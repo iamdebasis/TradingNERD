@@ -1,0 +1,31 @@
+.app {
+  display: grid;
+  grid-template-rows: var(--size-toolbar-height) minmax(0, 1fr);
+  height: 100%;
+}
+
+.toolbar {
+  background: var(--color-bg);
+}
+
+.workspace {
+  display: flex;
+  min-height: 0;
+  padding: var(--size-gutter);
+}
+
+.panel {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+  border-radius: var(--size-panel-radius);
+}
+
+.chart {
+  flex: 1 1 0;
+}
+
+.watchlist {
+  flex: none;
+  width: var(--watchlist-width);
+}

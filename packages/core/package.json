@@ -1,0 +1,14 @@
+{
+  "name": "@tradingnerd/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared types, constants and the UI ⇄ gateway protocol",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

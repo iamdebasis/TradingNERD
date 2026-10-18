@@ -1,0 +1,26 @@
+{
+  "name": "tradingnerd",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local TradingView-style charting app",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @tradingnerd/gateway --filter @tradingnerd/web run dev",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "pnpm -r run test",
+    "test:e2e": "pnpm --filter @tradingnerd/web run test:e2e",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:e2e"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

@@ -1,0 +1,20 @@
+.splitter {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: var(--size-gutter);
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+/* Widen the grab area to 10 px without changing what you see. */
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.splitter:focus-visible {
+  background: var(--color-accent);
+}

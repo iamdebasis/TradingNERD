@@ -1,0 +1,13 @@
+{
+  "name": "@tradingnerd/chart",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chart engine wrapper around Lightweight Charts (implemented from M1)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

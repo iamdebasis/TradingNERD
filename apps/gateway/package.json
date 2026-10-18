@@ -1,0 +1,22 @@
+{
+  "name": "@tradingnerd/gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local market-data gateway (loopback only)",
+  "scripts": {
+    "dev": "node --watch src/main.ts",
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.3.4",
+    "@tradingnerd/core": "workspace:*",
+    "fastify": "^5.12.7"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "ws": "^8.22.0"
+  }
+}

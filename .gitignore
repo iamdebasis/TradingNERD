@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Local runtime data: candle cache, logo cache and secrets (API keys). Never commit.
+data/
+
+# Env files can hold secrets
+.env
+.env.*
+*.local
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# OS / editor
+.DS_Store
