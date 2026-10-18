@@ -15,7 +15,8 @@
     "format": "biome check --write .",
     "test": "pnpm -r run test",
     "test:e2e": "pnpm --filter @tradingnerd/web run test:e2e",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:e2e"
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:e2e",
+    "test:live": "pnpm --filter @tradingnerd/gateway run test:live && pnpm --filter @tradingnerd/web run test:e2e:live"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

@@ -10,9 +10,11 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:live": "LIVE=1 playwright test"
   },
   "dependencies": {
+    "@tradingnerd/chart": "workspace:*",
     "@tradingnerd/core": "workspace:*",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

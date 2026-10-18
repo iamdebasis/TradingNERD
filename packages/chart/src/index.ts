@@ -1,16 +1,26 @@
-/**
- * Colors and fonts the chart needs. The app builds this from its design tokens and passes it in,
- * so this package never depends on app styles. The chart controller itself arrives in M1.
- */
-export interface ChartTheme {
-  background: string;
-  grid: string;
-  text: string;
-  axisText: string;
-  crosshair: string;
-  crosshairLabel: string;
-  up: string;
-  down: string;
-  fontFamily: string;
-  fontSize: number;
-}
+export {
+  ChartController,
+  type ChartControllerOptions,
+  type ChartDebugState,
+  type ChartInstrument,
+  DEFAULT_BAR_SPACING,
+  DEFAULT_RIGHT_OFFSET,
+  type HoverInfo,
+} from './ChartController';
+export {
+  formatCountdown,
+  formatCrosshairTime,
+  formatPrice,
+  formatSignedPercent,
+  formatSignedPrice,
+} from './format';
+export type { ChartTheme } from './theme';
+export {
+  DEFAULT_GESTURE_TUNING,
+  type GestureTuning,
+  PRICE_ANCHORS,
+  type PriceAnchor,
+  sanitizeTuning,
+  TUNING_LIMITS,
+  type TuningNumber,
+} from './tuning';

@@ -1,0 +1,159 @@
+/* Geometry measured from docs/reference/01-chart-layout.png (panel-relative CSS px). */
+.legend {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  left: 9px;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+  white-space: nowrap;
+  /* An overlay only: drags and wheel gestures go straight through to the chart. */
+  pointer-events: none;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+
+.logo {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--color-chip);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.title {
+  font-size: 16px;
+}
+
+.status {
+  position: relative;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0 8px 0 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-up) 22%, transparent);
+}
+
+.status::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--color-up);
+}
+
+.legend[data-status="loading"] .status,
+.legend[data-status="reconnecting"] .status {
+  background: color-mix(in srgb, var(--color-text-secondary) 25%, transparent);
+}
+
+.legend[data-status="loading"] .status::after,
+.legend[data-status="reconnecting"] .status::after {
+  background: var(--color-text-secondary);
+}
+
+.legend[data-status="error"] .status {
+  background: color-mix(in srgb, var(--color-down) 25%, transparent);
+}
+
+.legend[data-status="error"] .status::after {
+  background: var(--color-down);
+}
+
+.values {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.key {
+  margin-left: 8px;
+}
+
+.key:first-child {
+  margin-left: 0;
+}
+
+.value {
+  color: var(--color-up);
+}
+
+.legend[data-direction="down"] .value {
+  color: var(--color-down);
+}
+
+.change {
+  margin-left: 8px;
+}
+
+.message {
+  margin-top: 4px;
+  color: var(--color-down);
+  font-size: 13px;
+}
+
+.message:empty {
+  display: none;
+}
+
+.tradeRow {
+  display: flex;
+  align-items: center;
+  margin-top: 7px;
+}
+
+.legend[data-book="false"] .tradeRow {
+  visibility: hidden;
+}
+
+.trade {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 65.5px;
+  height: 34px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.sell {
+  border-color: var(--color-down);
+  color: var(--color-down);
+}
+
+.buy {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.tradePrice {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.tradeSide {
+  font-size: 11px;
+  line-height: 13px;
+  letter-spacing: 0.4px;
+}
+
+.spread {
+  width: 51px;
+  color: var(--color-text);
+  font-size: 11px;
+  text-align: center;
+}

@@ -1,25 +1,62 @@
+import type { Bar, BarsResponse, SymbolInfo } from './market.ts';
+
 /**
  * Wire protocol between the UI and the local gateway.
  * Bump PROTOCOL_VERSION on any breaking change so a stale UI can tell it needs a reload.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
   status: 'ok';
   protocolVersion: number;
   uptimeSec: number;
-  /** Gateway clock in epoch ms; later used to keep bar countdowns exact. */
+  /** Gateway clock in epoch ms. */
   serverTime: number;
 }
+
+export const ERROR_CODES = [
+  'bad_request',
+  'unknown_symbol',
+  'unsupported_resolution',
+  'upstream_error',
+  'rate_limited',
+  'too_many_subscriptions',
+  'internal_error',
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** Body of every REST error response. */
+export interface ApiErrorBody {
+  error: ErrorCode;
+  message: string;
+}
+
+/** Health of one live subscription: `reconnecting` while the exchange feed is down. */
+export type StreamState = 'live' | 'reconnecting';
 
 /** Messages the gateway sends over the WebSocket. */
 export type ServerMessage =
   | { type: 'hello'; protocolVersion: number; serverTime: number }
-  | { type: 'pong'; t: number };
+  | { type: 'pong'; t: number }
+  /** Live bar update. `historical` marks a late correction to a bar before the current one. */
+  | { type: 'bar'; id: string; bar: Bar; historical: boolean }
+  /** Best bid and ask. */
+  | { type: 'book'; id: string; bid: number; ask: number }
+  | { type: 'status'; id: string; state: StreamState }
+  | { type: 'error'; id: string | null; code: ErrorCode; message: string };
 
 /** Messages the UI sends over the WebSocket. */
-export type ClientMessage = { type: 'ping'; t: number };
+export type ClientMessage =
+  | { type: 'ping'; t: number }
+  | { type: 'subscribe'; id: string; channel: 'bars'; symbol: string; resolution: string }
+  | { type: 'subscribe'; id: string; channel: 'book'; symbol: string }
+  | { type: 'unsubscribe'; id: string };
+
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isShortString = (v: unknown, max = 64): v is string =>
+  typeof v === 'string' && v.length > 0 && v.length <= max;
+const isErrorCode = (v: unknown): v is ErrorCode => ERROR_CODES.includes(v as ErrorCode);
 
 function parseObject(raw: string): Record<string, unknown> | null {
   try {
@@ -32,27 +69,136 @@ function parseObject(raw: string): Record<string, unknown> | null {
   }
 }
 
+/** Validates a bar received from outside; all six fields must be finite numbers. */
+export function parseBar(value: unknown): Bar | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { time, open, high, low, close, volume } = value as Record<string, unknown>;
+  if (
+    !isNumber(time) ||
+    !isNumber(open) ||
+    !isNumber(high) ||
+    !isNumber(low) ||
+    !isNumber(close) ||
+    !isNumber(volume)
+  ) {
+    return null;
+  }
+  return { time, open, high, low, close, volume };
+}
+
+/** Validates GET /api/bars output: bars must be valid and strictly ascending. */
+export function parseBarsResponse(value: unknown): BarsResponse | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { bars, hasMore } = value as Record<string, unknown>;
+  if (!Array.isArray(bars) || typeof hasMore !== 'boolean') return null;
+  const parsed: Bar[] = [];
+  for (const item of bars) {
+    const bar = parseBar(item);
+    const previous = parsed.at(-1);
+    if (!bar || (previous && bar.time <= previous.time)) return null;
+    parsed.push(bar);
+  }
+  return { bars: parsed, hasMore };
+}
+
+/** Validates GET /api/symbols/resolve output. */
+export function parseSymbolInfo(value: unknown): SymbolInfo | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const strings = ['id', 'exchange', 'exchangeName', 'ticker', 'base', 'quote', 'description'];
+  if (!strings.every((key) => typeof v[key] === 'string')) return null;
+  if (v.type !== 'spot' || !isNumber(v.tickSize) || v.tickSize <= 0) return null;
+  if (!isNumber(v.pricePrecision) || !Number.isInteger(v.pricePrecision) || v.pricePrecision < 0) {
+    return null;
+  }
+  if (!Array.isArray(v.resolutions) || !v.resolutions.every((r) => typeof r === 'string'))
+    return null;
+  return {
+    id: v.id as string,
+    exchange: v.exchange as string,
+    exchangeName: v.exchangeName as string,
+    ticker: v.ticker as string,
+    base: v.base as string,
+    quote: v.quote as string,
+    description: v.description as string,
+    type: 'spot',
+    tickSize: v.tickSize,
+    pricePrecision: v.pricePrecision,
+    resolutions: [...(v.resolutions as string[])],
+  };
+}
+
+/** Validates a REST error body. */
+export function parseApiError(value: unknown): ApiErrorBody | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { error, message } = value as Record<string, unknown>;
+  return isErrorCode(error) && typeof message === 'string' ? { error, message } : null;
+}
+
 /** Parses a gateway → UI message. Returns null for anything malformed or unknown. */
 export function parseServerMessage(raw: string): ServerMessage | null {
   const msg = parseObject(raw);
-  if (
-    msg?.type === 'hello' &&
-    typeof msg.protocolVersion === 'number' &&
-    typeof msg.serverTime === 'number'
-  ) {
-    return { type: 'hello', protocolVersion: msg.protocolVersion, serverTime: msg.serverTime };
+  if (!msg) return null;
+  switch (msg.type) {
+    case 'hello':
+      return isNumber(msg.protocolVersion) && isNumber(msg.serverTime)
+        ? { type: 'hello', protocolVersion: msg.protocolVersion, serverTime: msg.serverTime }
+        : null;
+    case 'pong':
+      return isNumber(msg.t) ? { type: 'pong', t: msg.t } : null;
+    case 'bar': {
+      const bar = parseBar(msg.bar);
+      return isShortString(msg.id) && bar && typeof msg.historical === 'boolean'
+        ? { type: 'bar', id: msg.id, bar, historical: msg.historical }
+        : null;
+    }
+    case 'book':
+      return isShortString(msg.id) && isNumber(msg.bid) && isNumber(msg.ask)
+        ? { type: 'book', id: msg.id, bid: msg.bid, ask: msg.ask }
+        : null;
+    case 'status':
+      return isShortString(msg.id) && (msg.state === 'live' || msg.state === 'reconnecting')
+        ? { type: 'status', id: msg.id, state: msg.state }
+        : null;
+    case 'error':
+      return (msg.id === null || isShortString(msg.id)) &&
+        isErrorCode(msg.code) &&
+        typeof msg.message === 'string'
+        ? { type: 'error', id: msg.id, code: msg.code, message: msg.message }
+        : null;
+    default:
+      return null;
   }
-  if (msg?.type === 'pong' && typeof msg.t === 'number') {
-    return { type: 'pong', t: msg.t };
-  }
-  return null;
 }
 
 /** Parses a UI → gateway message. Returns null for anything malformed or unknown. */
 export function parseClientMessage(raw: string): ClientMessage | null {
   const msg = parseObject(raw);
-  if (msg?.type === 'ping' && typeof msg.t === 'number') {
-    return { type: 'ping', t: msg.t };
+  if (!msg) return null;
+  switch (msg.type) {
+    case 'ping':
+      return isNumber(msg.t) ? { type: 'ping', t: msg.t } : null;
+    case 'unsubscribe':
+      return isShortString(msg.id) ? { type: 'unsubscribe', id: msg.id } : null;
+    case 'subscribe': {
+      if (!isShortString(msg.id) || !isShortString(msg.symbol)) return null;
+      if (msg.channel === 'bars') {
+        return isShortString(msg.resolution, 16)
+          ? {
+              type: 'subscribe',
+              id: msg.id,
+              channel: 'bars',
+              symbol: msg.symbol,
+              resolution: msg.resolution,
+            }
+          : null;
+      }
+      if (msg.channel === 'book') {
+        return { type: 'subscribe', id: msg.id, channel: 'book', symbol: msg.symbol };
+      }
+      return null;
+    }
+    default:
+      return null;
   }
-  return null;
 }

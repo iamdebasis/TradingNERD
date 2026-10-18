@@ -3,11 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Chart engine wrapper around Lightweight Charts (implemented from M1)",
+  "description": "Chart engine: Lightweight Charts wrapper with TradingView-style labels and gestures",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tradingnerd/core": "workspace:*",
+    "lightweight-charts": "^5.2.1"
   }
 }

@@ -1,21 +1,27 @@
 import websocket from '@fastify/websocket';
 import {
   API_PREFIX,
+  type ApiErrorBody,
   type HealthResponse,
   PROTOCOL_VERSION,
-  parseClientMessage,
-  type ServerMessage,
   WS_PATH,
 } from '@tradingnerd/core';
 import Fastify, { type FastifyInstance, LogController } from 'fastify';
 import type { GatewayConfig } from './config.ts';
+import type { MarketService } from './market/MarketService.ts';
+import { MarketError } from './market/types.ts';
+import { registerMarketRoutes } from './routes/market.ts';
 import { isAllowedOrigin, isLoopbackHost } from './security.ts';
+import { attachSession } from './ws/session.ts';
 
-interface MessageSink {
-  send(data: string): void;
+export interface GatewayDeps {
+  market: MarketService;
 }
 
-export async function buildServer(config: GatewayConfig): Promise<FastifyInstance> {
+export async function buildServer(
+  config: GatewayConfig,
+  deps: GatewayDeps,
+): Promise<FastifyInstance> {
   const startedAt = Date.now();
   const app = Fastify({
     logger: config.logLevel === 'silent' ? false : { level: config.logLevel },
@@ -37,6 +43,21 @@ export async function buildServer(config: GatewayConfig): Promise<FastifyInstanc
     }
   });
 
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof MarketError) {
+      const body: ApiErrorBody = { error: error.code, message: error.message };
+      return reply.code(error.httpStatus).send(body);
+    }
+    const status = (error as { statusCode?: unknown }).statusCode;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      const body: ApiErrorBody = { error: 'bad_request', message: (error as Error).message };
+      return reply.code(status).send(body);
+    }
+    request.log.error(error);
+    const body: ApiErrorBody = { error: 'internal_error', message: 'Unexpected gateway error' };
+    return reply.code(500).send(body);
+  });
+
   app.get(
     `${API_PREFIX}/health`,
     async (): Promise<HealthResponse> => ({
@@ -47,22 +68,9 @@ export async function buildServer(config: GatewayConfig): Promise<FastifyInstanc
     }),
   );
 
-  app.get(WS_PATH, { websocket: true }, (socket) => {
-    send(socket, { type: 'hello', protocolVersion: PROTOCOL_VERSION, serverTime: Date.now() });
-    socket.on('message', (data) => {
-      const msg = parseClientMessage(rawToText(data));
-      if (msg?.type === 'ping') send(socket, { type: 'pong', t: msg.t });
-    });
-  });
+  registerMarketRoutes(app, deps.market);
+
+  app.get(WS_PATH, { websocket: true }, (socket) => attachSession(socket, deps.market));
 
   return app;
-}
-
-function send(socket: MessageSink, message: ServerMessage): void {
-  socket.send(JSON.stringify(message));
-}
-
-function rawToText(data: Buffer | ArrayBuffer | Buffer[]): string {
-  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
-  return Buffer.from(data as ArrayBuffer).toString('utf8');
 }

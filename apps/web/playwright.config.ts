@@ -1,14 +1,26 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
 import { GATEWAY_DEFAULT_PORT, WEB_DEV_PORT } from '@tradingnerd/core';
 
 /** Matches the reference screenshot's layout width (docs/SPEC.md §7.2), at Retina scale. */
 const viewport = { width: 1634, height: 1000 };
+
+/**
+ * Normal runs mock all market data in the browser and must never reach an exchange: a gateway
+ * started here gets unreachable Binance endpoints. LIVE=1 (`pnpm test:e2e:live`) runs only the
+ * @live tests, against real Binance.
+ */
+const live = process.env.LIVE === '1';
+const offlineBinance = {
+  BINANCE_REST_URL: 'http://127.0.0.1:9',
+  BINANCE_STREAM_URL: 'ws://127.0.0.1:9/stream',
+};
 
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   reporter: 'list',
+  ...(live ? { grep: /@live/ } : { grepInvert: /@live/ }),
   use: {
     baseURL: `http://127.0.0.1:${WEB_DEV_PORT}`,
     trace: 'retain-on-failure',
@@ -16,7 +28,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], viewport, deviceScaleFactor: 2 },
+      // Not devices['Desktop Chrome']: its Windows user agent would switch on the Windows wheel
+      // handling. This matches the Mac the app is built on.
+      use: {
+        browserName: 'chromium',
+        viewport,
+        deviceScaleFactor: 2,
+        // Emulated 2× alone leaves ResizeObserver reporting 1× sizes, so charts would render
+        // blurry at half resolution; a real 2× device scale matches a Retina Mac.
+        launchOptions: { args: ['--force-device-scale-factor=2'] },
+      },
     },
   ],
   webServer: [
@@ -25,6 +46,7 @@ export default defineConfig({
       cwd: '../gateway',
       url: `http://127.0.0.1:${GATEWAY_DEFAULT_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,
+      env: live ? {} : offlineBinance,
     },
     {
       command: 'pnpm exec vite',

@@ -6,7 +6,9 @@ dist/
 *.tsbuildinfo
 
 # Local runtime data: candle cache, logo cache and secrets (API keys). Never commit.
-data/
+# Anchored, so source folders that happen to be called "data" are still tracked.
+/data/
+/apps/gateway/data/
 
 # Env files can hold secrets
 .env

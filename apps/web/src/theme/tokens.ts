@@ -18,6 +18,8 @@ export interface Theme {
     /** Buy button, focus rings, matched search text. */
     accent: string;
     crosshair: string;
+    /** Text on colored price-axis labels. */
+    labelText: string;
     text: string;
     textSecondary: string;
     axisText: string;
@@ -49,6 +51,7 @@ export const darkTheme: Theme = {
     down: '#F23645',
     accent: '#2962FF',
     crosshair: '#9C9C9C',
+    labelText: '#FFFFFF',
     text: '#DBDBDB',
     textSecondary: '#8C8C8C',
     axisText: '#B8B8B8',

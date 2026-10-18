@@ -9,6 +9,8 @@ export interface GatewayConfig {
   /** Browser origins allowed to call the gateway (the UI dev server). */
   allowedOrigins: readonly string[];
   logLevel: LogLevel;
+  /** Optional endpoint overrides, e.g. for Binance.US: BINANCE_REST_URL / BINANCE_STREAM_URL. */
+  binance: { restUrl: string | undefined; streamUrl: string | undefined };
 }
 
 const LOG_LEVELS: readonly LogLevel[] = ['silent', 'error', 'warn', 'info', 'debug'];
@@ -29,5 +31,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     port,
     allowedOrigins: [`http://127.0.0.1:${WEB_DEV_PORT}`, `http://localhost:${WEB_DEV_PORT}`],
     logLevel,
+    binance: {
+      restUrl: env.BINANCE_REST_URL || undefined,
+      streamUrl: env.BINANCE_STREAM_URL || undefined,
+    },
   };
 }

@@ -1,4 +1,5 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { chartState, expect, openChart, test } from './fixtures';
 
 const toolbar = (page: Page) => page.getByRole('banner');
 const chart = (page: Page) => page.getByRole('main', { name: 'Chart' });
@@ -25,7 +26,7 @@ async function dragSplitter(page: Page, dx: number) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await openChart(page);
 });
 
 test('layout geometry matches the reference screenshot', async ({ page }) => {
@@ -50,10 +51,14 @@ test('surfaces use the measured colors and corner radius', async ({ page }) => {
   expect(await look(watchlist(page))).toEqual({ background: 'rgb(15, 15, 15)', radius: '3.5px' });
 });
 
-test('dragging the splitter resizes the watchlist and remembers it', async ({ page }) => {
+test('dragging the splitter resizes the watchlist, the chart follows, and it is remembered', async ({
+  page,
+}) => {
   await dragSplitter(page, -100);
   expect(await widthOf(watchlist(page))).toBe(415);
   expect(await widthOf(chart(page))).toBe(1207);
+  // The chart canvas resizes with its panel (pane + 72 px price axis + 1 px).
+  await expect.poll(async () => (await chartState(page)).paneWidth).toBe(1207 - 73);
 
   await page.reload();
   expect(await widthOf(watchlist(page))).toBe(415);
@@ -69,13 +74,15 @@ test('the splitter stops at the minimum and maximum widths', async ({ page }) =>
   expect(await widthOf(chart(page))).toBe(320);
 });
 
-test('arrow keys resize the watchlist', async ({ page }) => {
+test('arrow keys resize the watchlist without scrolling the chart', async ({ page }) => {
+  const before = await chartState(page);
   await splitter(page).focus();
   await page.keyboard.press('ArrowLeft');
   expect(await widthOf(watchlist(page))).toBe(331);
   await page.keyboard.press('Shift+ArrowRight');
   expect(await widthOf(watchlist(page))).toBe(267);
   await expect(splitter(page)).toHaveAttribute('aria-valuenow', '267');
+  expect((await chartState(page)).scrollPosition).toBeCloseTo(before.scrollPosition, 6);
 });
 
 test('a narrow window squeezes the watchlist without forgetting its width', async ({ page }) => {
@@ -89,22 +96,17 @@ test('a narrow window squeezes the watchlist without forgetting its width', asyn
   await expect.poll(() => widthOf(watchlist(page))).toBe(800);
 });
 
-test('connects to the local gateway', async ({ page }) => {
+test('reports its connection to the gateway', async ({ page }) => {
   await expect(page.locator('[data-gateway-status]')).toHaveAttribute(
     'data-gateway-status',
     'connected',
   );
 });
 
-test('loads without console errors or warnings', async ({ page }) => {
-  const problems: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error' || msg.type() === 'warning') problems.push(msg.text());
-  });
-  page.on('pageerror', (error) => problems.push(error.message));
-
-  await page.goto('/');
-  await expect(page.locator('[data-gateway-status="connected"]')).toBeVisible();
+test('stays free of console errors through hovering and resizing', async ({ page }) => {
+  // The consoleGuard fixture fails this test on any console error or warning.
+  await page.mouse.move(600, 400);
+  await page.mouse.move(900, 500, { steps: 10 });
   await dragSplitter(page, -50);
-  expect(problems).toEqual([]);
+  await page.mouse.move(700, 300, { steps: 5 });
 });

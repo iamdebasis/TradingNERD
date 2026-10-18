@@ -1,10 +1,12 @@
 import { type CSSProperties, useRef } from 'react';
-import { useGatewayStatus } from '../gateway/useGatewayStatus';
+import { ChartPane } from '../chart/ChartPane';
+import type { ChartRoute } from '../chart/route';
+import { useGatewayStatus } from '../data/GatewayContext';
 import styles from './AppShell.module.css';
 import { Splitter } from './Splitter';
 import { useWatchlistWidth } from './useWatchlistWidth';
 
-export function AppShell() {
+export function AppShell({ route }: { route: ChartRoute }) {
   const gatewayStatus = useGatewayStatus();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const watchlist = useWatchlistWidth(workspaceRef);
@@ -23,7 +25,9 @@ export function AppShell() {
         className={styles.workspace}
         style={{ '--watchlist-width': `${watchlist.width}px` } as CSSProperties}
       >
-        <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart" />
+        <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
+          <ChartPane symbol={route.symbol} resolution={route.resolution} />
+        </main>
         <Splitter
           width={watchlist.width}
           min={watchlist.min}

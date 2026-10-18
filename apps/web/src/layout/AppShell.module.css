@@ -22,6 +22,7 @@
 }
 
 .chart {
+  position: relative;
   flex: 1 1 0;
 }
 

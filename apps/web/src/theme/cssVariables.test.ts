@@ -14,6 +14,7 @@ describe('darkTheme', () => {
       down: '#F23645',
       accent: '#2962FF',
       crosshair: '#9C9C9C',
+      labelText: '#FFFFFF',
       text: '#DBDBDB',
       textSecondary: '#8C8C8C',
       axisText: '#B8B8B8',

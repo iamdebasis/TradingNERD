@@ -1,69 +1,144 @@
 import type { AddressInfo } from 'node:net';
-import { parseServerMessage, type ServerMessage } from '@tradingnerd/core';
+import { PROTOCOL_VERSION, parseServerMessage, type ServerMessage } from '@tradingnerd/core';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import type { GatewayConfig } from '../src/config.ts';
+import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
+import { dailyBars, FAKE_INFO, FakeExchange } from './helpers/FakeExchange.ts';
 
 const UI_ORIGIN = 'http://127.0.0.1:5173';
+const SYMBOL = 'FAKE:XRPUSDT';
+const LAST = Date.UTC(2026, 9, 18) / 1000;
 const config: GatewayConfig = {
   host: '127.0.0.1',
   port: 0,
   allowedOrigins: [UI_ORIGIN],
   logLevel: 'silent',
+  binance: { restUrl: undefined, streamUrl: undefined },
 };
+
+async function start() {
+  const fake = new FakeExchange();
+  fake.bars = dailyBars(10, LAST);
+  const app = await buildServer(config, {
+    market: new MarketService([fake], { emitIntervalMs: 0 }),
+  });
+  return { app, fake };
+}
 
 describe('gateway HTTP', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    app = await buildServer(config);
+    ({ app } = await start());
   });
   afterAll(async () => {
     await app.close();
   });
 
-  const get = (headers: Record<string, string>) =>
-    app.inject({
-      method: 'GET',
-      url: '/api/health',
-      headers: { host: '127.0.0.1:5180', ...headers },
-    });
+  const get = (url: string, headers: Record<string, string> = {}) =>
+    app.inject({ method: 'GET', url, headers: { host: '127.0.0.1:5180', ...headers } });
 
   it('reports health', async () => {
-    const res = await get({});
+    const res = await get('/api/health');
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ status: 'ok', protocolVersion: 1 });
+    expect(res.json()).toMatchObject({ status: 'ok', protocolVersion: PROTOCOL_VERSION });
     expect(Math.abs(res.json().serverTime - Date.now())).toBeLessThan(5_000);
   });
 
-  it('accepts the UI origin', async () => {
-    expect((await get({ origin: UI_ORIGIN })).statusCode).toBe(200);
-  });
-
-  it('rejects a foreign origin', async () => {
-    const res = await get({ origin: 'https://evil.example' });
+  it('accepts the UI origin and rejects a foreign one', async () => {
+    expect((await get('/api/health', { origin: UI_ORIGIN })).statusCode).toBe(200);
+    const res = await get('/api/health', { origin: 'https://evil.example' });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ error: 'forbidden_origin' });
   });
 
   it('rejects a non-loopback Host header (DNS rebinding)', async () => {
-    const res = await get({ host: 'evil.example:5180' });
+    const res = await get('/api/health', { host: 'evil.example:5180' });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ error: 'forbidden_host' });
   });
 
   it('sends no CORS headers', async () => {
-    const res = await get({ origin: UI_ORIGIN });
+    const res = await get('/api/health', { origin: UI_ORIGIN });
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('resolves a symbol', async () => {
+    const res = await get(`/api/symbols/resolve?symbol=${SYMBOL}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(FAKE_INFO);
+  });
+
+  it.each([
+    ['a missing symbol', '/api/symbols/resolve', 400, 'bad_request'],
+    ['a malformed symbol', '/api/symbols/resolve?symbol=nonsense', 400, 'bad_request'],
+    ['an unknown symbol', '/api/symbols/resolve?symbol=FAKE:NOPE', 404, 'unknown_symbol'],
+    ['an unknown exchange', '/api/symbols/resolve?symbol=NOPE:XRPUSDT', 404, 'unknown_symbol'],
+  ])('answers %s with a clear error', async (_label, url, status, code) => {
+    const res = await get(url);
+    expect(res.statusCode).toBe(status);
+    expect(res.json()).toMatchObject({ error: code });
+    expect(typeof res.json().message).toBe('string');
+  });
+
+  it('serves bars before an exclusive end time', async () => {
+    const res = await get(`/api/bars?symbol=${SYMBOL}&resolution=1D&to=${LAST}&countBack=2`);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.bars.map((bar: { time: number }) => bar.time)).toEqual([
+      LAST - 172_800,
+      LAST - 86_400,
+    ]);
+    expect(body.hasMore).toBe(true);
+  });
+
+  it('defaults to the latest bars', async () => {
+    const res = await get(`/api/bars?symbol=${SYMBOL}&resolution=1D`);
+    expect(res.json().bars.at(-1).time).toBe(LAST);
+    expect(res.json().hasMore).toBe(false); // only 10 fake bars exist
+  });
+
+  it.each([
+    ['a missing resolution', `/api/bars?symbol=${SYMBOL}`, 400, 'bad_request'],
+    [
+      'a non-numeric to',
+      `/api/bars?symbol=${SYMBOL}&resolution=1D&to=yesterday`,
+      400,
+      'bad_request',
+    ],
+    [
+      'a zero countBack',
+      `/api/bars?symbol=${SYMBOL}&resolution=1D&countBack=0`,
+      400,
+      'bad_request',
+    ],
+    [
+      'a huge countBack',
+      `/api/bars?symbol=${SYMBOL}&resolution=1D&countBack=99999`,
+      400,
+      'bad_request',
+    ],
+    [
+      'an unsupported resolution',
+      `/api/bars?symbol=${SYMBOL}&resolution=45`,
+      400,
+      'unsupported_resolution',
+    ],
+  ])('answers %s with a clear error', async (_label, url, status, code) => {
+    const res = await get(url);
+    expect(res.statusCode).toBe(status);
+    expect(res.json()).toMatchObject({ error: code });
   });
 });
 
 describe('gateway WebSocket', () => {
   let app: FastifyInstance;
+  let fake: FakeExchange;
   let url: string;
   beforeAll(async () => {
-    app = await buildServer(config);
+    ({ app, fake } = await start());
     await app.listen({ host: '127.0.0.1', port: 0 });
     url = `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/ws`;
   });
@@ -72,16 +147,16 @@ describe('gateway WebSocket', () => {
   });
 
   /** Opens a socket and returns a reader that yields the next parsed server message. */
-  function connect(origin: string) {
+  function connect(origin = UI_ORIGIN) {
     const ws = new WebSocket(url, { origin });
     const queue: ServerMessage[] = [];
-    const waiters: ((m: ServerMessage) => void)[] = [];
+    const waiters: ((message: ServerMessage) => void)[] = [];
     ws.on('message', (data) => {
-      const msg = parseServerMessage(String(data));
-      if (!msg) return;
+      const message = parseServerMessage(String(data));
+      if (!message) throw new Error(`unparseable server message: ${String(data)}`);
       const waiter = waiters.shift();
-      if (waiter) waiter(msg);
-      else queue.push(msg);
+      if (waiter) waiter(message);
+      else queue.push(message);
     });
     const next = () =>
       new Promise<ServerMessage>((resolve) => {
@@ -89,27 +164,95 @@ describe('gateway WebSocket', () => {
         if (queued) resolve(queued);
         else waiters.push(resolve);
       });
-    return { ws, next };
+    const send = (message: unknown) =>
+      ws.send(typeof message === 'string' ? message : JSON.stringify(message));
+    return { ws, next, send, queue };
   }
 
   it('greets with hello and answers ping with pong', async () => {
-    const { ws, next } = connect(UI_ORIGIN);
-    const hello = await next();
-    expect(hello).toMatchObject({ type: 'hello', protocolVersion: 1 });
-
-    ws.send(JSON.stringify({ type: 'ping', t: 42 }));
+    const { ws, next, send } = connect();
+    expect(await next()).toMatchObject({ type: 'hello', protocolVersion: PROTOCOL_VERSION });
+    send({ type: 'ping', t: 42 });
     expect(await next()).toEqual({ type: 'pong', t: 42 });
-
     ws.close();
   });
 
-  it('ignores malformed client messages', async () => {
-    const { ws, next } = connect(UI_ORIGIN);
+  it('answers malformed messages with an error and keeps the connection', async () => {
+    const { ws, next, send } = connect();
     await next(); // hello
-    ws.send('not json');
-    ws.send(JSON.stringify({ type: 'ping', t: 7 }));
+    send('not json');
+    expect(await next()).toMatchObject({ type: 'error', id: null, code: 'bad_request' });
+    send({ type: 'ping', t: 7 });
     expect(await next()).toEqual({ type: 'pong', t: 7 });
     ws.close();
+  });
+
+  it('streams live bars for a subscription until it is cancelled', async () => {
+    const { ws, next, send, queue } = connect();
+    await next(); // hello
+    send({ type: 'subscribe', id: 'b1', channel: 'bars', symbol: SYMBOL, resolution: '1D' });
+    expect(await next()).toEqual({ type: 'status', id: 'b1', state: 'live' });
+    expect(await next()).toMatchObject({ type: 'bar', id: 'b1', bar: { time: LAST, close: 1.1 } });
+
+    fake.emitTrade({ price: 1.25, quantity: 3, time: LAST * 1000 + 60_000 });
+    expect(await next()).toMatchObject({
+      type: 'bar',
+      id: 'b1',
+      bar: { close: 1.25 },
+      historical: false,
+    });
+
+    send({ type: 'unsubscribe', id: 'b1' });
+    send({ type: 'ping', t: 1 });
+    expect(await next()).toEqual({ type: 'pong', t: 1 });
+    expect(fake.activeStreams()).toBe(0);
+    fake.emitTrade({ price: 9, quantity: 1, time: LAST * 1000 + 61_000 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(queue).toEqual([]);
+    ws.close();
+  });
+
+  it('streams best bid and ask', async () => {
+    const { ws, next, send } = connect();
+    await next();
+    send({ type: 'subscribe', id: 'k1', channel: 'book', symbol: SYMBOL });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    fake.emitBook({ bid: 1.2955, ask: 1.2956 });
+    expect(await next()).toEqual({ type: 'status', id: 'k1', state: 'live' });
+    expect(await next()).toEqual({ type: 'book', id: 'k1', bid: 1.2955, ask: 1.2956 });
+    ws.close();
+  });
+
+  it('reports subscription errors with the subscription id', async () => {
+    const { ws, next, send } = connect();
+    await next();
+    send({ type: 'subscribe', id: 'x1', channel: 'bars', symbol: 'FAKE:NOPE', resolution: '1D' });
+    expect(await next()).toMatchObject({ type: 'error', id: 'x1', code: 'unknown_symbol' });
+    send({ type: 'subscribe', id: 'x2', channel: 'bars', symbol: SYMBOL, resolution: '45' });
+    expect(await next()).toMatchObject({ type: 'error', id: 'x2', code: 'unsupported_resolution' });
+    ws.close();
+  });
+
+  it('rejects a reused subscription id', async () => {
+    const { ws, next, send } = connect();
+    await next();
+    const subscribe = { type: 'subscribe', id: 'd1', channel: 'book', symbol: SYMBOL };
+    send(subscribe);
+    send(subscribe);
+    expect(await next()).toMatchObject({ type: 'error', id: 'd1', code: 'bad_request' });
+    ws.close();
+  });
+
+  it('releases every upstream feed when the UI disconnects', async () => {
+    const { ws, next, send } = connect();
+    await next();
+    send({ type: 'subscribe', id: 'r1', channel: 'bars', symbol: SYMBOL, resolution: '1D' });
+    send({ type: 'subscribe', id: 'r2', channel: 'book', symbol: SYMBOL });
+    await next(); // status live for r1
+    expect(fake.activeStreams()).toBe(3);
+    ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fake.activeStreams()).toBe(0);
   });
 
   it('refuses the handshake from a foreign origin and hangs up', async () => {
