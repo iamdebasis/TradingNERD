@@ -122,7 +122,7 @@ describe('gateway HTTP', () => {
     ],
     [
       'an unsupported resolution',
-      `/api/bars?symbol=${SYMBOL}&resolution=45`,
+      `/api/bars?symbol=${SYMBOL}&resolution=30S`,
       400,
       'unsupported_resolution',
     ],
@@ -228,7 +228,7 @@ describe('gateway WebSocket', () => {
     await next();
     send({ type: 'subscribe', id: 'x1', channel: 'bars', symbol: 'FAKE:NOPE', resolution: '1D' });
     expect(await next()).toMatchObject({ type: 'error', id: 'x1', code: 'unknown_symbol' });
-    send({ type: 'subscribe', id: 'x2', channel: 'bars', symbol: SYMBOL, resolution: '45' });
+    send({ type: 'subscribe', id: 'x2', channel: 'bars', symbol: SYMBOL, resolution: '30S' });
     expect(await next()).toMatchObject({ type: 'error', id: 'x2', code: 'unsupported_resolution' });
     ws.close();
   });

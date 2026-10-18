@@ -1,10 +1,17 @@
-import { type Bar, formatResolution, type Resolution, type SymbolInfo } from '@tradingnerd/core';
+import {
+  type Bar,
+  formatResolution,
+  parseResolution,
+  type Resolution,
+  type SymbolInfo,
+} from '@tradingnerd/core';
 import {
   type BookTop,
   type CandleUpdate,
   type ExchangeAdapter,
   type FeedState,
   MarketError,
+  type TickSource,
   type Trade,
   type Unsubscribe,
 } from '../../src/market/types.ts';
@@ -51,11 +58,16 @@ export class FakeExchange implements ExchangeAdapter {
   readonly id = 'FAKE';
   readonly name = 'Fake';
   readonly maxBarsPerRequest: number;
+  readonly nativeResolutions: readonly Resolution[];
+  readonly ticks?: TickSource;
 
-  /** Ascending bars served by fetchBars. */
+  /** Ascending bars served for any interval without its own entry in `series`. */
   bars: Bar[] = [];
+  /** Ascending bars per interval, keyed by TradingView notation ("1", "1S", "1M"). */
+  readonly series = new Map<string, Bar[]>();
   fetchError: Error | null = null;
-  readonly fetchCalls: { endTimeMs: number | null; limit: number }[] = [];
+  readonly fetchCalls: { resolution: string; endTimeMs: number | null; limit: number }[] = [];
+  readonly rangeCalls: { resolution: string; startMs: number; endMs: number }[] = [];
   resolveCalls = 0;
 
   private feedUp = true;
@@ -64,8 +76,18 @@ export class FakeExchange implements ExchangeAdapter {
   private readonly books = new Set<(top: BookTop) => void>();
   private readonly stateListeners = new Set<(state: FeedState) => void>();
 
-  constructor({ maxBarsPerRequest = 1_000 } = {}) {
+  constructor({
+    maxBarsPerRequest = 1_000,
+    natives = FAKE_INFO.resolutions,
+    ticks,
+  }: { maxBarsPerRequest?: number; natives?: string[]; ticks?: TickSource } = {}) {
     this.maxBarsPerRequest = maxBarsPerRequest;
+    if (ticks) this.ticks = ticks;
+    this.nativeResolutions = natives.map((text) => {
+      const resolution = parseResolution(text);
+      if (!resolution) throw new Error(`bad resolution ${text}`);
+      return resolution;
+    });
   }
 
   async resolveSymbol(ticker: string): Promise<SymbolInfo> {
@@ -74,20 +96,36 @@ export class FakeExchange implements ExchangeAdapter {
     return { ...FAKE_INFO };
   }
 
-  supportsResolution(resolution: Resolution): boolean {
-    return FAKE_INFO.resolutions.includes(formatResolution(resolution));
-  }
-
   async fetchBars(
     _ticker: string,
-    _resolution: Resolution,
+    resolution: Resolution,
     endTimeMs: number | null,
     limit: number,
   ): Promise<Bar[]> {
-    this.fetchCalls.push({ endTimeMs, limit });
+    this.fetchCalls.push({ resolution: formatResolution(resolution), endTimeMs, limit });
     if (this.fetchError) throw this.fetchError;
-    const eligible = this.bars.filter((bar) => endTimeMs === null || bar.time * 1000 < endTimeMs);
+    const eligible = this.seriesFor(resolution).filter(
+      (bar) => endTimeMs === null || bar.time * 1000 < endTimeMs,
+    );
     return eligible.slice(-limit).map((bar) => ({ ...bar }));
+  }
+
+  async fetchRange(
+    _ticker: string,
+    resolution: Resolution,
+    startMs: number,
+    endMs: number,
+  ): Promise<Bar[]> {
+    this.rangeCalls.push({ resolution: formatResolution(resolution), startMs, endMs });
+    if (this.fetchError) throw this.fetchError;
+    return this.seriesFor(resolution)
+      .filter((bar) => bar.time * 1000 >= startMs && bar.time * 1000 < endMs)
+      .slice(0, this.maxBarsPerRequest)
+      .map((bar) => ({ ...bar }));
+  }
+
+  private seriesFor(resolution: Resolution): Bar[] {
+    return this.series.get(formatResolution(resolution)) ?? this.bars;
   }
 
   subscribeCandles(_t: string, _r: Resolution, onUpdate: (u: CandleUpdate) => void): Unsubscribe {

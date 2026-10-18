@@ -4,10 +4,6 @@
   height: 100%;
 }
 
-.toolbar {
-  background: var(--color-bg);
-}
-
 .workspace {
   display: flex;
   min-height: 0;

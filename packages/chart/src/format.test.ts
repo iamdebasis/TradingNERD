@@ -6,6 +6,7 @@ import {
   formatPrice,
   formatSignedPercent,
   formatSignedPrice,
+  formatTickMark,
 } from './format';
 
 const MINUS = '−';
@@ -73,5 +74,12 @@ describe('formatCountdown', () => {
     [-5_000, '00:00'],
   ])('%d ms → %s', (ms, text) => {
     expect(formatCountdown(ms)).toBe(text);
+  });
+});
+
+describe('formatTickMark', () => {
+  it("shows a tick bar's first trade as a UTC clock time", () => {
+    expect(formatTickMark(Date.UTC(2026, 9, 18, 16, 9, 54, 321))).toBe('16:09:54');
+    expect(formatTickMark(Date.UTC(2026, 9, 18, 0, 0, 5))).toBe('00:00:05');
   });
 });

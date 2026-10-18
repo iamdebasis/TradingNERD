@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { PROTOCOL_VERSION } from '@tradingnerd/core';
 
 // The real local gateway (not the mock), reached through the dev server's proxy like the app
 // does. No market data is requested, so nothing goes out to an exchange.
@@ -6,7 +7,7 @@ import { expect, test } from '@playwright/test';
 test('the gateway answers health checks through the dev server', async ({ request }) => {
   const response = await request.get('/api/health');
   expect(response.ok()).toBe(true);
-  expect(await response.json()).toMatchObject({ status: 'ok', protocolVersion: 2 });
+  expect(await response.json()).toMatchObject({ status: 'ok', protocolVersion: PROTOCOL_VERSION });
 });
 
 test('the gateway greets a WebSocket from the app origin', async ({ page }) => {
@@ -22,5 +23,5 @@ test('the gateway greets a WebSocket from the app origin', async ({ page }) => {
         socket.onerror = () => reject(new Error('WebSocket failed'));
       }),
   );
-  expect(JSON.parse(hello)).toMatchObject({ type: 'hello', protocolVersion: 2 });
+  expect(JSON.parse(hello)).toMatchObject({ type: 'hello', protocolVersion: PROTOCOL_VERSION });
 });

@@ -1,0 +1,146 @@
+/* Provisional styling in TradingView's dark dialog idiom; no reference screenshot yet. */
+.backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+}
+
+.dialog {
+  width: 320px;
+  padding: 16px 20px 20px;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* Fill the column: an input's default width would push the select past the edge. */
+.input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-separator);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--color-down);
+}
+
+.hint {
+  min-height: 18px;
+  margin: 8px 0 12px;
+  color: var(--color-down);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancel,
+.submit {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cancel {
+  border: 1px solid var(--color-separator);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.cancel:hover {
+  background: var(--color-gutter);
+}
+
+.submit {
+  border: 0;
+  background: var(--color-accent);
+  color: var(--color-label-text);
+}
+
+.submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.close:focus-visible,
+.cancel:focus-visible,
+.submit:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}

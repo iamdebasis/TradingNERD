@@ -22,22 +22,36 @@ declare global {
   }
 }
 
+/**
+ * The chart panel. One chart lives as long as the pane; each symbol or interval gets its own
+ * session on it, so switching interval swaps the data without rebuilding the chart.
+ */
 export function ChartPane({ symbol, resolution }: { symbol: string; resolution: string }) {
   const gateway = useGateway();
   const container = useRef<HTMLDivElement>(null);
   const legend = useRef<LegendView>(null);
-  // Dev only: the chart the tuning panel adjusts.
-  const [tunedChart, setTunedChart] = useState<ChartController | null>(null);
+  const session = useRef<ChartSession | null>(null);
+  const [chart, setChart] = useState<ChartController | null>(null);
 
   useEffect(() => {
-    if (!container.current || !legend.current) return;
-    let session: ChartSession | undefined;
-    const chart = new ChartController(container.current, {
+    if (!container.current) return;
+    const created = new ChartController(container.current, {
       theme: chartTheme,
-      onHover: (info) => session?.hover(info),
-      onNeedHistory: () => void session?.loadOlder(),
+      onHover: (info) => session.current?.hover(info),
+      onNeedHistory: () => void session.current?.loadOlder(),
     });
-    session = new ChartSession({
+    setChart(created);
+    if (import.meta.env.DEV) window.__tradingNerd = { chart: created };
+    return () => {
+      created.destroy();
+      setChart(null);
+      if (import.meta.env.DEV) window.__tradingNerd = { chart: null };
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chart || !legend.current) return;
+    const current = new ChartSession({
       chart,
       api: marketApi,
       feed: gateway,
@@ -45,27 +59,23 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
       symbol,
       resolution,
     });
-    void session.start();
-    if (import.meta.env.DEV) {
-      window.__tradingNerd = { chart };
-      if (new URLSearchParams(window.location.search).has('tune')) setTunedChart(chart);
-    }
+    session.current = current;
+    void current.start();
     return () => {
-      session?.dispose();
-      if (import.meta.env.DEV) {
-        window.__tradingNerd = { chart: null };
-        setTunedChart(null);
-      }
+      current.dispose();
+      if (session.current === current) session.current = null;
     };
-  }, [gateway, symbol, resolution]);
+  }, [chart, gateway, symbol, resolution]);
+
+  const tuning = import.meta.env.DEV && new URLSearchParams(window.location.search).has('tune');
 
   return (
     <div className={styles.pane}>
       <div ref={container} className={styles.chart} />
       <Legend ref={legend} />
-      {TuningPanel && tunedChart && (
+      {TuningPanel && tuning && chart && (
         <Suspense fallback={null}>
-          <TuningPanel chart={tunedChart} />
+          <TuningPanel chart={chart} />
         </Suspense>
       )}
     </div>

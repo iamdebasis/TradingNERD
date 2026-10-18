@@ -27,9 +27,17 @@ describe('parseBar', () => {
     expect(parseBar({ ...bar, color: 'red' })).toEqual(bar);
   });
 
+  it("keeps a tick bar's start time", () => {
+    expect(parseBar({ ...bar, start: 1_792_341_875_123 })).toEqual({
+      ...bar,
+      start: 1_792_341_875_123,
+    });
+  });
+
   it.each([
     ['null', null],
     ['a missing field', { ...bar, volume: undefined }],
+    ['a start time that is not a number', { ...bar, start: 'soon' }],
     ['a string price', { ...bar, close: '1.29' }],
     ['NaN', { ...bar, high: Number.NaN }],
     ['Infinity', { ...bar, low: Number.POSITIVE_INFINITY }],

@@ -17,7 +17,10 @@ export function parseSymbolId(id: string): ParsedSymbolId | null {
   return { exchange: match[1], ticker: match[2] };
 }
 
-/** One OHLCV bar. `time` is the bar's open time in UTC seconds (Lightweight Charts' UTCTimestamp). */
+/**
+ * One OHLCV bar. `time` is the bar's open time in UTC seconds (Lightweight Charts'
+ * UTCTimestamp); for tick bars it is the bar's number instead, and `start` tells the time.
+ */
 export interface Bar {
   time: number;
   open: number;
@@ -25,6 +28,8 @@ export interface Bar {
   low: number;
   close: number;
   volume: number;
+  /** Tick bars only: when the bar's first trade happened, UTC ms. */
+  start?: number;
 }
 
 export interface SymbolInfo {

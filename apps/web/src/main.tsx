@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { chartRoute } from './chart/route';
 import { GatewayConnection, gatewaySocketUrl } from './data/GatewayConnection';
+import { LAST_INTERVAL_KEY } from './layout/AppShell';
+import { readJson } from './lib/storage';
 import { applyTheme } from './theme/cssVariables';
 import { darkTheme } from './theme/tokens';
 import './styles/global.css';
@@ -20,6 +22,9 @@ if (!root) throw new Error('#root element is missing from index.html');
 
 createRoot(root).render(
   <StrictMode>
-    <App gateway={gateway} route={chartRoute(window.location.search)} />
+    <App
+      gateway={gateway}
+      route={chartRoute(window.location.search, readJson(LAST_INTERVAL_KEY))}
+    />
   </StrictMode>,
 );

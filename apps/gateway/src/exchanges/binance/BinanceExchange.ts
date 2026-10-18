@@ -1,10 +1,18 @@
-import { type Bar, precisionOf, type Resolution, type SymbolInfo } from '@tradingnerd/core';
+import {
+  type AggTrade,
+  type Bar,
+  parseResolution,
+  precisionOf,
+  type Resolution,
+  type SymbolInfo,
+} from '@tradingnerd/core';
 import {
   type BookTop,
   type CandleUpdate,
   type ExchangeAdapter,
   type FeedState,
   MarketError,
+  type TickSource,
   type Trade,
   type Unsubscribe,
 } from '../../market/types.ts';
@@ -39,6 +47,13 @@ export class BinanceExchange implements ExchangeAdapter {
   readonly id = 'BINANCE';
   readonly name = 'Binance';
   readonly maxBarsPerRequest = 1_000;
+  readonly nativeResolutions: readonly Resolution[] = BINANCE_RESOLUTIONS.map((text) => {
+    const resolution = parseResolution(text);
+    if (!resolution) throw new Error(`Invalid Binance resolution ${text}`);
+    return resolution;
+  });
+
+  readonly ticks: TickSource;
 
   private readonly rest: BinanceRest;
   private readonly stream: BinanceStream;
@@ -58,6 +73,24 @@ export class BinanceExchange implements ExchangeAdapter {
       url: options.streamUrl ?? BINANCE_DEFAULTS.streamUrl,
       onWarning: this.warn,
     });
+    const rest = this.rest;
+    this.ticks = {
+      maxPerRequest: 1_000,
+      aggTrades: (ticker, fromId, limit) =>
+        rest.aggTrades(ticker, fromId === null ? { limit } : { fromId, limit }),
+      // Binance looks aggregates up by their own id, not by trade id: find the trade's time,
+      // then the aggregate of that millisecond that holds it.
+      async aggTradeContaining(ticker, tradeId): Promise<AggTrade | null> {
+        const trade = await rest.tradeById(ticker, tradeId);
+        if (!trade) return null;
+        const candidates = await rest.aggTrades(ticker, {
+          startTimeMs: trade.time,
+          endTimeMs: trade.time,
+          limit: 1_000,
+        });
+        return candidates.find((agg) => agg.firstId <= tradeId && tradeId <= agg.lastId) ?? null;
+      },
+    };
   }
 
   resolveSymbol(ticker: string): Promise<SymbolInfo> {
@@ -71,17 +104,24 @@ export class BinanceExchange implements ExchangeAdapter {
     return info;
   }
 
-  supportsResolution(resolution: Resolution): boolean {
-    return binanceInterval(resolution) !== null;
-  }
-
-  fetchBars(
+  // Async, so an unsupported interval rejects rather than throwing at the call.
+  async fetchBars(
     ticker: string,
     resolution: Resolution,
     endTimeMs: number | null,
     limit: number,
   ): Promise<Bar[]> {
     return this.rest.klines(ticker, this.interval(resolution), endTimeMs, limit);
+  }
+
+  async fetchRange(
+    ticker: string,
+    resolution: Resolution,
+    startMs: number,
+    endMs: number,
+  ): Promise<Bar[]> {
+    const interval = this.interval(resolution);
+    return this.rest.klines(ticker, interval, endMs, this.maxBarsPerRequest, startMs);
   }
 
   subscribeCandles(

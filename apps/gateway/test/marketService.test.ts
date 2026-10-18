@@ -1,8 +1,9 @@
-import type { Bar } from '@tradingnerd/core';
-import { describe, expect, it, vi } from 'vitest';
+import { type Bar, foldTicks } from '@tradingnerd/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BarListener, type BookListener, MarketService } from '../src/market/MarketService.ts';
 import { MarketError } from '../src/market/types.ts';
 import { dailyBars, FakeExchange } from './helpers/FakeExchange.ts';
+import { FakeTickSource, makeAggTrades } from './helpers/FakeTicks.ts';
 
 const SYMBOL = 'FAKE:XRPUSDT';
 /** Open time of the latest fake daily bar: 2026-10-18 00:00 UTC, in seconds. */
@@ -77,7 +78,7 @@ describe('MarketService.getBars', () => {
     ['an unknown exchange', 'NOPE:XRPUSDT', '1D', 5, 'unknown_symbol'],
     ['an unknown ticker', 'FAKE:NOPE', '1D', 5, 'unknown_symbol'],
     ['an invalid resolution', SYMBOL, 'abc', 5, 'unsupported_resolution'],
-    ['a resolution the exchange lacks', SYMBOL, '45', 5, 'unsupported_resolution'],
+    ['a resolution the exchange cannot serve or build', SYMBOL, '30S', 5, 'unsupported_resolution'],
   ])('rejects %s', async (_label, symbol, resolution, countBack, code) => {
     const { market } = setup();
     expect((await errorOf(market.getBars(symbol, resolution, null, countBack))).code).toBe(code);
@@ -122,7 +123,7 @@ describe('MarketService.subscribeBars', () => {
   it.each([
     ['an unknown ticker', 'FAKE:NOPE', '1D', 'unknown_symbol'],
     ['a malformed id', 'nonsense', '1D', 'bad_request'],
-    ['an unsupported resolution', SYMBOL, '45', 'unsupported_resolution'],
+    ['an unsupported resolution', SYMBOL, '30S', 'unsupported_resolution'],
   ])('reports %s as an error without opening a feed', async (_label, symbol, resolution, code) => {
     const { market, fake } = setup();
     const { listener, events } = barRecorder();
@@ -264,5 +265,210 @@ describe('MarketService.subscribeBook', () => {
     const { listener, events } = bookRecorder();
     market.subscribeBook('FAKE:NOPE', listener);
     await vi.waitFor(() => expect(events).toEqual(['error unknown_symbol']));
+  });
+});
+
+/** 10:00 UTC on the fake data day, in seconds. */
+const TEN = Date.UTC(2026, 9, 18, 10, 0) / 1000;
+const MINUTE = 60;
+
+/** `count` 1-minute bars from `from` (UTC s): bar i opens at i, closes at i + 0.5. */
+function minuteBars(from: number, count: number): Bar[] {
+  return Array.from({ length: count }, (_, i) => ({
+    time: from + i * MINUTE,
+    open: i,
+    high: i + 1,
+    low: i - 1,
+    close: i + 0.5,
+    volume: 1,
+  }));
+}
+
+/** A fake exchange with 1-minute data, its clock pinned to `nowSec`. */
+function resampleSetup({
+  maxBarsPerRequest = 1_000,
+  nowSec,
+  natives,
+}: {
+  maxBarsPerRequest?: number;
+  nowSec: number;
+  natives?: string[];
+}) {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(nowSec * 1000);
+  const fake = new FakeExchange(natives ? { maxBarsPerRequest, natives } : { maxBarsPerRequest });
+  const market = new MarketService([fake], { emitIntervalMs: 0, retryDelayMs: () => 5 });
+  return { fake, market };
+}
+
+describe('MarketService resampled intervals', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('builds 2-minute bars from 1-minute ones, fetching time slices in parallel', async () => {
+    const { fake, market } = resampleSetup({ maxBarsPerRequest: 4, nowSec: TEN + 9.5 * MINUTE });
+    fake.series.set('1', minuteBars(TEN, 10)); // 10:00 … 10:09
+    const { bars, hasMore } = await market.getBars(SYMBOL, '2', null, 3);
+
+    expect(bars).toEqual([
+      { time: TEN + 4 * MINUTE, open: 4, high: 6, low: 3, close: 5.5, volume: 2 },
+      { time: TEN + 6 * MINUTE, open: 6, high: 8, low: 5, close: 7.5, volume: 2 },
+      { time: TEN + 8 * MINUTE, open: 8, high: 10, low: 7, close: 9.5, volume: 2 },
+    ]);
+    expect(hasMore).toBe(true);
+    // (3 + 1) bars × 2 minutes = 8 minutes = two 4-bar slices ending after the live minute.
+    expect(fake.rangeCalls).toEqual([
+      { resolution: '1', startMs: (TEN + 6 * MINUTE) * 1000, endMs: (TEN + 10 * MINUTE) * 1000 },
+      { resolution: '1', startMs: (TEN + 2 * MINUTE) * 1000, endMs: (TEN + 6 * MINUTE) * 1000 },
+    ]);
+  });
+
+  it('ends before `to` and notices the start of history', async () => {
+    const { fake, market } = resampleSetup({ maxBarsPerRequest: 4, nowSec: TEN + 30 * MINUTE });
+    fake.series.set('1', minuteBars(TEN, 10));
+    const all = await market.getBars(SYMBOL, '2', TEN + 6 * MINUTE, 10);
+    expect(all.bars.map((bar) => bar.time)).toEqual([TEN, TEN + 2 * MINUTE, TEN + 4 * MINUTE]);
+    expect(all.hasMore).toBe(false);
+    // The oldest slice came back short, so one look further back confirmed nothing is there.
+    expect(fake.fetchCalls.at(-1)).toMatchObject({ resolution: '1', endTimeMs: TEN * 1000 });
+  });
+
+  it('caps the requests per call and drops an oldest bar it could only half build', async () => {
+    const { fake, market } = resampleSetup({ maxBarsPerRequest: 2, nowSec: TEN + 9.5 * MINUTE });
+    fake.series.set('1', minuteBars(TEN - 60 * MINUTE, 70)); // 09:00 … 10:09
+    const { bars, hasMore } = await market.getBars(SYMBOL, '3', null, 50);
+
+    expect(fake.rangeCalls).toHaveLength(12);
+    // 12 slices × 2 minutes reach back to 09:46, inside the 09:45 bar, which is left out.
+    expect(bars[0]).toEqual({
+      time: TEN - 12 * MINUTE,
+      open: 48,
+      high: 51,
+      low: 47,
+      close: 50.5,
+      volume: 3,
+    });
+    expect(bars.map((bar) => bar.time)).toEqual(
+      Array.from({ length: 8 }, (_, i) => TEN - 12 * MINUTE + i * 3 * MINUTE),
+    );
+    expect(hasMore).toBe(true);
+  });
+
+  it('builds 6-month bars from monthly ones, starting in January and July', async () => {
+    const { fake, market } = resampleSetup({
+      nowSec: Date.UTC(2026, 9, 18) / 1000,
+      natives: ['1', '60', '1D', '1M'],
+    });
+    const months = Array.from({ length: 30 }, (_, i) => ({
+      time: Date.UTC(2024, 4 + i, 1) / 1000, // May 2024 … October 2026
+      open: i,
+      high: i + 1,
+      low: i - 1,
+      close: i + 0.5,
+      volume: 1,
+    }));
+    fake.series.set('1M', months);
+    const { bars, hasMore } = await market.getBars(SYMBOL, '6M', null, 3);
+    expect(bars.map((bar) => new Date(bar.time * 1000).toISOString().slice(0, 7))).toEqual([
+      '2025-07',
+      '2026-01',
+      '2026-07',
+    ]);
+    expect(bars[1]).toMatchObject({ open: 20, close: 25.5, volume: 6 });
+    expect(bars[2]).toMatchObject({ open: 26, close: 29.5, volume: 4 }); // July … October so far
+    expect(hasMore).toBe(true);
+    expect(fake.rangeCalls).toEqual([]); // calendar months page back instead of slicing
+  });
+
+  it('streams a resampled bar: seeded from the base bars of its period, then live', async () => {
+    const { fake, market } = resampleSetup({ nowSec: TEN + 4.5 * MINUTE });
+    fake.series.set('1', minuteBars(TEN, 5)); // 10:00 … 10:04
+    const { listener, events } = barRecorder();
+    market.subscribeBars(SYMBOL, '3', listener);
+
+    // The 10:03 bar so far: the 10:03 and 10:04 minutes.
+    await vi.waitFor(() => expect(events).toEqual(['state live', `bar ${TEN + 3 * MINUTE} 4.5`]));
+    expect(fake.fetchCalls[0]).toEqual({ resolution: '1', endTimeMs: null, limit: 3 });
+
+    fake.emitTrade({ price: 7, quantity: 1, time: (TEN + 5 * MINUTE + 10) * 1000 });
+    expect(events.at(-1)).toBe(`bar ${TEN + 3 * MINUTE} 7`);
+    fake.emitTrade({ price: 8, quantity: 1, time: (TEN + 6 * MINUTE + 1) * 1000 });
+    expect(events.at(-1)).toBe(`bar ${TEN + 6 * MINUTE} 8`);
+  });
+});
+
+describe('MarketService tick intervals', () => {
+  function tickSetup() {
+    // 2,001 aggregates: 6,001 trades, so the live 100-tick bar holds a single trade.
+    const trades = makeAggTrades(2_001, 10_000, 500_000);
+    const source = new FakeTickSource(trades, 500);
+    const fake = new FakeExchange({ ticks: source });
+    const market = new MarketService([fake], { emitIntervalMs: 0, retryDelayMs: () => 5 });
+    return { fake, market, source, trades };
+  }
+
+  it('serves tick bars numbered by trade, each with its first trade time', async () => {
+    const { market, trades } = tickSetup();
+    const { bars, hasMore } = await market.getBars(SYMBOL, '100T', null, 10);
+    expect(bars).toEqual(foldTicks(trades, 100).slice(-10));
+    expect(bars.every((bar) => typeof bar.start === 'number')).toBe(true);
+    expect(hasMore).toBe(true);
+    // The next page back continues exactly where this one began.
+    const older = await market.getBars(SYMBOL, '100T', bars[0]?.time ?? 0, 10);
+    expect([...older.bars, ...bars]).toEqual(foldTicks(trades, 100).slice(-20));
+  });
+
+  it('has no tick intervals on an exchange without numbered trades', async () => {
+    const { market } = setup();
+    expect((await errorOf(market.getBars(SYMBOL, '10T', null, 5))).code).toBe(
+      'unsupported_resolution',
+    );
+  });
+
+  it('streams the live tick bar from trades, opening bars at trade-count boundaries', async () => {
+    const { market, fake, trades } = tickSetup();
+    const { listener, events } = barRecorder();
+    market.subscribeBars(SYMBOL, '100T', listener);
+    const live = foldTicks(trades, 100).at(-1) as Bar;
+    expect(live.volume).toBeLessThan(100 * 10); // still filling up
+    await vi.waitFor(() =>
+      expect(events).toEqual(['state live', `bar ${live.time} ${live.close}`]),
+    );
+    expect(fake.activeStreams()).toBe(1); // trades only: tick bars need no candles
+
+    const last = trades.at(-1) as (typeof trades)[number];
+    const boundary = (live.time + 1) * 100;
+    // An aggregate that finishes this bar and starts the next.
+    fake.emitTrade({
+      id: last.id + 1,
+      firstId: last.lastId + 1,
+      lastId: boundary + 1,
+      price: 1.5,
+      quantity: (boundary + 1 - last.lastId) * 10,
+      time: last.time + 1_000,
+    });
+    expect(events.slice(-2)).toEqual([`bar ${live.time} 1.5`, `bar ${live.time + 1} 1.5`]);
+  });
+
+  it('starts over when trades go missing, so listeners reload what they missed', async () => {
+    const { market, fake, source, trades } = tickSetup();
+    const { listener, events } = barRecorder();
+    market.subscribeBars(SYMBOL, '100T', listener);
+    await vi.waitFor(() => expect(events).toContain('state live'));
+    const seedsBefore = source.pageCalls.length;
+
+    const last = trades.at(-1) as (typeof trades)[number];
+    fake.emitTrade({
+      id: last.id + 5, // four aggregates never arrived
+      firstId: last.lastId + 20,
+      lastId: last.lastId + 20,
+      price: 1.4,
+      quantity: 10,
+      time: last.time + 2_000,
+    });
+    expect(events).toContain('state reconnecting');
+    await vi.waitFor(() => expect(events.at(-2)).toBe('state live'));
+    expect(source.pageCalls.length).toBe(seedsBefore + 1);
   });
 });

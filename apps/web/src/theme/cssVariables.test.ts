@@ -9,6 +9,8 @@ describe('darkTheme', () => {
       gutter: '#2E2E2E',
       grid: '#1C1C1C',
       chip: '#3D3D3D',
+      separator: '#4A4A4A',
+      popup: '#1F1F1F',
       selection: '#132E61',
       up: '#089981',
       down: '#F23645',

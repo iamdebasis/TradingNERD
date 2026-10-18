@@ -1,13 +1,30 @@
-import type { Bar, ErrorCode, Resolution, SymbolInfo } from '@tradingnerd/core';
+import type { AggTrade, Bar, ErrorCode, Resolution, SymbolInfo } from '@tradingnerd/core';
 
 export type Unsubscribe = () => void;
 
-/** One trade print. */
+/** One trade print, or an aggregate of trades at one price. */
 export interface Trade {
   price: number;
   quantity: number;
   /** Epoch ms. */
   time: number;
+  /** The aggregate's id and its trades' ids, when the exchange numbers them (for tick bars). */
+  id?: number;
+  firstId?: number;
+  lastId?: number;
+}
+
+/** Numbered trade history, which tick bars are built from. */
+export interface TickSource {
+  /** Most aggregates one `aggTrades` call returns. */
+  readonly maxPerRequest: number;
+  /**
+   * Up to `limit` aggregate trades with ids from `fromId` up, or the latest when null;
+   * ascending.
+   */
+  aggTrades(ticker: string, fromId: number | null, limit: number): Promise<AggTrade[]>;
+  /** The aggregate holding trade `tradeId`, or null once the exchange no longer has it. */
+  aggTradeContaining(ticker: string, tradeId: number): Promise<AggTrade | null>;
 }
 
 /** The exchange's own snapshot of a candle, valid as of `eventTime` (epoch ms). */
@@ -33,19 +50,32 @@ export interface ExchangeAdapter {
   /** Most bars one fetchBars call can return. */
   readonly maxBarsPerRequest: number;
 
+  /** Intervals the exchange serves itself; the gateway resamples the others from these. */
+  readonly nativeResolutions: readonly Resolution[];
+  /** Numbered trades, for tick bars; exchanges without them have no tick intervals. */
+  readonly ticks?: TickSource;
+
   /** Rejects with MarketError('unknown_symbol') if the exchange doesn't list it. */
   resolveSymbol(ticker: string): Promise<SymbolInfo>;
-  /** Native support only; resampled intervals arrive in M2. */
-  supportsResolution(resolution: Resolution): boolean;
   /**
    * Up to `limit` bars opening strictly before `endTimeMs` (or the latest bars when null),
-   * ascending by time.
+   * ascending by time. Native intervals only.
    */
   fetchBars(
     ticker: string,
     resolution: Resolution,
     endTimeMs: number | null,
     limit: number,
+  ): Promise<Bar[]>;
+  /**
+   * Bars opening in [startMs, endMs), ascending, at most `maxBarsPerRequest` of them (the
+   * earliest). Native intervals only.
+   */
+  fetchRange(
+    ticker: string,
+    resolution: Resolution,
+    startMs: number,
+    endMs: number,
   ): Promise<Bar[]>;
 
   subscribeCandles(

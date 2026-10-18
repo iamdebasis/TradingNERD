@@ -11,6 +11,10 @@ export interface Theme {
     grid: string;
     /** Active interval, symbol pill, crosshair labels. */
     chip: string;
+    /** Toolbar separators and menu dividers. */
+    separator: string;
+    /** Menus and dialogs. */
+    popup: string;
     /** Selected watchlist row. */
     selection: string;
     up: string;
@@ -46,6 +50,8 @@ export const darkTheme: Theme = {
     gutter: '#2E2E2E',
     grid: '#1C1C1C',
     chip: '#3D3D3D',
+    separator: '#4A4A4A',
+    popup: '#1F1F1F',
     selection: '#132E61',
     up: '#089981',
     down: '#F23645',

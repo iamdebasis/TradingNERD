@@ -1,0 +1,157 @@
+/*
+ * Measured from docs/reference/03-interval-menu.png at 2× (CSS px): 195.5 wide, rows of 32,
+ * section headers of 24, 1 px #4A4A4A dividers inset 6 px with 6 px above and below.
+ */
+.menu {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  overflow: hidden;
+  width: 195.5px;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 20%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.scroller {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+  scrollbar-width: none; /* drawn by .thumb instead, over the content like TradingView's */
+}
+
+.thumb {
+  position: absolute;
+  right: 1px;
+  width: 3px;
+  border-radius: 1.5px;
+  background: var(--color-chip);
+  pointer-events: none;
+}
+
+.add,
+.header,
+.choose {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add {
+  gap: 9px;
+  height: 32px;
+  padding: 0 14px 0 16px;
+}
+
+.divider {
+  height: 1px;
+  margin: 6px;
+  background: var(--color-separator);
+}
+
+.header {
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 18px 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.row {
+  position: relative;
+}
+
+.choose {
+  height: 32px;
+  padding: 0 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.add:hover,
+.row:hover,
+.header:hover {
+  background: var(--color-gutter);
+}
+
+/* The chart's current interval. */
+.row[data-active="true"] {
+  background: var(--color-chip);
+}
+
+.star,
+.remove {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+/* The star's right edge sits 16 px from the menu's edge (measured). */
+.star {
+  right: 16px;
+  width: 15.5px;
+  visibility: hidden;
+}
+
+.row:hover .star,
+.star:focus-visible {
+  visibility: visible;
+}
+
+.star:hover {
+  color: var(--color-text);
+}
+
+/* Favorites keep a solid star, measured #F2F2F2. */
+.row[data-favorite="true"] .star {
+  color: #f2f2f2;
+  visibility: visible;
+}
+
+.remove {
+  right: 36px;
+  width: 18px;
+  visibility: hidden;
+}
+
+.row:hover .remove,
+.remove:focus-visible {
+  visibility: visible;
+}
+
+.remove:hover {
+  color: var(--color-text);
+}
+
+.add:focus-visible,
+.header:focus-visible,
+.choose:focus-visible,
+.star:focus-visible,
+.remove:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* Half a pixel up, to sit exactly where the reference star does. */
+.star svg {
+  transform: translateY(-0.5px);
+}

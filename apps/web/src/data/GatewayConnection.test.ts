@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from '@tradingnerd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type BarHandlers, GatewayConnection } from './GatewayConnection';
 
@@ -42,7 +43,7 @@ class FakeSocket {
 
   hello() {
     this.open();
-    this.receive({ type: 'hello', protocolVersion: 2, serverTime: 0 });
+    this.receive({ type: 'hello', protocolVersion: PROTOCOL_VERSION, serverTime: 0 });
   }
 
   drop() {

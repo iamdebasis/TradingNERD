@@ -20,7 +20,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { formatCountdown, formatCrosshairTime, formatPrice } from './format';
+import { formatCountdown, formatCrosshairTime, formatPrice, formatTickMark } from './format';
 import { installKeyboard } from './interaction/keyboard';
 import { installVerticalDrag } from './interaction/verticalDrag';
 import { TimeViewport } from './interaction/viewport';
@@ -158,6 +158,12 @@ export class ChartController {
         barSpacing: DEFAULT_BAR_SPACING,
         rightOffset: DEFAULT_RIGHT_OFFSET,
         minBarSpacing: 0.5,
+        // Tick bars are numbered, not timed: label them with their first trade's time. Other
+        // intervals keep the library's own labels (null).
+        tickMarkFormatter: (time: Time) => {
+          const start = this.isTicks() ? this.tickStart(time as number) : undefined;
+          return start === undefined ? null : formatTickMark(start);
+        },
       },
       // The wheel is ours (see installWheel); dragging, pinching and the axes stay with the library.
       handleScroll: {
@@ -231,7 +237,12 @@ export class ChartController {
           this.tickPrices = [...prices];
           return prices.map((price) => formatPrice(price, precision));
         },
-        timeFormatter: (time: Time) => formatCrosshairTime(time as number, resolution),
+        timeFormatter: (time: Time) => {
+          // A tick bar's `time` is its number; show when its first trade happened.
+          const start = resolution.unit === 'tick' ? this.tickStart(time as number) : undefined;
+          const seconds = start === undefined ? (time as number) : start / 1000;
+          return formatCrosshairTime(seconds, resolution);
+        },
       },
       timeScale: {
         timeVisible: isIntraday(resolution),
@@ -304,6 +315,16 @@ export class ChartController {
     this.chart.timeScale().resetTimeScale();
   }
 
+  /**
+   * After new data (another interval or symbol): the latest bar at the default right margin,
+   * auto-scale on, and the zoom (bar spacing) kept.
+   */
+  showLatest(): void {
+    this.viewport.clear();
+    this.series.priceScale().setAutoScale(true);
+    this.chart.timeScale().scrollToPosition(DEFAULT_RIGHT_OFFSET, false);
+  }
+
   /** Zooms by notches with the right edge fixed (TradingView's Ctrl/⌘ + ↑/↓). */
   zoom(notches: number): void {
     const range = this.viewport.range();
@@ -367,6 +388,12 @@ export class ChartController {
     return this.series.coordinateToPrice(y);
   }
 
+  /** The crosshair's time label for a bar time, as the chart draws it. */
+  timeLabel(time: number): string {
+    const formatter = this.chart.options().localization.timeFormatter;
+    return formatter ? formatter(time as Time) : String(time);
+  }
+
   destroy(): void {
     clearTimeout(this.countdownTimer);
     for (const cleanup of this.cleanups.splice(0)) cleanup();
@@ -400,6 +427,15 @@ export class ChartController {
       if (y !== null) ys.push(y);
     }
     return ys;
+  }
+
+  private isTicks(): boolean {
+    return this.instrument?.resolution.unit === 'tick';
+  }
+
+  /** When tick bar number `time` began (its first trade, ms), if it is loaded. */
+  private tickStart(time: number): number | undefined {
+    return this.bars[indexOfTime(this.bars, time)]?.start;
   }
 
   private format(price: number): string {

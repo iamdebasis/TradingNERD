@@ -44,6 +44,12 @@ export function formatCrosshairTime(epochSeconds: number, resolution: Resolution
     : `${day}  ${clock}`;
 }
 
+/** A tick bar's time on the time axis: its first trade's clock time, "16:09:54" (UTC). */
+export function formatTickMark(epochMs: number): string {
+  const date = new Date(epochMs);
+  return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`;
+}
+
 /**
  * Time left until the bar closes, as on TradingView's price label: "00:45" under an hour,
  * "07:50:06" under a day, "3d 07:50:06" beyond.

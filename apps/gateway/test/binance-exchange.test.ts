@@ -1,4 +1,4 @@
-import { parseResolution, type Resolution } from '@tradingnerd/core';
+import { formatResolution, parseResolution, type Resolution } from '@tradingnerd/core';
 import { describe, expect, it, vi } from 'vitest';
 import { BinanceExchange } from '../src/exchanges/binance/BinanceExchange.ts';
 import { MarketError } from '../src/market/types.ts';
@@ -109,13 +109,34 @@ describe('BinanceExchange.resolveSymbol', () => {
 });
 
 describe('BinanceExchange intervals', () => {
-  it('serves only native Binance intervals', () => {
+  it('lists exactly the intervals Binance serves natively', () => {
     const { binance } = exchange();
-    for (const text of ['1S', '1', '15', '60', '240', '1D', '3D', '1W', '1M']) {
-      expect(binance.supportsResolution(mustParse(text))).toBe(true);
-    }
-    for (const text of ['2', '45', '180', '2D', '6M', '10T']) {
-      expect(binance.supportsResolution(mustParse(text))).toBe(false);
+    expect(binance.nativeResolutions.map(formatResolution)).toEqual(
+      ['1S', '1', '3', '5', '15', '30', '60', '120', '240', '360', '480', '720'].concat([
+        '1D',
+        '3D',
+        '1W',
+        '1M',
+      ]),
+    );
+  });
+
+  it('fetches a time range with startTime and an exclusive endTime', async () => {
+    const { binance, calls } = exchange();
+    await binance.fetchRange('XRPUSDT', mustParse('1S'), 1_000_000, 2_000_000);
+    const params = calls.find((url) => url.pathname === '/api/v3/klines')?.searchParams;
+    expect(params?.get('interval')).toBe('1s');
+    expect(params?.get('startTime')).toBe('1000000');
+    expect(params?.get('endTime')).toBe('1999999');
+    expect(params?.get('limit')).toBe('1000');
+  });
+
+  it('refuses intervals Binance does not serve; the market service resamples those', async () => {
+    const { binance } = exchange();
+    for (const text of ['2', '45', '180', '6M', '10T']) {
+      await expect(binance.fetchBars('XRPUSDT', mustParse(text), null, 1)).rejects.toMatchObject({
+        code: 'unsupported_resolution',
+      });
     }
   });
 

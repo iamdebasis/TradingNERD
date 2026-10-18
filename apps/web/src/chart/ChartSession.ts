@@ -23,7 +23,7 @@ export type ChartSurface = Pick<
   | 'updateBar'
   | 'firstBarTime'
   | 'latest'
-  | 'destroy'
+  | 'showLatest'
 >;
 
 export interface ChartSessionOptions {
@@ -45,7 +45,8 @@ export const HISTORY_RETRY_MS = 2_000;
 
 /**
  * One symbol and interval on the chart: loads history, follows the live feed, pages back on
- * demand, refills after reconnects, and keeps the legend in step with the cursor.
+ * demand, refills after reconnects, and keeps the legend in step with the cursor. The chart
+ * itself outlives sessions: switching interval starts a new session on the same chart.
  */
 export class ChartSession {
   private readonly options: ChartSessionOptions;
@@ -53,6 +54,8 @@ export class ChartSession {
   private readonly unsubscribes: (() => void)[] = [];
   private symbolId: string | null = null;
   private hasMore = true;
+  /** The first page is on the chart; until then the chart may still show another interval. */
+  private loaded = false;
   private loadingOlder = false;
   private retryAt = 0;
   private hoveredTime: number | null = null;
@@ -75,11 +78,6 @@ export class ChartSession {
       const info = await api.resolveSymbol(symbol, this.abort.signal);
       if (this.disposed) return;
       this.symbolId = info.id;
-      chart.setInstrument({
-        pricePrecision: info.pricePrecision,
-        tickSize: info.tickSize,
-        resolution,
-      });
       legend.setInstrument(info, resolution);
 
       const { bars, hasMore } = await api.getBars(
@@ -90,8 +88,16 @@ export class ChartSession {
         this.abort.signal,
       );
       if (this.disposed) return;
+      // Swap the chart over in one go: the previous interval stays up until this one is ready.
+      chart.setInstrument({
+        pricePrecision: info.pricePrecision,
+        tickSize: info.tickSize,
+        resolution,
+      });
       chart.setBars(bars);
+      chart.showLatest();
       this.hasMore = hasMore;
+      this.loaded = true;
       this.showLatest();
       // Subscribe only once history is in place; the feed starts with the current bar.
       this.subscribe(info.id);
@@ -104,14 +110,16 @@ export class ChartSession {
   async loadOlder(): Promise<void> {
     const { chart, api } = this.options;
     const first = chart.firstBarTime();
-    if (this.disposed || this.loadingOlder || !this.hasMore || !this.symbolId || first === null) {
+    if (this.disposed || !this.loaded || this.loadingOlder || !this.hasMore || first === null) {
       return;
     }
+    const { symbolId } = this;
+    if (!symbolId) return;
     if (Date.now() < this.retryAt) return;
     this.loadingOlder = true;
     try {
       const { bars, hasMore } = await api.getBars(
-        this.symbolId,
+        symbolId,
         this.options.resolution,
         first,
         PAGE_BARS,
@@ -143,7 +151,6 @@ export class ChartSession {
     this.disposed = true;
     this.abort.abort();
     for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe();
-    this.options.chart.destroy();
   }
 
   private subscribe(symbolId: string): void {

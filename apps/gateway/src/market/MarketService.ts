@@ -1,21 +1,33 @@
 import {
+  type AggTrade,
   type Bar,
   type BarsResponse,
+  barCloseTime,
+  barOpenTime,
   formatResolution,
+  maxBasePerBar,
   parseResolution,
   parseSymbolId,
   type Resolution,
+  resampleBars,
+  resampleBase,
   resolutionLabel,
   type StreamState,
   type SymbolInfo,
 } from '@tradingnerd/core';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
-import { type BarChange, LiveBarAggregator } from './liveBar.ts';
+import { fetchSlices, pageBack } from './history.ts';
+import type { BarChange } from './liveBar.ts';
+import { nativeLiveBars, ResampledBarAggregator } from './resampledBar.ts';
+import { TickBars, TickHistory } from './ticks.ts';
 import {
   type BookTop,
+  type CandleUpdate,
   type ExchangeAdapter,
   type FeedState,
   MarketError,
+  type TickSource,
+  type Trade,
   toMarketError,
   type Unsubscribe,
 } from './types.ts';
@@ -40,6 +52,14 @@ export interface MarketServiceOptions {
 }
 
 export const MAX_COUNT_BACK = 5_000;
+/** Requests one history call may make for a resampled interval (~0.5 s at 6 in parallel). */
+export const RESAMPLE_MAX_REQUESTS = 12;
+
+/** How an interval is served: natively, resampled from a native `base`, or from trades. */
+type IntervalPlan =
+  | { kind: 'native'; target: Resolution }
+  | { kind: 'resampled'; target: Resolution; base: Resolution }
+  | { kind: 'ticks'; target: Resolution; source: TickSource };
 
 /**
  * Market data for the UI: symbol lookup, paged history, and shared live feeds. Every browser
@@ -47,7 +67,8 @@ export const MAX_COUNT_BACK = 5_000;
  */
 export class MarketService {
   private readonly exchanges = new Map<string, ExchangeAdapter>();
-  private readonly barFeeds = new Map<string, BarFeed>();
+  private readonly barFeeds = new Map<string, BarFeed<unknown>>();
+  private readonly tickHistory = new TickHistory();
   private readonly bookFeeds = new Map<string, BookFeed>();
   private readonly emitIntervalMs: number;
   private readonly retryDelayMs: (attempt: number) => number;
@@ -79,42 +100,41 @@ export class MarketService {
         `countBack must be a whole number from 1 to ${MAX_COUNT_BACK}`,
       );
     }
-    const { adapter, ticker } = this.route(symbolId);
-    const resolution = supportedResolution(adapter, resolutionText);
+    const { adapter, ticker, id } = this.route(symbolId);
+    const plan = intervalPlan(adapter, resolutionText);
     await adapter.resolveSymbol(ticker);
-
-    const bars: Bar[] = [];
-    let endMs = toSec === null ? null : toSec * 1000;
-    while (bars.length < countBack) {
-      const limit = Math.min(adapter.maxBarsPerRequest, countBack - bars.length);
-      const page = await adapter.fetchBars(ticker, resolution, endMs, limit);
-      const firstKnown = bars[0]?.time ?? Number.POSITIVE_INFINITY;
-      const cutoff = endMs;
-      const fresh = page.filter(
-        (bar) => bar.time < firstKnown && (cutoff === null || bar.time * 1000 < cutoff),
-      );
-      bars.unshift(...fresh);
-      const oldest = fresh[0];
-      if (page.length < limit || !oldest) return { bars, hasMore: false };
-      endMs = oldest.time * 1000;
+    switch (plan.kind) {
+      case 'native':
+        return pageBack(
+          adapter,
+          ticker,
+          plan.target,
+          toSec === null ? null : toSec * 1000,
+          countBack,
+        );
+      case 'resampled':
+        return getResampledBars(adapter, ticker, plan.target, plan.base, toSec, countBack);
+      case 'ticks':
+        // For tick bars `toSec` is a bar number (see Bar.time).
+        return this.tickHistory.bars(plan.source, id, ticker, plan.target.count, toSec, countBack);
     }
-    return { bars, hasMore: true };
   }
 
   subscribeBars(symbolId: string, resolutionText: string, listener: BarListener): Unsubscribe {
-    let feed: BarFeed;
+    let feed: BarFeed<unknown>;
     try {
       const { adapter, ticker, id } = this.route(symbolId);
-      const resolution = supportedResolution(adapter, resolutionText);
-      const key = `${id}|${formatResolution(resolution)}`;
+      const plan = intervalPlan(adapter, resolutionText);
+      const key = `${id}|${formatResolution(plan.target)}`;
       const existing = this.barFeeds.get(key);
       if (existing) {
         feed = existing;
       } else {
+        const strategy = liveStrategy(adapter, ticker, plan) as LiveStrategy<unknown>;
         feed = new BarFeed(
           adapter,
           ticker,
-          resolution,
+          strategy,
           this.emitIntervalMs,
           this.retryDelayMs,
           () => {
@@ -177,18 +197,69 @@ export class MarketService {
   }
 }
 
-function supportedResolution(adapter: ExchangeAdapter, text: string): Resolution {
-  const resolution = parseResolution(text);
-  if (!resolution) {
+const sameResolution = (a: Resolution, b: Resolution) => a.unit === b.unit && a.count === b.count;
+
+/** Native if the exchange serves the interval, else resampled from its coarsest fitting one. */
+function intervalPlan(adapter: ExchangeAdapter, text: string): IntervalPlan {
+  const target = parseResolution(text);
+  if (!target) {
     throw new MarketError('unsupported_resolution', `"${text}" is not a valid resolution`);
   }
-  if (!adapter.supportsResolution(resolution)) {
+  if (adapter.nativeResolutions.some((native) => sameResolution(native, target))) {
+    return { kind: 'native', target };
+  }
+  if (target.unit === 'tick' && adapter.ticks)
+    return { kind: 'ticks', target, source: adapter.ticks };
+  const base = resampleBase(target, adapter.nativeResolutions);
+  if (!base) {
     throw new MarketError(
       'unsupported_resolution',
-      `${adapter.name} doesn't provide ${resolutionLabel(resolution)} bars yet`,
+      `${adapter.name} doesn't provide ${resolutionLabel(target)} bars yet`,
     );
   }
-  return resolution;
+  return { kind: 'resampled', target, base };
+}
+
+/**
+ * History for a resampled interval: enough base bars for `countBack` bars plus one, folded.
+ * The oldest bar is dropped if the base bars may not reach back to its start.
+ */
+async function getResampledBars(
+  adapter: ExchangeAdapter,
+  ticker: string,
+  target: Resolution,
+  base: Resolution,
+  toSec: number | null,
+  countBack: number,
+): Promise<BarsResponse> {
+  const perBar = maxBasePerBar(base, target);
+  const endMs = toSec === null ? null : periodEnd(target, toSec * 1000);
+  const history = await fetchSlices(
+    adapter,
+    ticker,
+    base,
+    endMs,
+    (countBack + 1) * perBar,
+    RESAMPLE_MAX_REQUESTS,
+  );
+  let bars = resampleBars(history.bars, target);
+  const firstBase = history.bars[0];
+  if (history.hasMore && firstBase && bars[0] && firstBase.time > bars[0].time) {
+    bars = bars.slice(1);
+  }
+  if (toSec !== null) bars = bars.filter((bar) => bar.time < toSec);
+  let hasMore = history.hasMore;
+  if (bars.length > countBack) {
+    bars = bars.slice(-countBack);
+    hasMore = true;
+  }
+  return { bars, hasMore };
+}
+
+/** The end of the bar that contains `ms`, or `ms` itself when a bar opens there. */
+function periodEnd(target: Resolution, ms: number): number {
+  const open = barOpenTime(target, ms);
+  return open === ms ? ms : barCloseTime(target, open);
 }
 
 interface FeedListener {
@@ -254,25 +325,112 @@ abstract class Feed<L extends FeedListener> {
   protected abstract cleanup(): void;
 }
 
-class BarFeed extends Feed<BarListener> {
+/** How a bar feed builds its live bar from the exchange. */
+interface LiveStrategy<Seed> {
+  /** Candles to stream: the interval itself or the base it's resampled from; none for ticks. */
+  readonly candles: Resolution | null;
+  /** Recent history over REST, for the live bar to start from. */
+  fetchSeed(): Promise<Seed>;
+  /** Starts the live bar; 'gap' if live data already got ahead of it. */
+  seed(data: Seed): BarChange[] | 'gap';
+  applyCandle(update: CandleUpdate): BarChange[];
+  /** 'gap' when trades went missing and the bar can't be trusted. */
+  applyTrade(trade: Trade): BarChange[] | 'gap';
+  current(): Bar | null;
+  reset(): void;
+}
+
+function liveStrategy(
+  adapter: ExchangeAdapter,
+  ticker: string,
+  plan: IntervalPlan,
+): LiveStrategy<Bar[]> | LiveStrategy<AggTrade[]> {
+  if (plan.kind === 'ticks') {
+    const { source } = plan;
+    const live = new TickBars(plan.target.count);
+    const ticks: LiveStrategy<AggTrade[]> = {
+      candles: null,
+      fetchSeed: () => source.aggTrades(ticker, null, source.maxPerRequest),
+      seed: (latest) => live.seed(latest),
+      applyCandle: () => [],
+      applyTrade: (trade) => live.apply(trade),
+      current: () => live.current(),
+      reset: () => live.reset(),
+    };
+    return ticks;
+  }
+  const { target } = plan;
+  const base = plan.kind === 'resampled' ? plan.base : null;
+  const live = base ? new ResampledBarAggregator(target, base) : nativeLiveBars(target);
+  const bars: LiveStrategy<Bar[]> = {
+    candles: base ?? target,
+    // A resampled interval needs every base bar of its current period.
+    fetchSeed: () =>
+      base
+        ? pageBack(adapter, ticker, base, null, maxBasePerBar(base, target)).then((h) => h.bars)
+        : adapter.fetchBars(ticker, target, null, 1),
+    seed: (seed) => live.seed(seed),
+    applyCandle: (update) => live.applyCandle(update),
+    applyTrade: (trade) => live.applyTrade(trade),
+    current: () => live.current(),
+    reset: () => live.reset(),
+  };
+  return bars;
+}
+
+/**
+ * Sends bar changes to listeners: corrections at once, updates to the current bar at most
+ * once per window, and a new bar at once, right after the previous bar's final update.
+ */
+class BarEmitter {
+  private readonly coalescer: Coalescer<Bar>;
+  private readonly send: (bar: Bar, historical: boolean) => void;
+  private lastBarTime: number | null = null;
+
+  constructor(emitIntervalMs: number, send: (bar: Bar, historical: boolean) => void) {
+    this.send = send;
+    this.coalescer = createCoalescer(emitIntervalMs, (bar) => send(bar, false));
+  }
+
+  apply(changes: BarChange[]): void {
+    for (const { bar, historical } of changes) {
+      if (historical) {
+        this.send(bar, true);
+      } else if (this.lastBarTime !== null && bar.time !== this.lastBarTime) {
+        this.coalescer.flush();
+        this.lastBarTime = bar.time;
+        this.coalescer.push(bar);
+        this.coalescer.flush();
+      } else {
+        this.lastBarTime = bar.time;
+        this.coalescer.push(bar);
+      }
+    }
+  }
+
+  reset(): void {
+    this.coalescer.cancel();
+    this.lastBarTime = null;
+  }
+}
+
+class BarFeed<Seed> extends Feed<BarListener> {
   private readonly adapter: ExchangeAdapter;
   private readonly ticker: string;
-  private readonly resolution: Resolution;
+  private readonly strategy: LiveStrategy<Seed>;
   private readonly retryDelayMs: (attempt: number) => number;
-  private readonly aggregator: LiveBarAggregator;
-  private readonly coalescer: Coalescer<Bar>;
+  private readonly emitter: BarEmitter;
   private feedUp = false;
   private seeded = false;
   private seeding = false;
   /** Bumped to discard seed results that were started before an outage. */
   private seedRun = 0;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
-  private lastBarTime: number | null = null;
 
   constructor(
     adapter: ExchangeAdapter,
     ticker: string,
-    resolution: Resolution,
+    strategy: LiveStrategy<Seed>,
     emitIntervalMs: number,
     retryDelayMs: (attempt: number) => number,
     onDispose: () => void,
@@ -280,11 +438,10 @@ class BarFeed extends Feed<BarListener> {
     super(onDispose);
     this.adapter = adapter;
     this.ticker = ticker;
-    this.resolution = resolution;
+    this.strategy = strategy;
     this.retryDelayMs = retryDelayMs;
-    this.aggregator = new LiveBarAggregator(resolution);
-    this.coalescer = createCoalescer(emitIntervalMs, (bar) =>
-      this.broadcast((listener) => listener.onBar(bar, false)),
+    this.emitter = new BarEmitter(emitIntervalMs, (bar, historical) =>
+      this.broadcast((listener) => listener.onBar(bar, historical)),
     );
   }
 
@@ -300,31 +457,41 @@ class BarFeed extends Feed<BarListener> {
       return;
     }
     if (this.disposed) return;
+    const { candles } = this.strategy;
     this.unsubscribes.push(
       this.adapter.onFeedState((state) => this.onFeedState(state)),
-      this.adapter.subscribeCandles(this.ticker, this.resolution, (update) =>
-        this.apply(this.aggregator.applyCandle(update)),
-      ),
       this.adapter.subscribeTrades(this.ticker, (trade) =>
-        this.apply(this.aggregator.applyTrade(trade)),
+        this.apply(this.strategy.applyTrade(trade)),
       ),
     );
+    if (candles) {
+      this.unsubscribes.push(
+        this.adapter.subscribeCandles(this.ticker, candles, (update) =>
+          this.apply(this.strategy.applyCandle(update)),
+        ),
+      );
+    }
     this.feedUp = this.adapter.isFeedUp();
     this.seed(0);
   }
 
-  /** Fetches the latest bar over REST so the chart has a live bar before the stream speaks. */
+  /** Fetches recent history over REST so the chart has a live bar before the stream speaks. */
   private seed(attempt: number): void {
     const run = ++this.seedRun;
     this.seeding = true;
     clearTimeout(this.retryTimer);
-    this.adapter.fetchBars(this.ticker, this.resolution, null, 1).then(
-      ([latest]) => {
+    this.strategy.fetchSeed().then(
+      (data) => {
         if (this.disposed || run !== this.seedRun) return;
         this.seeding = false;
+        const changes = this.strategy.seed(data);
+        if (changes === 'gap') {
+          this.restart();
+          return;
+        }
         this.seeded = true;
         this.updateState();
-        if (latest) this.apply(this.aggregator.seed(latest));
+        this.emitter.apply(changes);
       },
       (error: unknown) => {
         if (this.disposed || run !== this.seedRun) return;
@@ -338,6 +505,26 @@ class BarFeed extends Feed<BarListener> {
     );
   }
 
+  private apply(changes: BarChange[] | 'gap'): void {
+    if (changes === 'gap') this.restart();
+    else this.emitter.apply(changes);
+  }
+
+  /**
+   * Live data went missing: start the bar over. Listeners see 'reconnecting' and then 'live'
+   * again, so they reload recent history and pick up what was missed.
+   */
+  private restart(): void {
+    this.seeded = false;
+    this.seeding = false;
+    this.seedRun++;
+    clearTimeout(this.retryTimer);
+    this.strategy.reset();
+    this.emitter.reset();
+    this.updateState();
+    if (this.feedUp) this.seed(0);
+  }
+
   private onFeedState(state: FeedState): void {
     if (state === 'down') {
       this.feedUp = false;
@@ -345,9 +532,8 @@ class BarFeed extends Feed<BarListener> {
       this.seeding = false;
       this.seedRun++; // a seed started before the outage may be stale
       clearTimeout(this.retryTimer);
-      this.aggregator.reset();
-      this.coalescer.cancel();
-      this.lastBarTime = null;
+      this.strategy.reset();
+      this.emitter.reset();
     } else {
       this.feedUp = true;
       if (!this.seeded && !this.seeding) this.seed(0);
@@ -359,31 +545,14 @@ class BarFeed extends Feed<BarListener> {
     this.setState(this.seeded && this.feedUp ? 'live' : 'reconnecting');
   }
 
-  private apply(changes: BarChange[]): void {
-    for (const { bar, historical } of changes) {
-      if (historical) {
-        this.broadcast((listener) => listener.onBar(bar, true));
-      } else if (this.lastBarTime !== null && bar.time !== this.lastBarTime) {
-        // New bar: send the previous bar's final update first, then the new bar at once.
-        this.coalescer.flush();
-        this.lastBarTime = bar.time;
-        this.coalescer.push(bar);
-        this.coalescer.flush();
-      } else {
-        this.lastBarTime = bar.time;
-        this.coalescer.push(bar);
-      }
-    }
-  }
-
   protected replay(listener: BarListener): void {
-    const bar = this.aggregator.current();
+    const bar = this.strategy.current();
     if (bar) listener.onBar(bar, false);
   }
 
   protected cleanup(): void {
     clearTimeout(this.retryTimer);
-    this.coalescer.cancel();
+    this.emitter.reset();
   }
 }
 

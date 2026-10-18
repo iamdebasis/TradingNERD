@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseAggTrade,
+  parseAggTradeRow,
   parseAssetNames,
   parseBookTicker,
   parseExchangeInfo,
   parseKlineEvent,
   parseKlineRow,
+  parseTradeRow,
 } from '../src/exchanges/binance/parse.ts';
 
 // Shapes copied from real Binance responses captured on 2026-10-17/18.
@@ -47,11 +49,32 @@ const aggTrade = {
   a: 730153278,
   p: '1.30020000',
   q: '122.90000000',
-  f: 1,
-  l: 1,
+  f: 1736985092,
+  l: 1736985094,
   T: 1792326093943,
   m: false,
   M: true,
+};
+/** GET /api/v3/aggTrades row. */
+const aggTradeRow = {
+  a: 730153278,
+  p: '1.30020000',
+  q: '122.90000000',
+  f: 1736985092,
+  l: 1736985094,
+  T: 1792326093943,
+  m: false,
+  M: true,
+};
+/** GET /api/v3/historicalTrades row. */
+const tradeRow = {
+  id: 1736985093,
+  price: '1.30020000',
+  qty: '40.00000000',
+  quoteQty: '52.00800000',
+  time: 1792326093943,
+  isBuyerMaker: false,
+  isBestMatch: true,
 };
 const bookTicker = {
   u: 26763969247,
@@ -88,12 +111,47 @@ describe('Binance parsers', () => {
     });
   });
 
-  it('parses an aggregate trade', () => {
+  it('parses an aggregate trade with its aggregate and trade ids', () => {
     expect(parseAggTrade(aggTrade)).toEqual({
       price: 1.3002,
       quantity: 122.9,
       time: 1792326093943,
+      id: 730153278,
+      firstId: 1736985092,
+      lastId: 1736985094,
     });
+  });
+
+  it('still parses an aggregate trade without usable ids, just without them', () => {
+    const { a: _a, ...withoutIds } = aggTrade;
+    expect(parseAggTrade(withoutIds)).toEqual({
+      price: 1.3002,
+      quantity: 122.9,
+      time: 1792326093943,
+    });
+    expect(parseAggTrade({ ...aggTrade, l: 1 })).toEqual({
+      price: 1.3002,
+      quantity: 122.9,
+      time: 1792326093943,
+    });
+  });
+
+  it('parses aggregate trade history rows', () => {
+    expect(parseAggTradeRow(aggTradeRow)).toEqual({
+      id: 730153278,
+      firstId: 1736985092,
+      lastId: 1736985094,
+      price: 1.3002,
+      quantity: 122.9,
+      time: 1792326093943,
+    });
+    expect(parseAggTradeRow({ ...aggTradeRow, f: undefined })).toBeNull();
+    expect(parseAggTradeRow({ ...aggTradeRow, p: 'x' })).toBeNull();
+  });
+
+  it('parses a single trade row for its id and time', () => {
+    expect(parseTradeRow(tradeRow)).toEqual({ id: 1736985093, time: 1792326093943 });
+    expect(parseTradeRow({ ...tradeRow, id: '1' })).toBeNull();
   });
 
   it('parses a book ticker', () => {

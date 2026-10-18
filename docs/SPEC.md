@@ -1,6 +1,6 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-18** (M0 committed; M1 built and verified, awaiting review).
+Living document. Last updated **2026-10-19** (M0 and M1 committed; M2 built and verified, awaiting review).
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
@@ -48,6 +48,14 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-18 | Browser tests: mock gateway, clock pinned to 16:09:54 UTC, true 2× rendering | Deterministic, offline, and pixel-comparable with the reference (see §9). |
 | 2026-10-18 | A wheel or two-finger vertical swipe **over the price axis** stretches the price scale, not time | TradingView does this; Lightweight Charts doesn't ([issue #1237](https://github.com/tradingview/lightweight-charts/issues/1237)). Speed, fixed point and direction aren't published, so they start provisional and are calibrated (§11). |
 | 2026-10-18 | Temporary, dev-only **gesture tuning panel** (`?tune` in the URL) | Matches the unpublished gesture constants side by side with TradingView. Not in production builds; deleted once the values are fixed in `packages/chart/src/tuning.ts`. |
+| 2026-10-19 | Intervals an exchange lacks are **resampled in the gateway** from its coarsest native interval that nests exactly | The browser asks for any interval the same way; one implementation serves every exchange. Rebuilding Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars this way matches them exactly (live test). |
+| 2026-10-19 | When folding, base bars **without trades are skipped** unless the whole bar had none | They're placeholders at the previous close. Binance builds its own minutes from its seconds exactly this way: 45 of 45 live minutes matched, versus 28 of 45 when folding every second. |
+| 2026-10-19 | Resampled history is fetched as **parallel time slices**, at most 12 requests per page | A 45-second chart needs 45 one-second bars per bar; slicing keeps a page under a second. |
+| 2026-10-19 | **Tick bars are numbered by trade id** (bar k of an n-tick chart holds trades k·n … k·n + n − 1) and built from Binance's aggregate trades | Bars are identical however history is loaded, scroll back seamlessly, and never collide within a second. Rebuilding a live 100-tick bar from Binance's individual trades matches exactly. |
+| 2026-10-19 | Protocol v3: a tick bar's `time` is its number and `start` its first trade's time | Charts need strictly increasing bar times; the axis and crosshair show `start`. |
+| 2026-10-19 | Toolbar defaults are **the user's own TradingView favorites**, with 8h and 12h as custom intervals | From `docs/reference/02-toolbar.png`; TradingView's built-in list has no 8- or 12-hour entry. |
+| 2026-10-19 | Favorites, added intervals and folded sections kept in `localStorage`; the interval goes in the URL and is remembered for a page opened without one | Survives reloads with no server state; TradingView's own URL format. |
+| 2026-10-19 | Switching interval keeps the chart and swaps the data once it has arrived | No flash of an empty chart, and the zoom level carries over. |
 
 ## 4. Research findings
 
@@ -76,7 +84,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 | Vertical drag | Moves price and switches auto-scale off ¹ | Ignored while auto-scale is on | `interaction/verticalDrag.ts`: after 8 px of mostly vertical travel, auto-scale off and the price under the pointer stays under it |
 | Drag price/time axis; double-click axis | Stretch / reset | Works | Library behavior |
 | Alt+R, Ctrl/⌘+↑/↓, ←/→, Ctrl/⌘+←/→ | Reset, zoom, step one bar, move further | Not built in | `interaction/keyboard.ts` (move further = 10 bars ¹) |
-| Type digits / letters on the chart | Interval prompt / symbol search | Not built in | M2 / M4 |
+| Type digits / letters on the chart | Interval prompt / symbol search | Not built in | Digits (and ",") open the interval prompt (M2); letters arrive with symbol search (M4) |
 
 ¹ From TradingView's notes and observation, not formal docs: on the parity checklist (§11).
 
@@ -149,6 +157,12 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - "Add custom interval…".
 - **Interval prompt:** typing digits on the chart opens it (`15` ↵, `1D` ↵).
 - **Done when:** every interval in the menu renders and matches TradingView's bars.
+- **Status:** built in M2 (2026-10-19).
+  - **Toolbar:** symbol pill, separator, the favorite intervals (the current one highlighted, and shown among them while it isn't a favorite), and the ⌄ menu.
+  - **Menu:** "Add custom interval…", foldable sections, ★ favorites, ✕ on added intervals. Taller than the window, it spans it and scrolls under a thin overlay scrollbar, as in the reference.
+  - **Interval prompt:** digits or "," on the chart; the line under the input says what Enter will switch to, or "Not applicable".
+  - **Choices persist:** favorites, added intervals and folded sections survive reloads. The interval is in the URL and comes back for a page opened without one.
+  - **Not yet:** the pill doesn't open symbol search until M4. The menu's lower half, the hover and current-row colors, the add dialog and the prompt have no reference screenshot yet (§11).
 
 ### 5.3 Watchlist
 
@@ -281,6 +295,15 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - Intraday bars align to 00:00 UTC each day.
   - Weeks start Monday 00:00 UTC.
   - Months are calendar months.
+- **How it's built** (M2):
+  - **Picking the base:** the coarsest native interval whose bar boundaries all fall on the target's. Intraday bases must divide the day.
+  - **Folding:** open of the first base bar, close of the last, highest high, lowest low, summed volume. Base bars without trades are skipped unless none in the period traded. That's exactly how Binance's own bars come out.
+  - **History:** base bars are fetched as parallel time slices, at most 12 requests per page, 6 in flight. The oldest bar is dropped when the slices might not reach its start. An oldest slice that comes back short costs one more request to tell a real start of history from a gap.
+  - **Live:** the base interval's live bar is merged as usual (§6.4), and the target bar is the fold of its period's base bars. The current and previous periods are kept, so a late final candle corrects the right bar. Nothing is sent until the period's earlier base bars have arrived over REST.
+  - **Tick bars:** made from trades, numbered by trade id, from Binance's aggregate trades. Their quantity is shared evenly by the trades.
+    - History pages back by aggregate id (12 requests, about 40,000 trades, per page). Each page remembers which aggregate holds the trade before its oldest bar, so the next page starts exactly there. Without that, Binance is asked once.
+    - Live, the trade stream extends the bar. A gap in trade ids restarts the feed, and the chart reloads what it missed.
+  - Code: `packages/core/src/resample.ts`, `ticks.ts`, `intervals.ts`; `apps/gateway/src/market/history.ts`, `resampledBar.ts`, `ticks.ts`.
 
 ### 6.6 Local data (`data/`, gitignored)
 
@@ -343,6 +366,8 @@ Measured from `docs/reference/` after converting Display P3 → sRGB. Defined on
 | `--color-gutter` | `#2E2E2E` | 4 px gaps between panels; 1 px row separators |
 | `--color-grid` | `#1C1C1C` | Chart grid |
 | `--color-chip` | `#3D3D3D` | Active interval, symbol pill, crosshair labels |
+| `--color-separator` | `#4A4A4A` | Toolbar separators, menu dividers |
+| `--color-popup` | `#1F1F1F` | Interval menu, dialogs |
 | `--color-selection` | `#132E61` | Selected watchlist row |
 | `--color-up` / `--color-down` | `#089981` / `#F23645` | Candles and price changes |
 | `--color-accent` | `#2962FF` | Buy button, focus rings, matched search text |
@@ -375,6 +400,17 @@ Reference viewport is 1634 px wide.
   - Title 16 px. Status dot 18 px with a 10 px center.
   - OHLC at 14 px, colored by the bar's direction (close ≥ open). Change against the previous close.
   - Sell/Buy boxes 65.5 × 34 px with a 6 px radius: price 13 px medium, caption 11 px. Spread 11 px.
+- **Toolbar** (measured at 2×, built in M2; every label lands where the reference's does):
+  - Symbol pill: 128 × 28, fully rounded, `#3D3D3D`, 4 px from the window's edge. The ticker is 14 px semibold, 12 px in.
+  - Inside the pill, a 28 × 24 capsule in `#0F0F0F` (inset 2 px) holds a two-candle icon.
+  - Separator: 1 × 22 px `#4A4A4A`, 6 px either side. The ⊕ button TradingView has before it is out of scope.
+  - Interval buttons: 14 px regular with tabular digits, 4 px padding, 4 px apart, 34 px tall. The active one gets a `#3D3D3D` chip with a 5.5 px radius (the reference's corner pixels match it row for row).
+- **Interval menu** (measured at 2×, built in M2):
+  - 195.5 px wide, `#1F1F1F`, hung from the ⌄ button.
+  - "Add custom interval…" row: a 17 px "+" 16 px in, then the label.
+  - Sections: 6 px above and below a 1 px `#4A4A4A` divider inset 6 px. Headers 24 px, 11 px uppercase with 0.4 px spacing, `#8C8C8C`, with a caret.
+  - Rows: 32 px tall, 14 px regular with tabular digits. Favorites carry a solid 15.5 px star in `#F2F2F2`, 16 px from the right.
+  - Scrollbar: a 3 px `#3D3D3D` thumb 1 px from the edge, drawn over the content.
 - **Watchlist rows:**
   - 30 px tall, with 1 px `#2E2E2E` separators.
   - The selected row is `#132E61`.
@@ -397,8 +433,8 @@ Reference viewport is 1634 px wide.
 | | Milestone | Done when |
 |---|---|---|
 | M0 | Monorepo, tokens, app layout (toolbar, chart, watchlist, gutters, resizable split), gateway skeleton, test harness | Layout lines up with the reference screenshot; `pnpm verify` green |
-| M1 | Chart on Binance: history + scroll-back, live candle merge, legend, countdown, crosshair, gesture handling | XRPUSDT side by side with TradingView: same candles, same gestures. **Built 2026-10-18; awaiting your review** |
-| M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars |
+| M1 | Chart on Binance: history + scroll-back, live candle merge, legend, countdown, crosshair, gesture handling | XRPUSDT side by side with TradingView: same candles, same gestures. **Committed 2026-10-18** |
+| M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars. **Built 2026-10-19; awaiting your review** |
 | M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass |
 | M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s |
 | M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles |
@@ -417,7 +453,12 @@ Reference viewport is 1634 px wide.
   - Not `devices['Desktop Chrome']`: its Windows user agent switches on the Windows wheel handling.
   - Lightweight Charts applies view changes on the next frame, so tests read state after `settle()`.
 - **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, and the legend's position.
-- **Live (opt-in, `pnpm test:live`):** gateway tests and one browser test against real Binance (symbol names, full history back to 2018, live candle and quotes).
+- **Live (opt-in, `pnpm test:live`):** gateway tests and one browser test against real Binance:
+  - Symbol names, full history back to 2018, live candle and quotes.
+  - Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars rebuilt exactly from smaller intervals.
+  - Every resampled menu interval on its bar boundaries, up to the live bar.
+  - A 100-tick bar rebuilt exactly from Binance's individual trades.
+  - Live 45-second and 10-tick bars.
 - **Feel parity (manual, M1 and M6):** side-by-side checklist against TradingView:
   - zoom anchor, pinch speed, swipe speed, momentum, flick glide
   - price-axis swipe: speed, fixed point, direction
@@ -451,6 +492,20 @@ Reference viewport is 1634 px wide.
 8. Legend interval labels: minutes as "15", hours as "1h", then "1D", "1W", "1M".
 9. Legend values colored by the bar's own direction (close vs open).
 10. A two-finger vertical swipe or wheel over the price axis stretches or squeezes the candles vertically, not the time. The way that zooms the chart in makes them taller. Auto-scale turns off; double-clicking the axis or Alt+R turns it back on. **Provisional:** the middle of the price range stays put, and the speed equals the chart zoom.
+
+**Intervals (M2)**, in the same side-by-side setup:
+
+11. Every favorite and every menu interval shows the same candles as TradingView: 2m, 10m, 45m, 3h, 3M, 6M, 12M and 5–45s are built here; the rest are Binance's own.
+12. A tick chart's bars match TradingView's: a tick counted as one trade, and bars starting at trade numbers divisible by the tick count. TradingView's tick history needs a Premium plan, so compare only if yours has it.
+13. A current interval that isn't a favorite appears among the favorites in time order, highlighted. TradingView's placement is unconfirmed.
+14. Typing "15m" in the interval prompt gives 15 minutes, and "1M" a month. TradingView's handling of a lowercase "m" is unconfirmed.
+
+**Still needing a reference screenshot** (built in TradingView's idiom, not yet measured):
+
+- The menu scrolled to the bottom (Hours and Days sections, with the current interval's row).
+- A menu row under the mouse (hover color, outlined star).
+- The "Add custom interval" dialog.
+- The prompt after typing `5` on the chart.
 
 **Calibrating the gesture constants** (TradingView doesn't publish them):
 

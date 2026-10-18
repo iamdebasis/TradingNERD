@@ -70,8 +70,8 @@ class FakeChart implements ChartSurface {
     const bar = this.bars.at(-1);
     return bar ? { bar, previous: this.bars.at(-2) ?? null } : null;
   }
-  destroy() {
-    this.calls.push('destroy');
+  showLatest() {
+    this.calls.push('showLatest');
   }
 }
 
@@ -145,7 +145,7 @@ describe('ChartSession', () => {
     const { session, chart, legend, feed, requests } = setup();
     await session.start();
     expect(requests).toEqual([{ to: null, countBack: INITIAL_BARS }]);
-    expect(chart.calls).toEqual(['setInstrument', `setBars ${INITIAL_BARS}`]);
+    expect(chart.calls).toEqual(['setInstrument', `setBars ${INITIAL_BARS}`, 'showLatest']);
     expect(legend.calls).toEqual(['status loading', 'instrument XRP / TetherUS', `bar ${LAST} 1`]);
     expect(feed.bars).not.toBeNull();
     expect(feed.book).not.toBeNull();
@@ -287,12 +287,44 @@ describe('ChartSession', () => {
       },
     });
     const started = session.start();
-    await vi.waitFor(() => expect(chart.calls).toContain('setInstrument'));
+    await vi.waitFor(() => expect(legend.calls).toContain('instrument XRP / TetherUS'));
     session.dispose();
     release();
     await started;
-    expect(chart.calls).toEqual(['setInstrument', 'destroy']);
+    // The chart belongs to the pane, which may already show the next interval: untouched.
+    expect(chart.calls).toEqual([]);
     expect(feed.bars).toBeNull();
+  });
+
+  it('leaves the chart alone until its first page is in, then swaps it over at once', async () => {
+    const { chart, legend, feed } = setup();
+    let release: () => void = () => {};
+    const requests: (number | null)[] = [];
+    const session = new ChartSession({
+      chart,
+      legend,
+      feed,
+      symbol: 'BINANCE:XRPUSDT',
+      resolution: '15',
+      api: {
+        resolveSymbol: async () => INFO,
+        getBars: (_symbol, _resolution, to) => {
+          requests.push(to);
+          return new Promise((resolve) => {
+            release = () => resolve({ bars: history(5), hasMore: true });
+          });
+        },
+      },
+    });
+    chart.bars = history(50); // the previous interval, still on screen
+    const started = session.start();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await session.loadOlder(); // would page back from the old interval's bars
+    expect(requests).toEqual([null]);
+    expect(chart.calls).toEqual([]);
+    release();
+    await started;
+    expect(chart.calls).toEqual(['setInstrument', 'setBars 5', 'showLatest']);
   });
 
   it('unsubscribes from the live feed on dispose', async () => {

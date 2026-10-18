@@ -1,6 +1,13 @@
-import type { Bar } from '@tradingnerd/core';
+import type { AggTrade, Bar } from '@tradingnerd/core';
 import { MarketError } from '../../market/types.ts';
-import { type BinanceSymbol, parseAssetNames, parseExchangeInfo, parseKlineRow } from './parse.ts';
+import {
+  type BinanceSymbol,
+  parseAggTradeRow,
+  parseAssetNames,
+  parseExchangeInfo,
+  parseKlineRow,
+  parseTradeRow,
+} from './parse.ts';
 
 export interface BinanceRestOptions {
   /** Market data API, e.g. https://api.binance.com */
@@ -27,14 +34,19 @@ export class BinanceRest {
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
 
-  /** Up to `limit` klines opening strictly before `endTimeMs` (or the latest when null). */
+  /**
+   * Up to `limit` klines opening strictly before `endTimeMs` (or the latest when null). With
+   * `startTimeMs`, the earliest `limit` klines opening at or after it instead.
+   */
   async klines(
     symbol: string,
     interval: string,
     endTimeMs: number | null,
     limit: number,
+    startTimeMs?: number,
   ): Promise<Bar[]> {
     const params = new URLSearchParams({ symbol, interval, limit: String(limit) });
+    if (startTimeMs !== undefined) params.set('startTime', String(startTimeMs));
     // Binance's endTime is inclusive of the bar open time; ours is exclusive.
     if (endTimeMs !== null) params.set('endTime', String(endTimeMs - 1));
     const rows = await this.get(`${this.baseUrl}/api/v3/klines?${params}`);
@@ -46,6 +58,36 @@ export class BinanceRest {
       bars.push(bar);
     }
     return bars;
+  }
+
+  /**
+   * Aggregate trades, ascending: up to `limit` from aggregate id `fromId` up, those at or
+   * after `startTimeMs` (with `endTimeMs`), or the latest.
+   */
+  async aggTrades(
+    symbol: string,
+    query: { fromId?: number; startTimeMs?: number; endTimeMs?: number; limit: number },
+  ): Promise<AggTrade[]> {
+    const params = new URLSearchParams({ symbol, limit: String(query.limit) });
+    if (query.fromId !== undefined) params.set('fromId', String(query.fromId));
+    if (query.startTimeMs !== undefined) params.set('startTime', String(query.startTimeMs));
+    if (query.endTimeMs !== undefined) params.set('endTime', String(query.endTimeMs));
+    const rows = await this.get(`${this.baseUrl}/api/v3/aggTrades?${params}`);
+    if (!Array.isArray(rows)) throw upstream('Binance returned an unexpected aggTrades response');
+    return rows.map((row) => {
+      const trade = parseAggTradeRow(row);
+      if (!trade) throw upstream('Binance returned a malformed aggregate trade');
+      return trade;
+    });
+  }
+
+  /** The trade with id `fromId`, if Binance still has it (only its id and time). */
+  async tradeById(symbol: string, id: number): Promise<{ id: number; time: number } | null> {
+    const params = new URLSearchParams({ symbol, fromId: String(id), limit: '1' });
+    const rows = await this.get(`${this.baseUrl}/api/v3/historicalTrades?${params}`);
+    if (!Array.isArray(rows)) throw upstream('Binance returned an unexpected trades response');
+    const trade = rows[0] === undefined ? null : parseTradeRow(rows[0]);
+    return trade && trade.id === id ? trade : null;
   }
 
   async symbol(symbol: string): Promise<BinanceSymbol> {

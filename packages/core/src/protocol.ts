@@ -4,7 +4,8 @@ import type { Bar, BarsResponse, SymbolInfo } from './market.ts';
  * Wire protocol between the UI and the local gateway.
  * Bump PROTOCOL_VERSION on any breaking change so a stale UI can tell it needs a reload.
  */
-export const PROTOCOL_VERSION = 2;
+/** 3: tick bars, whose `time` is a bar number and `start` their first trade's time. */
+export const PROTOCOL_VERSION = 3;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -72,18 +73,21 @@ function parseObject(raw: string): Record<string, unknown> | null {
 /** Validates a bar received from outside; all six fields must be finite numbers. */
 export function parseBar(value: unknown): Bar | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { time, open, high, low, close, volume } = value as Record<string, unknown>;
+  const { time, open, high, low, close, volume, start } = value as Record<string, unknown>;
   if (
     !isNumber(time) ||
     !isNumber(open) ||
     !isNumber(high) ||
     !isNumber(low) ||
     !isNumber(close) ||
-    !isNumber(volume)
+    !isNumber(volume) ||
+    (start !== undefined && !isNumber(start))
   ) {
     return null;
   }
-  return { time, open, high, low, close, volume };
+  const bar: Bar = { time, open, high, low, close, volume };
+  if (start !== undefined) bar.start = start;
+  return bar;
 }
 
 /** Validates GET /api/bars output: bars must be valid and strictly ascending. */

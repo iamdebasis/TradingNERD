@@ -1,4 +1,4 @@
-import type { Bar } from '@tradingnerd/core';
+import type { AggTrade, Bar } from '@tradingnerd/core';
 import type { BookTop, CandleUpdate, Trade } from '../../market/types.ts';
 
 // Binance sends prices and quantities as decimal strings and times as epoch-ms numbers.
@@ -49,13 +49,45 @@ export function parseKlineEvent(data: unknown): CandleUpdate | null {
   return bar && eventTime !== null ? { bar, eventTime } : null;
 }
 
-/** `<symbol>@aggTrade` payload. */
+/** `<symbol>@aggTrade` payload; carries the aggregate and trade ids when present. */
 export function parseAggTrade(data: unknown): Trade | null {
   if (!isObject(data) || data.e !== 'aggTrade') return null;
   const price = decimal(data.p);
   const quantity = decimal(data.q);
   const time = epochMs(data.T);
-  return price !== null && quantity !== null && time !== null ? { price, quantity, time } : null;
+  if (price === null || quantity === null || time === null) return null;
+  const trade: Trade = { price, quantity, time };
+  const ids = aggIds(data);
+  if (ids) Object.assign(trade, ids);
+  return trade;
+}
+
+/** One row of GET /api/v3/aggTrades: {a, p, q, f, l, T, …}. */
+export function parseAggTradeRow(row: unknown): AggTrade | null {
+  if (!isObject(row)) return null;
+  const price = decimal(row.p);
+  const quantity = decimal(row.q);
+  const time = epochMs(row.T);
+  const ids = aggIds(row);
+  if (price === null || quantity === null || time === null || !ids) return null;
+  return { ...ids, price, quantity, time };
+}
+
+/** One row of GET /api/v3/historicalTrades: {id, price, qty, time, …}; only id and time used. */
+export function parseTradeRow(row: unknown): { id: number; time: number } | null {
+  if (!isObject(row)) return null;
+  const id = epochMs(row.id);
+  const time = epochMs(row.time);
+  return id !== null && time !== null ? { id, time } : null;
+}
+
+/** The aggregate id `a` and its first and last trade ids `f` … `l`. */
+function aggIds(data: Json): { id: number; firstId: number; lastId: number } | null {
+  const id = epochMs(data.a);
+  const firstId = epochMs(data.f);
+  const lastId = epochMs(data.l);
+  if (id === null || firstId === null || lastId === null || lastId < firstId) return null;
+  return { id, firstId, lastId };
 }
 
 /** `<symbol>@bookTicker` payload: best bid `b` and best ask `a`. */

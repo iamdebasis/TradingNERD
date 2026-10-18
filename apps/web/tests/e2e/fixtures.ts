@@ -1,5 +1,11 @@
 import { test as base, expect, type Page, type WebSocketRoute } from '@playwright/test';
-import type { Bar, SymbolInfo } from '@tradingnerd/core';
+import {
+  type Bar,
+  barOpenTime,
+  PROTOCOL_VERSION,
+  parseResolution,
+  type SymbolInfo,
+} from '@tradingnerd/core';
 
 export { expect };
 
@@ -75,9 +81,62 @@ export function makeBars(count = 2_500): Bar[] {
   return bars;
 }
 
+/**
+ * `count` bars of any time-based interval ending with the bar that is live at NOW, on the
+ * interval's real boundaries: a random walk around 1.3.
+ */
+export function makeIntervalBars(resolution: string, count = 1_500): Bar[] {
+  const parsed = parseResolution(resolution);
+  if (!parsed || parsed.unit === 'tick') throw new Error(`No mock bars for ${resolution}`);
+  const times: number[] = [];
+  for (let t = barOpenTime(parsed, NOW); times.length < count; t = barOpenTime(parsed, t - 1)) {
+    times.unshift(t / 1000);
+  }
+  const random = mulberry32(7);
+  let close = 1.3;
+  return times.map((time) => {
+    const open = close;
+    close = round4(Math.min(1.6, Math.max(1, open * (1 + (random() - 0.5) * 0.01))));
+    return {
+      time,
+      open,
+      high: round4(Math.max(open, close) * (1 + random() * 0.003)),
+      low: round4(Math.min(open, close) * (1 - random() * 0.003)),
+      close,
+      volume: 1_000,
+    };
+  });
+}
+
+/** The number of the first mock tick bar (tick bars are numbered by trade, see Bar.time). */
+export const FIRST_TICK_BAR = 17_369_000;
+
+/** `count` tick bars, numbered from FIRST_TICK_BAR, their first trades 0.6 s apart up to NOW. */
+export function makeTickBars(count = 1_500): Bar[] {
+  const random = mulberry32(11);
+  let close = 1.3;
+  return Array.from({ length: count }, (_, i) => {
+    const open = close;
+    close = round4(Math.min(1.6, Math.max(1, open * (1 + (random() - 0.5) * 0.002))));
+    return {
+      time: FIRST_TICK_BAR + i,
+      open,
+      high: round4(Math.max(open, close) * 1.0005),
+      low: round4(Math.min(open, close) * 0.9995),
+      close,
+      volume: 100,
+      start: NOW - (count - 1 - i) * 600,
+    };
+  });
+}
+
 export interface MockMarket {
-  /** History served by GET /api/bars. */
+  /** Daily history served by GET /api/bars (other intervals get makeIntervalBars). */
   bars: Bar[];
+  /** Every bars subscription the page has made: [id, resolution], in order. */
+  readonly barSubscriptions: [string, string][];
+  /** Ids of subscriptions the page still holds. */
+  activeSubscriptions(): string[];
   /** Query of every /api/bars request, in order. */
   readonly barRequests: URLSearchParams[];
   /** How many WebSocket connections the page has opened. */
@@ -93,10 +152,12 @@ export interface MockMarket {
 class MockGateway implements MockMarket {
   bars: Bar[] = makeBars();
   readonly barRequests: URLSearchParams[] = [];
+  readonly barSubscriptions: [string, string][] = [];
   private readonly page: Page;
   private socket: WebSocketRoute | null = null;
   private openCount = 0;
   private readonly subscriptions = new Map<string, { channel: string }>();
+  private readonly series = new Map<string, Bar[]>();
 
   constructor(page: Page) {
     this.page = page;
@@ -118,12 +179,28 @@ class MockGateway implements MockMarket {
       this.barRequests.push(params);
       const to = params.get('to');
       const countBack = Number(params.get('countBack') ?? 300);
-      const eligible = this.bars.filter((bar) => to === null || bar.time < Number(to));
+      const bars = this.barsFor(params.get('resolution') ?? '1D');
+      const eligible = bars.filter((bar) => to === null || bar.time < Number(to));
       return route.fulfill({
         json: { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack },
       });
     });
     await this.page.routeWebSocket(/\/ws$/, (socket) => this.accept(socket));
+  }
+
+  /** The history this mock serves for an interval. */
+  barsFor(resolution: string): Bar[] {
+    if (resolution === '1D') return this.bars;
+    let bars = this.series.get(resolution);
+    if (!bars) {
+      bars = resolution.endsWith('T') ? makeTickBars() : makeIntervalBars(resolution);
+      this.series.set(resolution, bars);
+    }
+    return bars;
+  }
+
+  activeSubscriptions(): string[] {
+    return [...this.subscriptions.keys()];
   }
 
   connections(): number {
@@ -159,13 +236,22 @@ class MockGateway implements MockMarket {
   private accept(socket: WebSocketRoute): void {
     this.socket = socket;
     this.openCount++;
-    socket.send(JSON.stringify({ type: 'hello', protocolVersion: 2, serverTime: NOW }));
+    socket.send(
+      JSON.stringify({ type: 'hello', protocolVersion: PROTOCOL_VERSION, serverTime: NOW }),
+    );
     socket.onMessage((raw) => {
-      const message = JSON.parse(String(raw)) as { type: string; id: string; channel: string };
+      const message = JSON.parse(String(raw)) as {
+        type: string;
+        id: string;
+        channel: string;
+        resolution?: string;
+      };
       if (message.type === 'subscribe') {
         this.subscriptions.set(message.id, { channel: message.channel });
         socket.send(JSON.stringify({ type: 'status', id: message.id, state: 'live' }));
-        const last = this.bars.at(-1);
+        const resolution = message.resolution ?? '1D';
+        if (message.channel === 'bars') this.barSubscriptions.push([message.id, resolution]);
+        const last = this.barsFor(resolution).at(-1);
         if (message.channel === 'bars' && last) {
           socket.send(
             JSON.stringify({ type: 'bar', id: message.id, bar: last, historical: false }),
@@ -245,6 +331,7 @@ interface DebugChart {
   yToPrice(y: number): number | null;
   scrollBars(bars: number): void;
   gestureTuning(): GestureTuning;
+  timeLabel(time: number): string;
 }
 
 type DebugWindow = { __tradingNerd?: { chart: DebugChart | null } };
@@ -264,6 +351,15 @@ export async function chartTuning(page: Page): Promise<GestureTuning> {
   );
   if (!tuning) throw new Error('The chart is not mounted');
   return tuning;
+}
+
+/** The crosshair's time label for a bar time, as the chart draws it. */
+export async function chartTimeLabel(page: Page, time: number): Promise<string> {
+  return page.evaluate((value) => {
+    const chart = (window as unknown as DebugWindow).__tradingNerd?.chart;
+    if (!chart) throw new Error('The chart is not mounted');
+    return chart.timeLabel(value);
+  }, time);
 }
 
 /** Waits until the chart shows data, then returns its state. */
