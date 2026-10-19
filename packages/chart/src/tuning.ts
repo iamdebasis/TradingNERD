@@ -1,9 +1,9 @@
 import { WHEEL_PAN_FACTOR, ZOOM_STEP } from './zoom';
 
 /**
- * Gesture constants that TradingView doesn't publish. The defaults are provisional until they've
- * been calibrated side by side with TradingView (docs/SPEC.md §11); anyone can set their own in
- * the top bar's Gestures popup (apps/web/src/gestures/).
+ * Gesture constants that TradingView doesn't publish. The defaults are the ones you settled on
+ * (2026-10-19, docs/SPEC.md §11); anyone can set their own in the top bar's Gestures popup
+ * (apps/web/src/gestures/).
  */
 
 /** The price that keeps its place while a wheel over the price axis stretches the scale. */
@@ -29,8 +29,8 @@ export const DEFAULT_GESTURE_TUNING: Readonly<GestureTuning> = Object.freeze({
   zoomStep: ZOOM_STEP,
   pinchStep: ZOOM_STEP,
   panFactor: WHEEL_PAN_FACTOR,
-  // Provisional: the same speed as the time zoom, and the fixed point Lightweight Charts uses
-  // when the price axis is dragged (the middle of the price range).
+  // The same speed as the time zoom, and the fixed point Lightweight Charts uses when the
+  // price axis is dragged (the middle of the price range).
   priceStep: ZOOM_STEP,
   priceAnchor: 'center',
   priceReversed: false,

@@ -7,7 +7,7 @@ import {
 } from './tuning';
 
 describe('gesture tuning', () => {
-  it('defaults to the library speeds, with the provisional price-axis choices', () => {
+  it('defaults to the library speeds and the middle of the price range, as settled', () => {
     expect(DEFAULT_GESTURE_TUNING).toEqual({
       zoomStep: 0.1,
       pinchStep: 0.1,

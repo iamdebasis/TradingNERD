@@ -46,7 +46,7 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-18 | Asset names ("TetherUS") from Binance's public asset list, falling back to codes | The exchange's own names are what TradingView shows; the endpoint is unofficial, so it's never required. |
 | 2026-10-18 | `?symbol=BINANCE:XRPUSDT&interval=1D` in the URL | TradingView's own URL format; the only way to switch symbol or interval until M2/M4. |
 | 2026-10-18 | Browser tests: mock gateway, clock pinned to 16:09:54 UTC, true 2× rendering | Deterministic, offline, and pixel-comparable with the reference (see §9). |
-| 2026-10-18 | A wheel or two-finger vertical swipe **over the price axis** stretches the price scale, not time | TradingView does this; Lightweight Charts doesn't ([issue #1237](https://github.com/tradingview/lightweight-charts/issues/1237)). Speed, fixed point and direction aren't published, so they start provisional and are calibrated (§11). |
+| 2026-10-18 | A wheel or two-finger vertical swipe **over the price axis** stretches the price scale, not time | TradingView does this; Lightweight Charts doesn't ([issue #1237](https://github.com/tradingview/lightweight-charts/issues/1237)). Speed, fixed point and direction aren't published, so they started provisional; on 2026-10-19 you kept them as the defaults (§11). |
 | 2026-10-18 | Temporary, dev-only **gesture tuning panel** (`?tune` in the URL) | Matches the unpublished gesture constants side by side with TradingView. Not in production builds; deleted once the values are fixed in `packages/chart/src/tuning.ts`. **Replaced on 2026-10-19 by the Gestures popup.** |
 | 2026-10-19 | Intervals an exchange lacks are **resampled in the gateway** from its coarsest native interval that nests exactly | The browser asks for any interval the same way; one implementation serves every exchange. Rebuilding Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars this way matches them exactly (live test). |
 | 2026-10-19 | When folding, base bars **without trades are skipped** unless the whole bar had none | They're placeholders at the previous close. Binance builds its own minutes from its seconds exactly this way: 45 of 45 live minutes matched, versus 28 of 45 when folding every second. |
@@ -92,6 +92,7 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | The gesture settings are **everyone's own**: a **Gestures** button in the top bar opens them, replacing the `?tune` panel | Your call: anyone can tune the feel to their liking. Values set in the old panel carry over once. |
 | 2026-10-19 | The Gestures popup **leaves the chart in use** and lights up the setting each gesture uses | A change can be tried on the chart at once, and it's clear which slider does what. So pressing on the chart doesn't close it; Escape, ✕ or the button do. |
 | 2026-10-19 | Only **changed** gesture settings are kept (`tn.gestures` in this browser) | Settings left at the defaults follow any better defaults later. A dot on the button shows when they differ. |
+| 2026-10-19 | The gesture defaults are **final**: 10% per notch for zoom, pinch and the price scale, scroll 0.80×, the middle of the price range holding | Your call: keep the values as they are. Anyone can still set their own in the Gestures popup. |
 
 ## 4. Research findings
 
@@ -113,7 +114,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 | Input | TradingView | Lightweight Charts default | Ours (built in M1) |
 |---|---|---|---|
 | Wheel / two-finger vertical swipe over the chart or time axis | Zoom with the right edge fixed; hold Ctrl/⌘ to zoom toward the cursor ¹ | Always zooms toward the cursor, up to ±10% bar spacing per event | Own wheel handler (`interaction/wheel.ts`): right edge fixed, Ctrl/⌘ anchors at the cursor; the library's 10% per notch |
-| Wheel / two-finger vertical swipe over the price axis | Stretches or squeezes the price scale and turns auto-scale off ¹ | Zooms time, as anywhere else | Same handler: the way that zooms the chart in makes the candles taller; the middle of the price range stays put; 10% per notch; every event in a frame counts. Speed, fixed point and direction are provisional ¹ |
+| Wheel / two-finger vertical swipe over the price axis | Stretches or squeezes the price scale and turns auto-scale off ¹ | Zooms time, as anywhere else | Same handler: the way that zooms the chart in makes the candles taller; the middle of the price range stays put; 10% per notch; every event in a frame counts. Speed, fixed point and direction are the defaults you settled on ¹ |
 | Pinch (macOS sends it as Ctrl+wheel) | Zoom toward the fingers | Works | Same handler; every event in a frame counts (`interaction/viewport.ts`) |
 | Two-finger horizontal swipe, Shift+wheel | Pan, with OS momentum | Works (0.8 px per wheel-delta px) | Same handler, 0.8 px per wheel pixel, anywhere (price axis included) |
 | Click-drag and release | Pan; a quick flick keeps gliding | Kinetic scroll is touch-only by default (min speed 0.2, max 7, damping 0.997, min move 15 px) | Library drag with kinetic scroll on for mouse/trackpad |
@@ -194,7 +195,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - Price precision comes from the symbol's tick size.
 - **Gestures and shortcuts** per §4.2.
 - **Done when:** XRPUSDT side by side with TradingView shows the same candles and the gestures feel the same (checklist in §11).
-- **Status:** built in M1. The candles are Binance's own data, as on TradingView. The gestures are covered by automated tests; the side-by-side feel check is yours (§11). The price-axis swipe was added after your first review, with provisional constants to calibrate.
+- **Status:** built in M1. The candles are Binance's own data, as on TradingView. The gestures are covered by automated tests; the side-by-side feel check is yours (§11). The price-axis swipe was added after your first review; you settled its constants on 2026-10-19.
 
 ### 5.2 Top bar
 
@@ -680,7 +681,7 @@ Reference viewport is 1634 px wide.
 7. Crosshair time label: "Thu 08 Dec '22" (daily and weekly), "… 14:35" intraday, "Dec '22" monthly.
 8. Legend interval labels: minutes as "15", hours as "1h", then "1D", "1W", "1M".
 9. Legend values colored by the bar's own direction (close vs open).
-10. A two-finger vertical swipe or wheel over the price axis stretches or squeezes the candles vertically, not the time. The way that zooms the chart in makes them taller. Auto-scale turns off; double-clicking the axis or Alt+R turns it back on. **Provisional:** the middle of the price range stays put, and the speed equals the chart zoom.
+10. A two-finger vertical swipe or wheel over the price axis stretches or squeezes the candles vertically, not the time. The way that zooms the chart in makes them taller. Auto-scale turns off; double-clicking the axis or Alt+R turns it back on. **Your defaults (2026-10-19):** the middle of the price range stays put, and the speed equals the chart zoom.
 
 **Intervals (M2)**, in the same side-by-side setup:
 
@@ -734,6 +735,8 @@ Reference viewport is 1634 px wide.
 2. **Fixed point:** in TradingView, with auto-scale on, take a screenshot, do one short swipe over the price axis near its top, and take another. Repeat near the bottom. The axis labels in each pair show which price stayed put.
 3. **Speeds and direction:** do the same swipe in both apps and move each slider until they match. Then press **Copy values** and paste the result into the chat.
 4. The values become the defaults in `packages/chart/src/tuning.ts`; your own settings stay as you set them.
+
+**Settled (2026-10-19):** you kept the current values as the defaults: zoom, pinch zoom and price scale 10% per notch, scroll 0.80×, the middle of the price range holding, the usual direction. The Gestures popup still lets anyone set their own.
 
 ## 12. References
 
