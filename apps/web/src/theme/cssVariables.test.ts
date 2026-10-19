@@ -17,6 +17,8 @@ describe('darkTheme', () => {
       upText: '#22AB94',
       unavailable: '#F7525F',
       avatarText: '#636363',
+      bright: '#F2F2F2',
+      fieldBorder: '#636363',
       accent: '#2962FF',
       crosshair: '#9C9C9C',
       labelText: '#FFFFFF',

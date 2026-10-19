@@ -11,9 +11,10 @@ import {
 } from 'react';
 import { marketApi } from '../data/api';
 import type { QuoteSource } from '../data/GatewayConnection';
+import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { ChevronDownIcon } from '../toolbar/icons';
 import { AddIcon, AdvancedViewIcon, MoreIcon, SectionCaret } from './icons';
-import { moveSymbol, neighbor, removeSymbol, toggleSection } from './model';
+import { addSymbol, allSymbols, moveSymbol, neighbor, removeSymbol, toggleSection } from './model';
 import { PopupMenu, type PopupMenuItem } from './PopupMenu';
 import { QuoteBoard } from './QuoteBoard';
 import { SymbolDirectory } from './SymbolDirectory';
@@ -64,6 +65,8 @@ export function Watchlist({
   const [menu, setMenu] = useState<{ x: number; y: number; symbol: SymbolId | null } | null>(null);
   const [dragging, setDragging] = useState<SymbolId | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
+  const [adding, setAdding] = useState(false);
+  const added = useMemo(() => new Set(list ? allSymbols(list) : []), [list]);
   const rows = useRef(new Map<SymbolId, HTMLButtonElement>());
   const more = useRef<HTMLButtonElement>(null);
 
@@ -85,16 +88,19 @@ export function Watchlist({
     [onChoose],
   );
 
+  /** Removes a row; if it was the selected one, its neighbor is selected (and focused). */
   const remove = useCallback(
-    (target: SymbolId) => {
+    (target: SymbolId, focus = true) => {
       if (!list) return;
-      const after = neighbor(list, target, 1);
-      const next = after === target ? neighbor(list, target, -1) : after;
+      if (target === selected) {
+        const after = neighbor(list, target, 1);
+        const next = after === target ? neighbor(list, target, -1) : after;
+        setSelected(next === target ? null : next);
+        if (focus && next && next !== target) rows.current.get(next)?.focus();
+      }
       edit((current) => removeSymbol(current, target));
-      setSelected(next === target ? null : next);
-      if (next && next !== target) rows.current.get(next)?.focus();
     },
-    [edit, list],
+    [edit, list, selected],
   );
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -172,8 +178,13 @@ export function Watchlist({
           <ChevronDownIcon />
         </span>
         <span className={styles.actions}>
-          {/* Add symbol opens TradingView's dialog, which arrives in M4. */}
-          <button type="button" className={styles.action} aria-label="Add symbol" disabled>
+          <button
+            type="button"
+            className={styles.action}
+            aria-label="Add symbol"
+            disabled={!list}
+            onClick={() => setAdding(true)}
+          >
             <AddIcon />
           </button>
           <button type="button" className={styles.action} aria-label="Advanced view" disabled>
@@ -247,6 +258,19 @@ export function Watchlist({
           </section>
         ))}
       </div>
+      {adding && (
+        <SymbolSearchDialog
+          mode="add"
+          added={added}
+          onAdd={(symbol) => edit((current) => addSymbol(current, symbol, selected))}
+          onRemove={(symbol) => remove(symbol, false)}
+          onLocate={(symbol) => {
+            setAdding(false);
+            choose(symbol);
+          }}
+          onClose={() => setAdding(false)}
+        />
+      )}
       {menu && (
         <PopupMenu
           x={menu.x}

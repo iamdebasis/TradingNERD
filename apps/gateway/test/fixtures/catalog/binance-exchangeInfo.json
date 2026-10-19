@@ -1,0 +1,110 @@
+{
+  "timezone": "UTC",
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "status": "TRADING",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.01000000",
+          "maxPrice": "1000000.00000000",
+          "tickSize": "0.01000000"
+        }
+      ]
+    },
+    {
+      "symbol": "XRPBTC",
+      "status": "TRADING",
+      "baseAsset": "XRP",
+      "quoteAsset": "BTC",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.00000001",
+          "maxPrice": "1000.00000000",
+          "tickSize": "0.00000001"
+        }
+      ]
+    },
+    {
+      "symbol": "XRPUSDT",
+      "status": "TRADING",
+      "baseAsset": "XRP",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.00010000",
+          "maxPrice": "10000.00000000",
+          "tickSize": "0.00010000"
+        }
+      ]
+    },
+    {
+      "symbol": "XRPTRY",
+      "status": "TRADING",
+      "baseAsset": "XRP",
+      "quoteAsset": "TRY",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.01000000",
+          "maxPrice": "1000.00000000",
+          "tickSize": "0.01000000"
+        }
+      ]
+    },
+    {
+      "symbol": "USDTTRY",
+      "status": "TRADING",
+      "baseAsset": "USDT",
+      "quoteAsset": "TRY",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "34.50000000",
+          "maxPrice": "51.80000000",
+          "tickSize": "0.01000000"
+        }
+      ]
+    },
+    {
+      "symbol": "EURUSDT",
+      "status": "TRADING",
+      "baseAsset": "EUR",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.90000000",
+          "maxPrice": "1.40000000",
+          "tickSize": "0.00010000"
+        }
+      ]
+    },
+    {
+      "symbol": "SNTUSDT",
+      "status": "BREAK",
+      "baseAsset": "SNT",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.01000000",
+          "maxPrice": "1000000.00000000",
+          "tickSize": "0.01000000"
+        }
+      ]
+    }
+  ]
+}

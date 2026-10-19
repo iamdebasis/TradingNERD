@@ -6,6 +6,8 @@ export interface JsonFileOptions {
   mode?: number;
   /** Told when an unreadable file was moved aside. */
   onInvalid?: (movedTo: string) => void;
+  /** Spaces per indent level; 0 writes one compact line, for large files. */
+  indent?: number;
 }
 
 /**
@@ -18,6 +20,7 @@ export class JsonFile<T> {
   private readonly parse: (value: unknown) => T | null;
   private readonly mode: number;
   private readonly onInvalid: (movedTo: string) => void;
+  private readonly indent: number;
   private queue: Promise<void> = Promise.resolve();
   private counter = 0;
 
@@ -26,6 +29,7 @@ export class JsonFile<T> {
     this.parse = parse;
     this.mode = options.mode ?? 0o644;
     this.onInvalid = options.onInvalid ?? (() => {});
+    this.indent = options.indent ?? 2;
   }
 
   /** The stored value, or null when there is none (or it was unusable and moved aside). */
@@ -66,7 +70,7 @@ export class JsonFile<T> {
   private async writeNow(value: T): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const temp = `${this.path}.${process.pid}.${this.counter++}.tmp`;
-    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: this.mode });
+    await writeFile(temp, `${JSON.stringify(value, null, this.indent)}\n`, { mode: this.mode });
     await chmod(temp, this.mode); // the mode given to writeFile is reduced by the umask
     await rename(temp, this.path);
   }

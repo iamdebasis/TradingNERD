@@ -64,6 +64,11 @@ export function useLogos(): Logos {
   return useContext(LogoContext);
 }
 
+/** Where an exchange's logo is served: the gateway's cache of CoinGecko's image. */
+export function exchangeLogoUrl(exchange: string, version: number): string {
+  return `${API_PREFIX}/logos/exchange/${encodeURIComponent(exchange)}?v=${version}`;
+}
+
 /** Where a coin's logo is served: the gateway's cache of CoinGecko's 50 px image. */
 export function logoUrl(symbol: SymbolId, base: string, version: number): string {
   const exchange = symbol.slice(0, symbol.indexOf(':'));

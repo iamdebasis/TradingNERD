@@ -12,6 +12,16 @@ export interface GatewayConfig {
   logLevel: LogLevel;
   /** Optional endpoint overrides, e.g. for Binance.US: BINANCE_REST_URL / BINANCE_STREAM_URL. */
   binance: { restUrl: string | undefined; streamUrl: string | undefined };
+  /**
+   * REST endpoints of the exchanges listed in symbol search before their live data arrives:
+   * BYBIT_REST_URL, OKX_REST_URL, COINBASE_REST_URL, KRAKEN_REST_URL (tests point them nowhere).
+   */
+  catalogUrls: {
+    bybit: string | undefined;
+    okx: string | undefined;
+    coinbase: string | undefined;
+    kraken: string | undefined;
+  };
   /** Where local data lives (watchlist, secrets, logo cache): DATA_DIR, or the repo's data/. */
   dataDir: string;
 }
@@ -40,6 +50,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     binance: {
       restUrl: env.BINANCE_REST_URL || undefined,
       streamUrl: env.BINANCE_STREAM_URL || undefined,
+    },
+    catalogUrls: {
+      bybit: env.BYBIT_REST_URL || undefined,
+      okx: env.OKX_REST_URL || undefined,
+      coinbase: env.COINBASE_REST_URL || undefined,
+      kraken: env.KRAKEN_REST_URL || undefined,
     },
     dataDir: env.DATA_DIR || REPO_DATA_DIR,
   };

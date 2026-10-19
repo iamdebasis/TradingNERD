@@ -1,6 +1,6 @@
 import { API_PREFIX } from '@tradingnerd/core';
-import type { FastifyInstance } from 'fastify';
-import type { LogoService } from '../logos/LogoService.ts';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { LogoImage, LogoService } from '../logos/LogoService.ts';
 
 export function registerLogoRoutes(app: FastifyInstance, logos: LogoService): void {
   app.get(`${API_PREFIX}/logos/status`, () => logos.status());
@@ -18,12 +18,20 @@ export function registerLogoRoutes(app: FastifyInstance, logos: LogoService): vo
   // browser logs no error for every coin without one.
   app.get(`${API_PREFIX}/logos/coin/:exchange/:base`, async (request, reply) => {
     const { exchange, base } = request.params as { exchange: string; base: string };
-    const image = await logos.logo(exchange.toUpperCase(), base.toUpperCase());
-    if (!image) return reply.code(204).send();
-    return reply
-      .header('content-type', image.contentType)
-      .header('cache-control', 'private, max-age=86400')
-      .header('x-content-type-options', 'nosniff')
-      .send(image.bytes);
+    return sendImage(reply, await logos.logo(exchange.toUpperCase(), base.toUpperCase()));
   });
+
+  app.get(`${API_PREFIX}/logos/exchange/:exchange`, async (request, reply) => {
+    const { exchange } = request.params as { exchange: string };
+    return sendImage(reply, await logos.exchangeLogo(exchange.toUpperCase()));
+  });
+}
+
+function sendImage(reply: FastifyReply, image: LogoImage | null) {
+  if (!image) return reply.code(204).send();
+  return reply
+    .header('content-type', image.contentType)
+    .header('cache-control', 'private, max-age=86400')
+    .header('x-content-type-options', 'nosniff')
+    .send(image.bytes);
 }

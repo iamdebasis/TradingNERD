@@ -1,4 +1,4 @@
-import type { SymbolId, Watchlist } from '@tradingnerd/core';
+import { MAX_WATCHLIST_SYMBOLS, type SymbolId, type Watchlist } from '@tradingnerd/core';
 
 /** Edits to a watchlist, as pure functions: each returns a new list, or the same one if nothing changed. */
 
@@ -32,6 +32,26 @@ export function moveSymbol(
       symbols.splice(Math.max(0, Math.min(index, symbols.length)), 0, symbol);
       return { ...section, symbols };
     }),
+  };
+}
+
+/**
+ * Adds `symbol` once, at the end of the section holding `near` (the selected row), else of the
+ * last section; an empty list gets a Crypto section.
+ */
+export function addSymbol(list: Watchlist, symbol: SymbolId, near: SymbolId | null): Watchlist {
+  const symbols = allSymbols(list);
+  if (symbols.includes(symbol) || symbols.length >= MAX_WATCHLIST_SYMBOLS) return list;
+  const target =
+    (near !== null && list.sections.find((section) => section.symbols.includes(near))) ||
+    list.sections.at(-1);
+  if (!target) {
+    return { sections: [{ id: 'crypto', title: 'Crypto', collapsed: false, symbols: [symbol] }] };
+  }
+  return {
+    sections: list.sections.map((section) =>
+      section === target ? { ...section, symbols: [...section.symbols, symbol] } : section,
+    ),
   };
 }
 

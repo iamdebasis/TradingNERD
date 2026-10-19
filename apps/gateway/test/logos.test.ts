@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -179,6 +179,61 @@ describe('the logo list', () => {
     await logos.refreshIfStale();
     await logos.whenIdle();
     expect(fake.calls.length).toBeGreaterThan(calls);
+  });
+
+  it("serves each exchange's logo, cached like coin logos", async () => {
+    const { logos, fake, dataDir } = setup();
+    expect(await logos.exchangeLogo('BINANCE')).toBeNull(); // no list yet
+    await logos.saveKey(KEY);
+    await logos.whenIdle();
+    expect((await logos.exchangeLogo('BYBIT'))?.bytes.equals(PNG_BYTES)).toBe(true);
+    // CoinGecko calls Bybit's spot exchange "bybit_spot", OKX "okex", Coinbase "gdax".
+    expect(
+      fake.calls.some((call) => call.url.endsWith('/markets/images/9/small/bybit_spot.png')),
+    ).toBe(true);
+    expect(readdirSync(join(dataDir, 'logos', 'exchanges'))).toEqual(['bybit']);
+    const downloads = fake.calls.length;
+    await logos.exchangeLogo('BYBIT');
+    expect(fake.calls.length).toBe(downloads);
+    expect(await logos.exchangeLogo('NOPE')).toBeNull();
+    expect(await logos.exchangeLogo('../..')).toBeNull();
+  });
+
+  it('finds a coin on another exchange through the mapped exchange, then market cap', async () => {
+    const { logos } = setup();
+    await logos.saveKey(KEY);
+    await logos.whenIdle();
+    expect((await logos.logo('KRAKEN', 'LINK'))?.contentType).toBe('image/png');
+    expect((await logos.logo('KRAKEN', 'XRP'))?.contentType).toBe('image/png');
+    expect(await logos.logo('KRAKEN', 'NOPE')).toBeNull();
+  });
+
+  it('refreshes a list saved before exchange logos existed, even when recent', async () => {
+    const { logos, fake, dataDir } = setup();
+    await logos.saveKey(KEY);
+    await logos.whenIdle();
+    const file = join(dataDir, 'logos', 'index.json');
+    const index = JSON.parse(readFileSync(file, 'utf8'));
+    expect(index.version).toBe(2);
+    delete index.version;
+    delete index.exchangeImages;
+    writeFileSync(file, JSON.stringify(index));
+
+    // A new gateway reads the old list: still searchable, but due for a refresh.
+    const restarted = new LogoService({
+      client: new CoinGeckoClient({ fetch: fake.fetch }),
+      secrets: new SecretStore(dataDir, {}),
+      dataDir,
+      fetch: fake.fetch,
+      paceMs: 0,
+      now: () => Date.UTC(2026, 9, 19),
+    });
+    expect((await restarted.logo('BINANCE', 'LINK'))?.contentType).toBe('image/png');
+    const calls = fake.calls.length;
+    await restarted.refreshIfStale();
+    await restarted.whenIdle();
+    expect(fake.calls.length).toBeGreaterThan(calls);
+    expect((await restarted.exchangeLogo('KRAKEN'))?.contentType).toBe('image/png');
   });
 
   it('remembers that the first-launch prompt was skipped', async () => {

@@ -242,7 +242,7 @@ test('toolbar and menu geometry match the reference', async ({ page }) => {
     return value;
   };
   // docs/reference/02-toolbar.png: a 128 × 28 pill on the 4 px gutter, a 34 px active chip.
-  expect(await box(toolbar(page).locator('div').first())).toEqual({
+  expect(await box(toolbar(page).getByRole('button', { name: /^Symbol search/ }))).toEqual({
     x: 4,
     y: 5,
     width: 128,

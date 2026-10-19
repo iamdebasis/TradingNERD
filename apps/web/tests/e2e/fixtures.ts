@@ -2,12 +2,16 @@ import { test as base, expect, type Page, type Route, type WebSocketRoute } from
 import {
   type Bar,
   barOpenTime,
+  type CatalogEntry,
   DEFAULT_WATCHLIST,
+  type ExchangeSummary,
   type LogoStatus,
   PROTOCOL_VERSION,
   parseResolution,
   parseWatchlist,
+  SEARCH_PAGE_SIZE,
   type SymbolInfo,
+  searchCatalog,
   type Watchlist,
 } from '@tradingnerd/core';
 
@@ -64,19 +68,84 @@ const PRECISION: Record<string, number> = {
 /** Coins Binance doesn't list: XCH is the reference's unavailable row. */
 const UNLISTED = new Set(['XCH']);
 
-/** SymbolInfo for any BINANCE:…USDT pair except the unlisted ones. */
+/** The exchanges the mock's symbol catalog covers; only Binance has live data (until M5). */
+export const MOCK_EXCHANGES: ExchangeSummary[] = [
+  { id: 'BINANCE', name: 'Binance', live: true },
+  { id: 'BYBIT', name: 'Bybit', live: false },
+  { id: 'OKX', name: 'OKX', live: false },
+  { id: 'COINBASE', name: 'Coinbase', live: false },
+  { id: 'KRAKEN', name: 'Kraken', live: false },
+];
+
+const listing = (
+  exchange: string,
+  ticker: string,
+  base: string,
+  quote: string,
+  description: string,
+  volumeUsd: number,
+): CatalogEntry => ({
+  exchange,
+  ticker,
+  base,
+  quote,
+  description,
+  volumeUsd,
+  live: exchange === 'BINANCE',
+});
+
+/**
+ * What the mock's symbol search searches (with the gateway's own ranking): XRP across the five
+ * exchanges as on 2026-10-19, the default watchlist's coins on Binance, and 60 quiet pairs so
+ * an empty search has a second page.
+ */
+export const MOCK_CATALOG: CatalogEntry[] = [
+  listing('BINANCE', 'XRPUSDT', 'XRP', 'USDT', 'XRP / TetherUS', 150e6),
+  listing('OKX', 'XRPUSDT', 'XRP', 'USDT', 'XRP / TetherUS', 22e6),
+  listing('BYBIT', 'XRPUSDT', 'XRP', 'USDT', 'XRP / TetherUS', 20e6),
+  listing('KRAKEN', 'XRPUSDT', 'XRP', 'USDT', 'XRP / TetherUS', 1e6),
+  listing('COINBASE', 'XRPUSDT', 'XRP', 'USDT', 'XRP / TetherUS', 0.2e6),
+  listing('COINBASE', 'XRPUSD', 'XRP', 'USD', 'XRP / US Dollar', 66e6),
+  listing('KRAKEN', 'XRPUSD', 'XRP', 'USD', 'XRP / US Dollar', 22e6),
+  listing('BINANCE', 'XRPUSDC', 'XRP', 'USDC', 'XRP / USDC', 30e6),
+  listing('BYBIT', 'XRPUSDC', 'XRP', 'USDC', 'XRP / USDC', 2e6),
+  listing('BINANCE', 'XRPEUR', 'XRP', 'EUR', 'XRP / Euro', 5e6),
+  listing('COINBASE', 'XRPEUR', 'XRP', 'EUR', 'XRP / Euro', 0.8e6),
+  listing('BINANCE', 'XRPTRY', 'XRP', 'TRY', 'XRP / Turkish Lira', 3.2e6),
+  listing('BINANCE', 'XRPBTC', 'XRP', 'BTC', 'XRP / Bitcoin', 3e6),
+  listing('BINANCE', 'XRPU', 'XRP', 'U', 'XRP / United Stables', 0.5e6),
+  listing('BINANCE', 'BTCUSDT', 'BTC', 'USDT', 'Bitcoin / TetherUS', 900e6),
+  listing('KRAKEN', 'XBTUSD', 'BTC', 'USD', 'Bitcoin / US Dollar', 117e6),
+  listing('OKX', 'XCHUSDT', 'XCH', 'USDT', 'Chia / TetherUS', 1e6),
+  ...(DEFAULT_WATCHLIST.sections[0]?.symbols ?? [])
+    .filter((symbol) => symbol !== XRP_INFO.id)
+    .map((symbol, i) => {
+      const base = symbol.slice('BINANCE:'.length, -'USDT'.length);
+      return listing('BINANCE', `${base}USDT`, base, 'USDT', `${base} / TetherUS`, 50e6 - i * 1e6);
+    }),
+  ...Array.from({ length: 60 }, (_, i) =>
+    listing('BINANCE', `QQ${i}USDT`, `QQ${i}`, 'USDT', `Quiet ${i} / TetherUS`, 1_000 - i),
+  ),
+];
+
+/** SymbolInfo for a Binance pair in the mock catalog, or any BINANCE:…USDT but the unlisted. */
 export function infoFor(symbol: string): SymbolInfo | null {
   if (symbol === XRP_INFO.id) return XRP_INFO;
+  const listed = MOCK_CATALOG.find(
+    (entry) => entry.exchange === 'BINANCE' && `BINANCE:${entry.ticker}` === symbol,
+  );
   const match = /^BINANCE:([A-Z0-9]+)USDT$/.exec(symbol);
-  const base = match?.[1];
+  const base = listed?.base ?? match?.[1];
+  const quote = listed?.quote ?? 'USDT';
   if (!base || UNLISTED.has(base)) return null;
   const pricePrecision = PRECISION[base] ?? 4;
   return {
     ...XRP_INFO,
     id: symbol,
-    ticker: `${base}USDT`,
+    ticker: `${base}${quote}`,
     base,
-    description: `${base} / TetherUS`,
+    quote,
+    description: listed?.description ?? `${base} / TetherUS`,
     tickSize: 10 ** -pricePrecision,
     pricePrecision,
   };
@@ -211,6 +280,8 @@ export interface MockMarket {
   logoStatus: LogoStatus;
   /** Every body the page sent to PUT /api/logos/key. */
   readonly savedKeys: string[];
+  /** Query of every symbol search, in order. */
+  readonly searchRequests: URLSearchParams[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
   /** Ids of subscriptions the page still holds. */
@@ -238,6 +309,7 @@ class MockGateway implements MockMarket {
     syncError: null,
   };
   readonly savedKeys: string[] = [];
+  readonly searchRequests: URLSearchParams[] = [];
   readonly watchlistSaves: Watchlist[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
@@ -266,6 +338,21 @@ class MockGateway implements MockMarket {
           });
     });
     await this.page.route(/\/api\/logos\//, (route) => this.logos(route));
+    await this.page.route(/\/api\/symbols\/search\?/, (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      this.searchRequests.push(params);
+      return route.fulfill({
+        json: searchCatalog(MOCK_CATALOG, {
+          query: params.get('query') ?? '',
+          exchange: params.get('exchange'),
+          offset: Number(params.get('offset') ?? 0),
+          limit: Number(params.get('limit') ?? SEARCH_PAGE_SIZE),
+        }),
+      });
+    });
+    await this.page.route(/\/api\/exchanges$/, (route) =>
+      route.fulfill({ json: { exchanges: MOCK_EXCHANGES } }),
+    );
     await this.page.route(/\/api\/watchlist$/, (route) => {
       if (route.request().method() === 'PUT') {
         const saved = parseWatchlist(route.request().postDataJSON());
@@ -314,6 +401,11 @@ class MockGateway implements MockMarket {
   private logos(route: Route) {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/logos/exchange/')) {
+      return this.logoStatus.syncedAt
+        ? route.fulfill({ body: LOGO_PNG, contentType: 'image/png' })
+        : route.fulfill({ status: 204 });
+    }
     if (path.startsWith('/api/logos/coin/')) {
       const base = path.split('/').at(-1);
       return this.logoStatus.syncedAt && (base === 'XRP' || base === 'LINK')

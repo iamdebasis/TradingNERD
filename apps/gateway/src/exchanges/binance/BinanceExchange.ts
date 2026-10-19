@@ -6,6 +6,7 @@ import {
   type Resolution,
   type SymbolInfo,
 } from '@tradingnerd/core';
+import type { CatalogSnapshot, CatalogSource } from '../../catalog/types.ts';
 import {
   type BookTop,
   type CandleUpdate,
@@ -19,7 +20,7 @@ import {
 import { BinanceRest } from './BinanceRest.ts';
 import { BinanceStream, type BinanceStreamOptions } from './BinanceStream.ts';
 import { BINANCE_RESOLUTIONS, binanceInterval } from './intervals.ts';
-import { parseAggTrade, parseBookTicker, parseKlineEvent } from './parse.ts';
+import { type BinanceSymbol, parseAggTrade, parseBookTicker, parseKlineEvent } from './parse.ts';
 
 export const BINANCE_DEFAULTS = {
   restUrl: 'https://api.binance.com',
@@ -38,12 +39,14 @@ export interface BinanceExchangeOptions {
 }
 
 const SYMBOL_TTL_MS = 60 * 60_000;
+/** How long the full pair list (from the catalog) answers symbol lookups without a request. */
+const LISTING_TTL_MS = 12 * 60 * 60_000;
 const ASSET_NAMES_TTL_MS = 24 * 60 * 60_000;
 const ASSET_NAMES_RETRY_MS = 5 * 60_000;
 /** Longest a symbol lookup waits for display names before falling back to asset codes. */
 const ASSET_NAMES_WAIT_MS = 3_000;
 
-export class BinanceExchange implements ExchangeAdapter {
+export class BinanceExchange implements ExchangeAdapter, CatalogSource {
   readonly id = 'BINANCE';
   readonly name = 'Binance';
   readonly maxBarsPerRequest = 1_000;
@@ -60,6 +63,8 @@ export class BinanceExchange implements ExchangeAdapter {
   private readonly warn: (message: string) => void;
   private readonly symbols = new Map<string, { info: Promise<SymbolInfo>; expires: number }>();
   private assetNames: { names: Promise<Map<string, string>>; expires: number } | null = null;
+  /** Every trading pair, from the last catalog fetch: lookups need no request of their own. */
+  private listing: { symbols: Map<string, BinanceSymbol>; fetchedAt: number } | null = null;
 
   constructor(options: BinanceExchangeOptions = {}) {
     this.warn = options.onWarning ?? (() => {});
@@ -155,6 +160,32 @@ export class BinanceExchange implements ExchangeAdapter {
     });
   }
 
+  /** Every trading spot pair with its 24 h figures, and Binance's asset names, for search. */
+  async fetchCatalog(): Promise<CatalogSnapshot> {
+    const [listings, stats, names] = await Promise.all([
+      this.rest.tradingSymbols(),
+      this.rest.miniTickers(),
+      this.loadAssetNames(),
+    ]);
+    this.listing = {
+      symbols: new Map(listings.map((listing) => [listing.symbol, listing])),
+      fetchedAt: Date.now(),
+    };
+    return {
+      pairs: listings.map((listing) => {
+        const stat = stats.get(listing.symbol);
+        return {
+          ticker: listing.symbol,
+          base: listing.baseAsset,
+          quote: listing.quoteAsset,
+          quoteVolume: stat?.quoteVolume ?? 0,
+          last: stat?.last ?? 0,
+        };
+      }),
+      names: Object.fromEntries(names),
+    };
+  }
+
   isFeedUp(): boolean {
     return this.stream.isUp();
   }
@@ -176,7 +207,15 @@ export class BinanceExchange implements ExchangeAdapter {
   }
 
   private async loadSymbol(ticker: string): Promise<SymbolInfo> {
-    const [symbol, names] = await Promise.all([this.rest.symbol(ticker), this.displayNames()]);
+    // A pair from a recent full list needs no request: picking one goes live a round trip sooner.
+    const listed =
+      this.listing && Date.now() - this.listing.fetchedAt < LISTING_TTL_MS
+        ? this.listing.symbols.get(ticker)
+        : undefined;
+    const [symbol, names] = await Promise.all([
+      listed ?? this.rest.symbol(ticker),
+      this.displayNames(),
+    ]);
     const name = (code: string) => names.get(code) ?? code;
     return {
       id: `${this.id}:${symbol.symbol}`,
@@ -198,6 +237,11 @@ export class BinanceExchange implements ExchangeAdapter {
    * are best-effort: cached for a day, never waited on for long, and never a reason to fail.
    */
   private displayNames(): Promise<Map<string, string>> {
+    return withTimeout(this.loadAssetNames(), ASSET_NAMES_WAIT_MS, new Map());
+  }
+
+  /** The asset names, cached; never rejects (an empty map when they couldn't be loaded). */
+  private loadAssetNames(): Promise<Map<string, string>> {
     if (!this.assetNames || this.assetNames.expires <= Date.now()) {
       const names: Promise<Map<string, string>> = this.rest.assetNames().catch((error: unknown) => {
         this.warn(`Couldn't load Binance asset names; showing asset codes (${String(error)})`);
@@ -208,7 +252,7 @@ export class BinanceExchange implements ExchangeAdapter {
       });
       this.assetNames = { names, expires: Date.now() + ASSET_NAMES_TTL_MS };
     }
-    return withTimeout(this.assetNames.names, ASSET_NAMES_WAIT_MS, new Map());
+    return this.assetNames.names;
   }
 }
 

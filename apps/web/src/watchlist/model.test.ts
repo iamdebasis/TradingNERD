@@ -1,6 +1,7 @@
 import type { Watchlist } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
 import {
+  addSymbol,
   allSymbols,
   moveSymbol,
   neighbor,
@@ -20,6 +21,19 @@ describe('watchlist edits', () => {
   it('removes a symbol, and leaves the list alone for one it lacks', () => {
     expect(allSymbols(removeSymbol(LIST, 'X:B'))).toEqual(['X:A', 'X:C', 'X:D', 'X:E']);
     expect(removeSymbol(LIST, 'X:Z')).toBe(LIST);
+  });
+
+  it("adds a symbol once, at the end of the selected row's section, else the last", () => {
+    expect(addSymbol(LIST, 'X:F', 'X:A').sections.map((s) => s.symbols)).toEqual([
+      ['X:A', 'X:B', 'X:C', 'X:F'],
+      ['X:D', 'X:E'],
+    ]);
+    expect(addSymbol(LIST, 'X:F', null).sections[1]?.symbols).toEqual(['X:D', 'X:E', 'X:F']);
+    expect(addSymbol(LIST, 'X:F', 'X:GONE').sections[1]?.symbols.at(-1)).toBe('X:F');
+    expect(addSymbol(LIST, 'X:B', null)).toBe(LIST);
+    expect(addSymbol({ sections: [] }, 'X:A', null)).toEqual({
+      sections: [{ id: 'crypto', title: 'Crypto', collapsed: false, symbols: ['X:A'] }],
+    });
   });
 
   it('moves a symbol within a section and across sections', () => {

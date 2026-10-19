@@ -1,0 +1,33 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "spot",
+    "list": [
+      {
+        "symbol": "XRPBTC",
+        "lastPrice": "0.00001586",
+        "turnover24h": "4.1964501446",
+        "volume24h": "266085.24"
+      },
+      {
+        "symbol": "BTCUSDT",
+        "lastPrice": "82806.3",
+        "turnover24h": "694363669.56559086",
+        "volume24h": "8496.643942"
+      },
+      {
+        "symbol": "XRPUSDT",
+        "lastPrice": "1.3139",
+        "turnover24h": "20567948.699984",
+        "volume24h": "15991875.74"
+      },
+      {
+        "symbol": "XRPEUR",
+        "lastPrice": "1.1675",
+        "turnover24h": "51536.443764",
+        "volume24h": "45575.78"
+      }
+    ]
+  }
+}

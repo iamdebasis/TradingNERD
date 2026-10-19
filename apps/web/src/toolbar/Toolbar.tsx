@@ -19,13 +19,15 @@ export interface ToolbarProps {
   /** The chart's interval, TradingView notation. */
   interval: string;
   onIntervalChange(interval: string): void;
+  /** The symbol pill was pressed: open symbol search. */
+  onSymbolSearch(): void;
 }
 
 /**
  * TradingView's top bar, v1 slice: the symbol pill, the favorite intervals and the interval
  * menu (docs/reference/02-toolbar.png and 03-interval-menu.png).
  */
-export function Toolbar({ symbol, interval, onIntervalChange }: ToolbarProps) {
+export function Toolbar({ symbol, interval, onIntervalChange, onSymbolSearch }: ToolbarProps) {
   const [prefs, setPrefs] = useIntervalPrefs();
   const [menuOpen, setMenuOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -39,13 +41,17 @@ export function Toolbar({ symbol, interval, onIntervalChange }: ToolbarProps) {
 
   return (
     <header className={styles.toolbar}>
-      {/* Symbol search arrives in M4; until then the pill only shows the symbol. */}
-      <div className={styles.pill}>
+      <button
+        type="button"
+        className={styles.pill}
+        aria-label={`Symbol search: ${ticker}`}
+        onClick={onSymbolSearch}
+      >
         <span className={styles.ticker}>{ticker}</span>
         <span className={styles.pillIcon}>
           <CandlesIcon />
         </span>
-      </div>
+      </button>
       <span className={styles.separator} />
       <fieldset className={styles.intervals} aria-label="Intervals">
         {toolbarButtons(prefs, interval).map((button) => (

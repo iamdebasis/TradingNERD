@@ -33,6 +33,13 @@ export interface Coin {
   image: string | null;
 }
 
+export interface ExchangeLogo {
+  /** CoinGecko's exchange id, e.g. "gdax" for Coinbase. */
+  id: string;
+  /** The exchange's logo, or null when it has none. */
+  image: string | null;
+}
+
 export interface CoinGeckoOptions {
   fetch?: typeof fetch;
   demoUrl?: string;
@@ -108,6 +115,18 @@ export class CoinGeckoClient {
       const { id, symbol, image } = coin as Record<string, unknown>;
       if (typeof id !== 'string' || typeof symbol !== 'string') return [];
       return [{ id, symbol: symbol.toLowerCase(), image: smallImage(image) }];
+    });
+  }
+
+  /** The 250 most traded exchanges and their logos. */
+  async exchanges(key: CoinGeckoKey): Promise<ExchangeLogo[]> {
+    const body = await this.get(key, '/exchanges?per_page=250&page=1');
+    if (!Array.isArray(body)) throw new CoinGeckoError('unreachable', 'Unexpected exchange list');
+    return body.flatMap((exchange): ExchangeLogo[] => {
+      const { id, image } = exchange as Record<string, unknown>;
+      if (typeof id !== 'string') return [];
+      const https = typeof image === 'string' && image.startsWith('https://') ? image : null;
+      return [{ id, image: https }];
     });
   }
 

@@ -5,13 +5,16 @@ import { join } from 'node:path';
 import {
   DEFAULT_WATCHLIST,
   PROTOCOL_VERSION,
+  parseExchangeList,
   parseLogoStatus,
   parseServerMessage,
+  parseSymbolSearchResponse,
   type ServerMessage,
 } from '@tradingnerd/core';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
+import { SymbolCatalog } from '../src/catalog/SymbolCatalog.ts';
 import type { GatewayConfig } from '../src/config.ts';
 import { CoinGeckoClient } from '../src/logos/coingecko.ts';
 import { LogoService } from '../src/logos/LogoService.ts';
@@ -19,6 +22,7 @@ import { SecretStore } from '../src/logos/secrets.ts';
 import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
 import { WatchlistStore } from '../src/storage/WatchlistStore.ts';
+import { FakeCatalogSource, pair } from './helpers/FakeCatalog.ts';
 import { fakeCoinGecko } from './helpers/FakeCoinGecko.ts';
 import { dailyBars, FAKE_INFO, FakeExchange } from './helpers/FakeExchange.ts';
 
@@ -31,6 +35,7 @@ const config: GatewayConfig = {
   allowedOrigins: [UI_ORIGIN],
   logLevel: 'silent',
   binance: { restUrl: undefined, streamUrl: undefined },
+  catalogUrls: { bybit: undefined, okx: undefined, coinbase: undefined, kraken: undefined },
   dataDir: '', // each server gets its own temporary directory
 };
 
@@ -50,14 +55,28 @@ async function start() {
     fetch: coingecko.fetch,
     paceMs: 0,
   });
+  const catalog = new SymbolCatalog({
+    sources: [
+      new FakeCatalogSource('FAKE', 'Fake Exchange', [
+        pair('XRPUSDT', 'XRP', 'USDT', 9e7, 1.3),
+        pair('XRPBTC', 'XRP', 'BTC', 10, 0.0000158),
+        pair('BTCUSDT', 'BTC', 'USDT', 9e8, 82_000),
+      ]),
+      new FakeCatalogSource('OTHER', 'Other Exchange', [pair('XRPUSDT', 'XRP', 'USDT', 2e7, 1.3)]),
+    ],
+    live: new Set(['FAKE']),
+    dataDir,
+  });
   const app = await buildServer(
     { ...config, dataDir },
     {
       market: new MarketService([fake], { emitIntervalMs: 0, quoteIntervalMs: 0 }),
+      catalog,
       watchlist: new WatchlistStore(dataDir),
       logos,
     },
   );
+  app.addHook('onClose', async () => catalog.close());
   return { app, fake, dataDir, logos };
 }
 
@@ -163,6 +182,70 @@ describe('gateway HTTP', () => {
     const res = await get(url);
     expect(res.statusCode).toBe(status);
     expect(res.json()).toMatchObject({ error: code });
+  });
+});
+
+describe('gateway symbol search', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    ({ app } = await start());
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const get = (url: string) =>
+    app.inject({ method: 'GET', url, headers: { host: '127.0.0.1:5180' } });
+
+  it('finds pairs across exchanges, one match per ticker, live exchanges first', async () => {
+    const res = await get('/api/symbols/search?query=xrp');
+    expect(res.statusCode).toBe(200);
+    const body = parseSymbolSearchResponse(res.json());
+    expect(body?.hasMore).toBe(false);
+    expect(body?.matches.map((match) => match.ticker)).toEqual(['XRPUSDT', 'XRPBTC']);
+    expect(body?.matches[0]?.listings).toEqual([
+      { id: 'FAKE:XRPUSDT', exchange: 'FAKE', live: true },
+      { id: 'OTHER:XRPUSDT', exchange: 'OTHER', live: false },
+    ]);
+  });
+
+  it('filters by source and pages through results', async () => {
+    const other = parseSymbolSearchResponse(
+      (await get('/api/symbols/search?query=XRP&exchange=other')).json(),
+    );
+    expect(other?.matches.map((match) => match.listings.map((listing) => listing.id))).toEqual([
+      ['OTHER:XRPUSDT'],
+    ]);
+    const page = parseSymbolSearchResponse(
+      (await get('/api/symbols/search?limit=1&offset=1')).json(),
+    );
+    expect(page?.matches).toHaveLength(1);
+    expect(page?.hasMore).toBe(true);
+  });
+
+  it('refuses malformed parameters', async () => {
+    for (const query of [
+      'limit=0',
+      'limit=101',
+      'offset=-1',
+      'type=futures',
+      'exchange=b%20x',
+      `query=${'x'.repeat(65)}`,
+    ]) {
+      const res = await get(`/api/symbols/search?${query}`);
+      expect(res.statusCode, query).toBe(400);
+      expect(res.json().error).toBe('bad_request');
+    }
+  });
+
+  it('lists the exchanges, saying which have live data', async () => {
+    const res = await get('/api/exchanges');
+    expect(parseExchangeList(res.json())).toEqual({
+      exchanges: [
+        { id: 'FAKE', name: 'Fake Exchange', live: true },
+        { id: 'OTHER', name: 'Other Exchange', live: false },
+      ],
+    });
   });
 });
 

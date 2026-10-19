@@ -1,0 +1,520 @@
+/*
+ * Measured from docs/reference/04-add-symbol.png at 2× (CSS px, from the dialog's top-left):
+ * an 840 × 680 dialog; the title row, a 40 px search field at 68, 28 px chips at 124, the
+ * filters, then 40 px rows from 205 and a 40 px footer. Colors are the theme's: #1F1F1F
+ * surface, #636363 field outline, #3D3D3D row lines, #2E2E2E chips and footer.
+ */
+.backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+}
+
+.dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(840px, calc(100vw - 32px));
+  height: min(680px, calc(100vh - 32px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 24px rgb(0 0 0 / 50%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.titleRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 20px 0;
+}
+
+/* 20 px semibold, its capitals 26.5 px from the top. */
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+/* A 15 px × centered 34 px from the top and 34 px from the right. */
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-gutter);
+}
+
+/* 800 × 40 at y 68, outlined 1 px #636363. */
+.searchField {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 40px;
+  margin: 20px 20px 0;
+  border: 1px solid var(--color-field-border);
+  border-radius: 8px;
+}
+
+.searchIcon {
+  display: flex;
+  flex: none;
+  margin-left: 11px;
+  color: var(--color-text-secondary);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 16px;
+  caret-color: var(--color-text);
+}
+
+.clear {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.clear:hover {
+  color: var(--color-text);
+}
+
+/* Category chips: 28 px, fully rounded, 4 px apart, at y 124. */
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  margin: 16px 20px 0;
+}
+
+.tab {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--color-gutter);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--color-chip);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--color-bright);
+  color: var(--color-bg);
+}
+
+.filters {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  height: 34px;
+  margin: 13px 20px 6px;
+}
+
+.filterWrap {
+  position: relative;
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter:hover,
+.filter[data-open] {
+  background: var(--color-gutter);
+}
+
+.filterChevron {
+  display: flex;
+  justify-content: center;
+  width: 18px;
+  margin-left: 4px;
+  padding-right: 1px;
+}
+
+.filter[data-open] .filterChevron {
+  transform: rotate(180deg);
+}
+
+/* A filter's choices: provisional, in the interval menu's idiom. */
+.menu {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow:
+    0 0 0 1px var(--color-chip),
+    0 4px 16px rgb(0 0 0 / 50%);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--color-gutter);
+}
+
+.menuLabel {
+  flex: 1;
+}
+
+.menuLogo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--color-gutter);
+  color: var(--color-avatar-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Rows from y 205; a 5 px strip on the right holds a 3 px #3D3D3D thumb, 1 px in. */
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.list::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--color-chip) padding-box;
+}
+
+/* 39 px plus a 1 px #3D3D3D line; logo 20 px in, ticker at 52, description at 152. */
+.row {
+  --row-bg: var(--color-popup);
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-chip);
+  background: var(--row-bg);
+  cursor: default;
+}
+
+.row[data-active] {
+  --row-bg: var(--color-gutter);
+}
+
+.row[data-child] {
+  padding-left: 32px;
+}
+
+.logo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--color-gutter);
+  color: var(--color-avatar-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.logo[data-logo] {
+  background: transparent;
+}
+
+.logo img,
+.exchangeLogo img,
+.stackLogo img,
+.menuLogo img {
+  display: none;
+  width: 100%;
+  height: 100%;
+}
+
+.logo[data-logo] img,
+.exchangeLogo[data-logo] img,
+.stackLogo[data-logo] img,
+.menuLogo[data-logo] img {
+  display: block;
+}
+
+.ticker {
+  flex: none;
+  min-width: 99px;
+  padding-right: 8px;
+  font-size: 16px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.row[data-child] .ticker {
+  min-width: 87px;
+}
+
+.description {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An exchange without live data yet. */
+.row[aria-disabled="true"] .ticker,
+.row[aria-disabled="true"] .description {
+  color: var(--color-text-secondary);
+}
+
+.match {
+  background: transparent;
+  color: var(--color-accent);
+}
+
+/* Right-aligned, ending 730 px in: "spot crypto", the exchange, its 18 px logo. */
+.source {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.type {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* The reference leaves 9 px before the logo, 8 between the words. */
+.exchangeLogo,
+.stack {
+  margin-left: 1px;
+}
+
+.exchangeLogo,
+.stackLogo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--color-gutter);
+  color: var(--color-avatar-text);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Logos 10 px apart, each over the next with a ring of the row's color between them. */
+.stack {
+  display: flex;
+  align-items: center;
+}
+
+.stackLogo {
+  position: relative;
+  box-shadow: 0 0 0 1px var(--row-bg);
+}
+
+.stackLogo + .stackLogo {
+  margin-left: -8px;
+}
+
+.more {
+  margin-left: 3px;
+  color: var(--color-text-secondary);
+}
+
+.expand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.expand:hover {
+  background: var(--color-chip);
+}
+
+/* Two 28 px slots 8 px apart, 21 px after the exchange: +, or trash and locate. */
+.actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  width: 64px;
+  margin-left: 21px;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.action:has(> svg[width="17"]) {
+  color: var(--color-text);
+}
+
+.action:hover:not(:disabled) {
+  background: var(--color-chip);
+  color: var(--color-text);
+}
+
+.action:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.empty {
+  margin: 48px 20px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+/* 40 px, #2E2E2E; keycaps 21 px with a 1 px #4A4A4A edge and shadow; 13 px text. */
+.footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 40px;
+  /* The reference's hint sits 6.75 px right of center. */
+  padding-left: 13.5px;
+  background: var(--color-gutter);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 21px;
+  padding: 0 6px;
+  border: 1px solid var(--color-separator);
+  border-radius: 4px;
+  background: var(--color-popup);
+  box-shadow: 0 1px 0 var(--color-chip);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.key:has(> svg) {
+  padding: 0;
+}
+
+.or {
+  margin: 0 9px;
+}
+
+.hint {
+  margin-left: 9px;
+}
+
+.close:focus-visible,
+.clear:focus-visible,
+.tab:focus-visible,
+.filter:focus-visible,
+.menuItem:focus-visible,
+.expand:focus-visible,
+.action:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}

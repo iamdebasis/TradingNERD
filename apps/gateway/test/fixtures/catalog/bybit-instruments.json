@@ -1,0 +1,40 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "spot",
+    "list": [
+      {
+        "symbol": "BTCUSDT",
+        "baseCoin": "BTC",
+        "quoteCoin": "USDT",
+        "status": "Trading"
+      },
+      {
+        "symbol": "XRPUSDT",
+        "baseCoin": "XRP",
+        "quoteCoin": "USDT",
+        "status": "Trading"
+      },
+      {
+        "symbol": "XRPBTC",
+        "baseCoin": "XRP",
+        "quoteCoin": "BTC",
+        "status": "Trading"
+      },
+      {
+        "symbol": "XRPEUR",
+        "baseCoin": "XRP",
+        "quoteCoin": "EUR",
+        "status": "Trading"
+      },
+      {
+        "symbol": "NEWUSDT",
+        "baseCoin": "NEW",
+        "quoteCoin": "USDT",
+        "status": "PreLaunch"
+      }
+    ],
+    "nextPageCursor": ""
+  }
+}

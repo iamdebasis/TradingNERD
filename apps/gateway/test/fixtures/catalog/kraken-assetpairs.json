@@ -1,0 +1,54 @@
+{
+  "error": [],
+  "result": {
+    "XXRPZUSD": {
+      "altname": "XRPUSD",
+      "wsname": "XRP/USD",
+      "base": "XXRP",
+      "quote": "ZUSD",
+      "status": "online"
+    },
+    "XXBTZUSD": {
+      "altname": "XBTUSD",
+      "wsname": "XBT/USD",
+      "base": "XXBT",
+      "quote": "ZUSD",
+      "status": "online"
+    },
+    "XDGUSD": {
+      "altname": "XDGUSD",
+      "wsname": "XDG/USD",
+      "base": "XXDG",
+      "quote": "ZUSD",
+      "status": "online"
+    },
+    "XRPUSDT": {
+      "altname": "XRPUSDT",
+      "wsname": "XRP/USDT",
+      "base": "XXRP",
+      "quote": "USDT",
+      "status": "online"
+    },
+    "USDTZUSD": {
+      "altname": "USDTUSD",
+      "wsname": "USDT/USD",
+      "base": "USDT",
+      "quote": "ZUSD",
+      "status": "online"
+    },
+    "ZEURZUSD": {
+      "altname": "EURUSD",
+      "wsname": "EUR/USD",
+      "base": "ZEUR",
+      "quote": "ZUSD",
+      "status": "online"
+    },
+    "ACAEUR": {
+      "altname": "ACAEUR",
+      "wsname": "ACA/EUR",
+      "base": "ACA",
+      "quote": "ZEUR",
+      "status": "cancel_only"
+    }
+  }
+}

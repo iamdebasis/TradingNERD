@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "BTCUSDT",
+    "lastPrice": "82810.21000000",
+    "quoteVolume": "954692944.52404040"
+  },
+  {
+    "symbol": "XRPBTC",
+    "lastPrice": "0.00001587",
+    "quoteVolume": "10.84216386"
+  },
+  {
+    "symbol": "XRPUSDT",
+    "lastPrice": "1.31400000",
+    "quoteVolume": "96533149.14009000"
+  },
+  {
+    "symbol": "XRPTRY",
+    "lastPrice": "64.97000000",
+    "quoteVolume": "157802274.22100000"
+  },
+  {
+    "symbol": "USDTTRY",
+    "lastPrice": "49.44000000",
+    "quoteVolume": "851059870.01000000"
+  },
+  {
+    "symbol": "EURUSDT",
+    "lastPrice": "1.12380000",
+    "quoteVolume": "5718218.79599000"
+  }
+]

@@ -2,13 +2,17 @@ import {
   API_PREFIX,
   type BarsResponse,
   type ErrorCode,
+  type ExchangeSummary,
   type LogoStatus,
   parseApiError,
   parseBarsResponse,
+  parseExchangeList,
   parseLogoStatus,
   parseSymbolInfo,
+  parseSymbolSearchResponse,
   parseWatchlist,
   type SymbolInfo,
+  type SymbolSearchResponse,
   type Watchlist,
 } from '@tradingnerd/core';
 
@@ -79,6 +83,33 @@ export const marketApi: MarketApi = {
     return bars;
   },
 };
+
+export interface SearchRequest {
+  query: string;
+  /** Only this exchange's pairs. */
+  exchange: string | null;
+  offset: number;
+}
+
+/** Symbol search across every exchange's pairs, ranked by the gateway (docs/SPEC.md §5.4). */
+export const searchApi = {
+  async search(request: SearchRequest, signal?: AbortSignal): Promise<SymbolSearchResponse> {
+    const params = new URLSearchParams({ query: request.query, offset: String(request.offset) });
+    if (request.exchange) params.set('exchange', request.exchange);
+    const body = await getJson(`${API_PREFIX}/symbols/search?${params}`, signal);
+    const results = parseSymbolSearchResponse(body);
+    if (!results) throw new ApiError('internal_error', 'The gateway sent malformed search results');
+    return results;
+  },
+
+  async exchanges(signal?: AbortSignal): Promise<ExchangeSummary[]> {
+    const list = parseExchangeList(await getJson(`${API_PREFIX}/exchanges`, signal));
+    if (!list) throw new ApiError('internal_error', 'The gateway sent a malformed exchange list');
+    return list.exchanges;
+  },
+};
+
+export type SearchApi = typeof searchApi;
 
 /** The watchlist the gateway keeps in data/watchlist.json. */
 export const watchlistApi = {

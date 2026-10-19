@@ -1,6 +1,6 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-19** (M0–M2 committed; M3 built and verified, awaiting review).
+Living document. Last updated **2026-10-19** (M0–M3 committed; M4 built and verified, awaiting review).
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
@@ -64,6 +64,13 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | A coin without a logo gets **204 No Content**; images are PNG, JPEG or WebP from CoinGecko's own hosts only, checked by their first bytes | The row keeps its letter with no console error. SVG can carry script, and the gateway serves these files from its own origin. |
 | 2026-10-19 | Removing the CoinGecko key **keeps the logos already fetched** | They come from CoinGecko's keyless image CDN; only the weekly refresh needs the key. |
 | 2026-10-19 | Performance budgets are tested **on real frames, in their own Playwright project after the rest** | The pinned test clock replaces `requestAnimationFrame` and `performance.now`, and parallel tests skew timing. |
+| 2026-10-19 | Symbol search **lists all five exchanges' pairs now**; only Binance's can be picked until M5 | The plan's M4 goal ("typing XRP lists every exchange"); a pair with no live data yet shows a dimmed + saying so, rather than a broken row. |
+| 2026-10-19 | **One row per ticker** across exchanges, its exchanges' logos stacked, ⌄ for the rest; live exchanges first, then the most traded | Our form of TradingView's grouped rows (its "CRYPTO" rows stack the sources the same way); this is where you pick the price source. |
+| 2026-10-19 | Search runs **in the gateway** over a catalog kept in `data/catalog.json`, refreshed every 12 h, retried every 5 min after a failure | About 5,000 pairs answer in a millisecond over loopback; a restart searches at once, offline too. |
+| 2026-10-19 | Ranking: exact ticker, ticker prefix, base asset, description words, anywhere in the ticker; ties by 24 h volume **in dollars** | Volumes come in each quote asset; each exchange's own dollar pairs convert them (BTC by BTCUSDT, TRY by USDTTRY), so XRPBTC and XRPUSDT compare fairly. |
+| 2026-10-19 | Descriptions use Binance's asset names, filled in from Coinbase's; Kraken's XBT and XDG count as BTC and DOGE | TradingView shows Binance's names ("XRP / TetherUS"); one name table keeps the same pair described the same everywhere. |
+| 2026-10-19 | Binance symbol lookups are answered from the catalog's full pair list (up to 12 h old) | It saves a round trip: measured live, a picked pair shows its price in 0.25–0.4 s instead of 0.95 s. |
+| 2026-10-19 | Coins on other exchanges take their logo from Binance's mapping of the same code, then market cap | One CoinGecko ticker list per live exchange keeps the weekly refresh cheap; per-exchange lists can come with M5. |
 
 ## 4. Research findings
 
@@ -110,6 +117,14 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Binance's candle stream can lag trades by up to 2 s.** We merge trades into the live candle (§6.4).
 - **TradingView's `BINANCE:XRPUSDT` is Binance's own data.** Binance's XRPUSDT daily bar (O 1.3115, H 1.3126) and 0.0001 tick size matched the TradingView screenshot exactly.
 - **Watchlist Chg / Chg%** in TradingView compares against the **previous daily bar's close**, not a rolling 24 h window.
+- **Pair lists** (2026-10-19, public endpoints, each answering in under a second):
+  - Binance: 1,380 trading spot pairs (`exchangeInfo`, 2.5 MB), 24 h figures from `ticker/24hr?type=MINI`.
+  - Bybit: 527 (`instruments-info` and `tickers`, turnover in the quote asset).
+  - OKX: 1,184 (`instruments` and `tickers`; for spot, `volCcy24h` is in the quote asset).
+  - Coinbase: about 515 once the 406 "-USDC" products are dropped. Those are aliases of the "-USD" books. The public Advanced Trade `market/products` also names assets ("US Dollar").
+  - Kraken: 1,365 online (`AssetPairs` and `Ticker`, volume in the base asset). Bitcoin is XBT and Dogecoin XDG; TradingView keeps Kraken's own tickers (XBTUSD).
+  - XRPUSDT is listed on all five.
+- **CoinGecko's exchange ids** (2026-10-19): `binance`, `bybit_spot`, `okex`, `gdax` (Coinbase Exchange), `kraken`; their logos are on its keyless image host.
 
 ### 4.4 CoinGecko (verified 2026-10-18)
 
@@ -170,7 +185,8 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Menu:** "Add custom interval…", foldable sections, ★ favorites, ✕ on added intervals. Taller than the window, it spans it and scrolls under a thin overlay scrollbar, as in the reference.
   - **Interval prompt:** digits or "," on the chart; the line under the input says what Enter will switch to, or "Not applicable".
   - **Choices persist:** favorites, added intervals and folded sections survive reloads. The interval is in the URL and comes back for a page opened without one.
-  - **Not yet:** the pill doesn't open symbol search until M4. The menu's lower half, the hover and current-row colors, the add dialog and the prompt have no reference screenshot yet (§11).
+  - **Symbol search** (M4): the pill opens it, as does a letter typed on the chart (§5.4).
+  - **Not yet:** the menu's lower half, the hover and current-row colors, the add dialog and the prompt have no reference screenshot yet (§11).
 
 ### 5.3 Watchlist
 
@@ -195,7 +211,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Saved** by the gateway in `data/watchlist.json` on every change, so it survives restarts. A list that couldn't load is retried every 3 s and never overwritten meanwhile.
   - **Unavailable symbols:** red ticker, no prices.
   - **Default list:** your coins from the reference, on Binance. Binance doesn't list XCH and has halted SNT, so they're left out. The reference's second ARB, DASH and XCH rows come from other exchanges; those arrive in M5.
-  - **Not yet:** "Add symbol" (+) waits for M4's dialog. "Advanced view" and the list switcher are shown but do nothing (one list in v1). TradingView's row flags aren't built. The row hover color, the menus and dragging have no reference yet (§11).
+  - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) TradingView's row flags aren't built. The row hover color, the menus and dragging have no reference yet (§11).
 
 ### 5.4 Add symbol dialog (also used as Symbol search)
 
@@ -209,6 +225,16 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - Esc closes.
 - **Already-added rows** show remove and locate buttons.
 - **Done when:** typing "XRP" lists every exchange, and a picked row is live within 1 s.
+- **Status:** built in M4 (2026-10-19).
+  - **Opened by:** the watchlist's + ("Add symbol"); the symbol pill, or a letter typed on the chart ("Symbol search", which shows the pick on the chart instead of adding it).
+  - **Catalog:** every trading spot pair on Binance, Bybit, OKX, Coinbase and Kraken (about 5,000), from their public APIs. Typing "XRP" lists all five; measured live, a picked Binance pair shows its price 0.25–0.4 s after the click.
+  - **Only Binance can be picked until M5.** The other exchanges' rows are listed with a dimmed + and say "Live data from … isn't available yet".
+  - **Rows:** one per ticker. A ticker listed on several exchanges shows the first one's name, its logos stacked, and ⌄ to list the others. Exchanges with live data come first, then the most traded. Typed text is highlighted in the ticker and the description.
+  - **Keyboard:** ↑/↓ highlight a row (none is highlighted at first, as in the reference); Enter adds the highlighted row or, without one, the top match, and the dialog stays open. Shift+Enter or Shift+click adds and closes; Escape closes an open filter, then the dialog.
+  - **Filters:** chips All and Crypto (the same in v1, remembered); sources, types (spot) and exchange types (all are centralized).
+  - **Added rows** offer remove (trash) and locate, which shows the row in the watchlist and on the chart. A new symbol goes to the end of the selected row's section (provisional, §11).
+  - **Empty search:** the most traded pairs; scrolling down loads 50 more at a time.
+  - **Logos:** coins as in the watchlist; exchanges from CoinGecko, cached in `data/logos/exchanges/`.
 
 ### 5.5 Logos (CoinGecko) — ships with M3
 
@@ -291,6 +317,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Transport:**
   - REST for search, history and settings; one WebSocket for live data.
   - Messages are typed in `packages/core`, and any breaking change bumps `PROTOCOL_VERSION`.
+- **Symbol search** (M4): `GET /api/symbols/search?query=&exchange=&offset=&limit=` returns `{matches, hasMore}`. Each match is one ticker with its exchanges' `listings`, each saying whether it's `live`. `GET /api/exchanges` lists the exchanges.
 - **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
@@ -342,7 +369,9 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 | `secrets.json` | CoinGecko key (owner-only permissions) |
 | `logos/index.json` | Each exchange's base assets → CoinGecko coins, and image URLs (refreshed weekly) |
 | `logos/coins/` | Cached 50 px coin logos |
-| `tradingnerd.db` | Planned: SQLite candle cache and symbol catalog |
+| `logos/exchanges/` | Cached exchange logos |
+| `catalog.json` | Every exchange's trading pairs with 24 h volume, and asset names (one compact line, about 230 KB) |
+| `tradingnerd.db` | Planned: SQLite candle cache |
 
 - **Owner-only:** the folder is created owner-only (0700).
 - **Atomic writes:** each file is written whole to a temporary file, then renamed into place.
@@ -408,6 +437,8 @@ Measured from `docs/reference/` after converting Display P3 → sRGB. Defined on
 | `--color-up-text` | `#22AB94` | Rising numbers in text: watchlist Chg, digits that went up |
 | `--color-unavailable` | `#F7525F` | Ticker of a symbol the exchange doesn't list |
 | `--color-avatar-text` | `#636363` | Letter on a coin's placeholder avatar |
+| `--color-bright` | `#F2F2F2` | Favorite stars, the chosen category chip |
+| `--color-field-border` | `#636363` | Text field outlines (symbol search) |
 | `--color-accent` | `#2962FF` | Buy button, focus rings, matched search text |
 | `--color-crosshair` | `#9C9C9C` | Crosshair lines (dashed) |
 | `--color-text` · `--color-text-secondary` · `--color-axis-text` | `#DBDBDB` · `#8C8C8C` · `#B8B8B8` | Text |
@@ -457,6 +488,22 @@ Reference viewport is 1634 px wide.
   - Avatar: 18 px round, the logo or an 11 px semibold letter in `#636363` on `#2E2E2E`.
   - Colors: selected row `#132E61`; up `#22AB94`, down `#F23645`; an unlisted symbol's ticker `#F7525F`. The hover color `#1F1F1F` is provisional (§11).
   - Real minus sign; symbols hard-clipped.
+- **Add symbol dialog** (measured from `docs/reference/04-add-symbol.png` at 2×, built in M4; CSS px from the dialog's top-left):
+  - 840 × 680, `#1F1F1F`, 6 px corners, centered over a 50% black backdrop.
+  - Title: 20 px semibold, 20 px in, its capitals 26.5 px down. Close: a 15 px × (1.25 px strokes) centered at (806, 34).
+  - Search field: 800 × 40 at (20, 68), 1 px `#636363` outline, 8 px corners. A 1.5 px magnifier 13 px in; 16 px text from 57.5; a 16 px clear disc ending 13 px from the right.
+  - Chips: 28 px tall, fully rounded, 14 px text, 12 px padding, 4 px apart, at y 124. `#2E2E2E`; the chosen one `#F2F2F2` with dark text.
+  - Filters: 14 px text, capitals at y 176.5, each with an 8 px ⌄; the labels start at 32.5, 153.5 and 259.
+  - Rows from y 205: 39 px plus a 1 px `#3D3D3D` line, ending 5 px short of the right edge, where a 3 px `#3D3D3D` scrollbar thumb sits 1 px in.
+    - A 24 px coin logo 20 px in.
+    - The ticker: 16 px, from 52.
+    - The description: 14 px, from 151.
+    - Matches in `#2962FF`.
+  - Right of each row: "spot crypto" (12 px `#8C8C8C`), 8 px, the exchange (14 px), 9 px, an 18 px logo ending at 730.
+    - Several exchanges stack 18 px logos 10 px apart, each over the next with a ring of the row's color, then a ⌄ (1.5 px strokes) in the logo's place.
+    - Then two 28 px slots 8 px apart, at 751 and 787: + (17 px), or trash and locate (`#8C8C8C`).
+  - Footer: 40 px `#2E2E2E`; 21 px keycaps with a 1 px `#4A4A4A` edge and a 1 px `#3D3D3D` shadow; 13 px text, its content 6.75 px right of center as in the reference.
+  - Checked by pixel comparison: title, close, search field, chips, filters and footer are each within 1.5 gray levels on average of the reference (`tests/e2e/symbol-search.spec.ts`).
 - **Attribution:** the TradingView logo at the bottom left is Lightweight Charts' required attribution, so we keep it.
 
 ### 7.4 Motion and feel
@@ -477,8 +524,8 @@ Reference viewport is 1634 px wide.
 | M0 | Monorepo, tokens, app layout (toolbar, chart, watchlist, gutters, resizable split), gateway skeleton, test harness | Layout lines up with the reference screenshot; `pnpm verify` green |
 | M1 | Chart on Binance: history + scroll-back, live candle merge, legend, countdown, crosshair, gesture handling | XRPUSDT side by side with TradingView: same candles, same gestures. **Committed 2026-10-18** |
 | M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars. **Committed 2026-10-19** |
-| M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass. **Built 2026-10-19; awaiting your review** |
-| M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s |
+| M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass. **Committed 2026-10-19** |
+| M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s. **Built 2026-10-19; awaiting your review** |
 | M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles |
 | M6 | Feel tuning vs TradingView, visual regression, performance profiling, optional Electron | Parity checklist all passes |
 
@@ -500,6 +547,11 @@ Reference viewport is 1634 px wide.
   - Its own Playwright project, run after the rest so parallel tests can't skew the timing.
   - It keeps the page's real clock (`realClock`). The pinned clock replaces `requestAnimationFrame` and `performance.now` with timer-driven, whole-millisecond versions.
   - Run it alone with `pnpm exec playwright test perf --no-deps` (in `apps/web`).
+- **Symbol search** (M4):
+  - Each exchange's pair list is parsed from responses recorded on 2026-10-19 (`apps/gateway/test/fixtures/catalog/`), including the pairs that must be left out.
+  - The catalog's refresh, retry, save and reload run on simulated time.
+  - The browser mock ranks its catalog with the gateway's own search (`searchCatalog`).
+  - The dialog's title, field, chips, filters and footer are compared with `docs/reference/04-add-symbol.png` pixel by pixel.
 - **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, and the legend's position.
 - **Live (opt-in, `pnpm test:live`):** gateway tests and one browser test against real Binance:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -509,6 +561,8 @@ Reference viewport is 1634 px wide.
   - Live 45-second and 10-tick bars.
   - Watchlist quotes against Binance's own previous daily close.
   - CoinGecko rejects a made-up key.
+  - Each exchange's real pair list loads, with XRPUSDT among the pairs. Typing "XRP" lists all five exchanges in one row, Binance first.
+  - In the browser, a picked Binance pair is live within 1 s of the click. The test answers the watchlist save itself, so your list isn't changed.
 - **Feel parity (manual, M1 and M6):** side-by-side checklist against TradingView:
   - zoom anchor, pinch speed, swipe speed, momentum, flick glide
   - price-axis swipe: speed, fixed point, direction
@@ -556,6 +610,12 @@ Reference viewport is 1634 px wide.
 16. A new price colors the digits from the first changed one, green up or red down. The color stays until the price changes again.
 17. ✓ Your real CoinGecko key works: logos show in the watchlist and the legend (your check, 2026-10-19).
 
+**Add symbol and symbol search (M4):**
+
+18. Where TradingView puts a newly added symbol: ours goes to the end of the selected row's section.
+19. Whether TradingView highlights a row before ↑/↓ (the reference shows none, so ours doesn't), and what Enter does without one (ours adds the top match).
+20. TradingView describes Binance's XRPU as "XRP / U"; ours says "XRP / United Stables", Binance's own name for the asset.
+
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
 **Still needing a reference screenshot** (built in TradingView's idiom, not yet measured):
@@ -567,6 +627,8 @@ Reference viewport is 1634 px wide.
 - A watchlist row under the mouse (hover color).
 - The watchlist's ⋯ menu, and a row's right-click menu.
 - A watchlist row being dragged.
+- The Add symbol dialog with a row under the mouse, a filter menu open, and a grouped row's ⌄ opened (TradingView's list of sources).
+- The symbol search opened from the chart (its title and anything that differs from Add symbol).
 
 **Calibrating the gesture constants** (TradingView doesn't publish them):
 

@@ -25,6 +25,10 @@ export interface Theme {
     unavailable: string;
     /** The letter on a symbol's placeholder avatar. */
     avatarText: string;
+    /** The brightest UI color: favorite stars, the chosen category chip. */
+    bright: string;
+    /** Text field outlines (symbol search). */
+    fieldBorder: string;
     /** Buy button, focus rings, matched search text. */
     accent: string;
     crosshair: string;
@@ -64,6 +68,8 @@ export const darkTheme: Theme = {
     upText: '#22AB94',
     unavailable: '#F7525F',
     avatarText: '#636363',
+    bright: '#F2F2F2',
+    fieldBorder: '#636363',
     accent: '#2962FF',
     crosshair: '#9C9C9C',
     labelText: '#FFFFFF',

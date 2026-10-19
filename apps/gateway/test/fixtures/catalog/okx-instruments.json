@@ -1,0 +1,41 @@
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {
+      "instId": "XRP-EUR",
+      "baseCcy": "XRP",
+      "quoteCcy": "EUR",
+      "state": "live",
+      "instType": "SPOT"
+    },
+    {
+      "instId": "USDT-EUR",
+      "baseCcy": "USDT",
+      "quoteCcy": "EUR",
+      "state": "live",
+      "instType": "SPOT"
+    },
+    {
+      "instId": "BTC-USDT",
+      "baseCcy": "BTC",
+      "quoteCcy": "USDT",
+      "state": "live",
+      "instType": "SPOT"
+    },
+    {
+      "instId": "XRP-USDT",
+      "baseCcy": "XRP",
+      "quoteCcy": "USDT",
+      "state": "live",
+      "instType": "SPOT"
+    },
+    {
+      "instId": "OLD-USDT",
+      "baseCcy": "OLD",
+      "quoteCcy": "EUR",
+      "state": "suspend",
+      "instType": "SPOT"
+    }
+  ]
+}

@@ -128,6 +128,57 @@ export function parseExchangeInfo(body: unknown): BinanceSymbol | null {
   return { symbol, status, baseAsset, quoteAsset, tickSize };
 }
 
+const LISTED_CODE = /^[A-Z0-9]{1,30}$/;
+
+/**
+ * Every spot pair that is trading, from GET /api/v3/exchangeInfo, with its tick size (so a
+ * symbol lookup can be answered without asking again); null on an odd shape.
+ */
+export function parseTradingSymbols(body: unknown): BinanceSymbol[] | null {
+  if (!isObject(body) || !Array.isArray(body.symbols)) return null;
+  const listings: BinanceSymbol[] = [];
+  for (const entry of body.symbols) {
+    if (!isObject(entry) || entry.status !== 'TRADING' || entry.isSpotTradingAllowed !== true) {
+      continue;
+    }
+    const { symbol, baseAsset, quoteAsset } = entry;
+    if (
+      typeof symbol !== 'string' ||
+      typeof baseAsset !== 'string' ||
+      typeof quoteAsset !== 'string' ||
+      !LISTED_CODE.test(symbol) ||
+      !LISTED_CODE.test(baseAsset) ||
+      !LISTED_CODE.test(quoteAsset) ||
+      !Array.isArray(entry.filters)
+    ) {
+      continue;
+    }
+    const priceFilter = entry.filters.find(
+      (filter): filter is Json => isObject(filter) && filter.filterType === 'PRICE_FILTER',
+    );
+    const tickSize = decimal(priceFilter?.tickSize);
+    if (tickSize === null || tickSize === 0) continue;
+    listings.push({ symbol, status: 'TRADING', baseAsset, quoteAsset, tickSize });
+  }
+  return listings;
+}
+
+/** Last price and 24 h quote volume per symbol, from GET /api/v3/ticker/24hr?type=MINI. */
+export function parseMiniTickers(
+  body: unknown,
+): Map<string, { last: number; quoteVolume: number }> | null {
+  if (!Array.isArray(body)) return null;
+  const stats = new Map<string, { last: number; quoteVolume: number }>();
+  for (const row of body) {
+    if (!isObject(row) || typeof row.symbol !== 'string') continue;
+    stats.set(row.symbol, {
+      last: decimal(row.lastPrice) ?? 0,
+      quoteVolume: decimal(row.quoteVolume) ?? 0,
+    });
+  }
+  return stats;
+}
+
 /** Binance's public asset list: asset code → display name ("USDT" → "TetherUS"). */
 export function parseAssetNames(body: unknown): Map<string, string> {
   const names = new Map<string, string>();

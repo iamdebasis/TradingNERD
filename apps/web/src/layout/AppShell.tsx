@@ -7,6 +7,8 @@ import { isEditable } from '../lib/dom';
 import { writeJson } from '../lib/storage';
 import { useLogos } from '../logos/LogoContext';
 import { LogoDialog } from '../logos/LogoDialog';
+import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
+import { searchKey } from '../search/searchPrefs';
 import { Toolbar } from '../toolbar/Toolbar';
 import { Watchlist } from '../watchlist/Watchlist';
 import styles from './AppShell.module.css';
@@ -25,6 +27,8 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const [resolution, setResolution] = useState(route.resolution);
   const [symbol, setSymbol] = useState(route.symbol);
   const [prompt, setPrompt] = useState<string | null>(null);
+  /** Symbol search, with what was typed to open it. */
+  const [searching, setSearching] = useState<string | null>(null);
   const logos = useLogos();
   const [logoDialog, setLogoDialog] = useState<'first-launch' | 'menu' | null>(null);
   const firstLaunchShown = useRef(false);
@@ -54,15 +58,18 @@ export function AppShell({ route }: { route: ChartRoute }) {
     window.history.replaceState(null, '', withSymbol(window.location.search, next));
   }, []);
 
-  // Typing a number on the chart opens the interval prompt, as on TradingView.
+  // Typing on the chart opens TradingView's prompts: a number the interval prompt, a letter
+  // symbol search.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditable(event.target)) return;
       if (document.querySelector('[role="dialog"]')) return;
-      const initial = promptKey(event);
-      if (initial === null) return;
+      const digits = promptKey(event);
+      const letter = searchKey(event);
+      if (digits === null && letter === null) return;
       event.preventDefault();
-      setPrompt(initial);
+      if (digits !== null) setPrompt(digits);
+      else setSearching(letter);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -76,7 +83,20 @@ export function AppShell({ route }: { route: ChartRoute }) {
 
   return (
     <div className={styles.app} data-gateway-status={gatewayStatus}>
-      <Toolbar symbol={symbol} interval={resolution} onIntervalChange={changeInterval} />
+      <Toolbar
+        symbol={symbol}
+        interval={resolution}
+        onIntervalChange={changeInterval}
+        onSymbolSearch={() => setSearching('')}
+      />
+      {searching !== null && (
+        <SymbolSearchDialog
+          mode="search"
+          initialQuery={searching}
+          onChoose={changeSymbol}
+          onClose={() => setSearching(null)}
+        />
+      )}
       <div
         ref={workspaceRef}
         className={styles.workspace}

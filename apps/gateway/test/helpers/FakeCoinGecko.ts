@@ -17,6 +17,8 @@ export interface FakeCoinGeckoOptions {
   offline?: boolean;
   /** Override an image's bytes, by coin id. */
   imageBytes?: Record<string, Buffer>;
+  /** Exchanges with logos, most traded first: CoinGecko ids (default: our five). */
+  exchanges?: string[];
 }
 
 /** A fetch that answers like CoinGecko's API and image CDN, recording every request. */
@@ -58,6 +60,16 @@ export function fakeCoinGecko(options: FakeCoinGeckoOptions = {}) {
       return Response.json({
         tickers: slice.map(([base, coinId]) => ({ base, target: 'USDT', coin_id: coinId })),
       });
+    }
+    if (path === '/exchanges') {
+      const ids = options.exchanges ?? ['binance', 'bybit_spot', 'okex', 'gdax', 'kraken'];
+      return Response.json(
+        ids.map((id) => ({
+          id,
+          name: id,
+          image: `https://coin-images.coingecko.com/markets/images/9/small/${id}.png`,
+        })),
+      );
     }
     if (path === '/coins/markets') {
       const ids = url.searchParams.get('ids');

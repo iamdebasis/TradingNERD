@@ -6,7 +6,9 @@ import {
   parseAssetNames,
   parseExchangeInfo,
   parseKlineRow,
+  parseMiniTickers,
   parseTradeRow,
+  parseTradingSymbols,
 } from './parse.ts';
 
 export interface BinanceRestOptions {
@@ -97,6 +99,23 @@ export class BinanceRest {
     const info = parseExchangeInfo(body);
     if (!info) throw upstream('Binance returned unexpected symbol information');
     return info;
+  }
+
+  /** Every spot pair that is trading (about 1,400; weight 20). */
+  async tradingSymbols(): Promise<BinanceSymbol[]> {
+    const body = await this.get(
+      `${this.baseUrl}/api/v3/exchangeInfo?permissions=SPOT&symbolStatus=TRADING&showPermissionSets=false`,
+    );
+    const listings = parseTradingSymbols(body);
+    if (!listings) throw upstream('Binance returned an unexpected symbol list');
+    return listings;
+  }
+
+  /** Last price and 24 h quote volume of every symbol (weight 80). */
+  async miniTickers(): Promise<Map<string, { last: number; quoteVolume: number }>> {
+    const stats = parseMiniTickers(await this.get(`${this.baseUrl}/api/v3/ticker/24hr?type=MINI`));
+    if (!stats) throw upstream('Binance returned unexpected 24 h tickers');
+    return stats;
   }
 
   async assetNames(): Promise<Map<string, string>> {
