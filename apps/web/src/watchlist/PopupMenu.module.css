@@ -1,4 +1,11 @@
-/* Same idiom as the interval menu: #1F1F1F, 6 px corners, 32 px rows. */
+/*
+ * Two shapes. A plain menu (the watchlist's ⋯) is in the interval menu's idiom: #1F1F1F, 6 px
+ * corners, 32 px rows, labels 16 px in. One with icons keeps a column for them, measured from
+ * TradingView's row menu (docs/reference/07-watchlist-row-menu.png) at 2× (CSS px): 252 px wide,
+ * 6 px above and below the rows; labels 42 px in and half a pixel below center, icons 12 px in,
+ * and 12 px shortcuts 20 px from the right; dividers 1 px #4A4A4A across, with 6 px each side;
+ * the row under the mouse #2E2E2E.
+ */
 .menu {
   position: fixed;
   z-index: 150;
@@ -13,6 +20,7 @@
 }
 
 .item {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -25,20 +33,54 @@
   color: inherit;
   font: inherit;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.menu[data-icons] {
+  min-width: 252px;
+}
+
+.menu[data-icons] .item {
+  padding: 1px 20px 0 42px;
+}
+
 .item:hover,
-.item:focus-visible {
+.item:focus-visible,
+.custom:hover {
   background: var(--color-gutter);
   outline: none;
 }
 
-.shortcut {
-  color: var(--color-text-secondary);
+.icon {
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  display: flex;
 }
 
-/* Under a divider like the interval menu's: 1 px #4A4A4A inset 6 px, 6 px above and below. */
+.shortcut {
+  position: relative;
+  top: 0.5px;
+  color: var(--color-avatar-text);
+  font-size: 12px;
+}
+
+.separator {
+  height: 1px;
+  margin: 6px 0;
+  border: 0;
+  background: var(--color-separator);
+}
+
+.custom {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 20px 0 42px;
+}
+
+/* Under a divider: 1 px #4A4A4A inset 6 px, 6 px above and below. */
 .note {
   margin: 6px 6px 0;
   padding: 6px 10px 0;

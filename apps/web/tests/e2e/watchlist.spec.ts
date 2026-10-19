@@ -101,7 +101,7 @@ test('↑/↓ move through the list, switching the chart', async ({ page }) => {
   await expect(row(page, 'LINKUSDT')).toHaveAttribute('aria-current', 'true');
 });
 
-test('Delete and the right-click menu remove rows, and the list is saved', async ({
+test("Delete and a row's remove button remove rows, and the list is saved", async ({
   page,
   market,
 }) => {
@@ -111,8 +111,9 @@ test('Delete and the right-click menu remove rows, and the list is saved', async
   await expect(row(page, 'BATUSDT')).toHaveCount(0);
   await expect(row(page, 'ARBUSDT')).toBeFocused();
 
-  await row(page, 'MANAUSDT').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: /Remove from watchlist/ }).click();
+  // TradingView's row menu has no "Remove" (docs/reference/07-watchlist-row-menu.png).
+  await row(page, 'MANAUSDT').hover();
+  await panel(page).getByRole('button', { name: 'Remove from watchlist' }).click();
   await expect(row(page, 'MANAUSDT')).toHaveCount(0);
 
   await expect
@@ -175,6 +176,361 @@ test('the remove button matches the reference pixel for pixel', async ({ page })
   }
   expect([ours.width, ours.height]).toEqual([44, 44]);
   expect(total / (44 * 44)).toBeLessThan(1.5);
+});
+
+// ---- flags (docs/reference/06-watchlist-flags.png, 07-watchlist-row-menu.png) ----
+
+const palette = (page: Page) => page.getByRole('group', { name: 'Flag color' });
+const rowMenu = (page: Page) => page.getByRole('menu', { name: 'Symbol actions' });
+const away = (page: Page) => page.mouse.move(600, 500);
+
+test("a click on a set flag takes it off; on a row's gray one it flags in the last color", async ({
+  page,
+  market,
+}) => {
+  market.flags = { flags: { 'BINANCE:LINKUSDT': 'blue' }, lastColor: 'green' };
+  await openChart(page);
+  const flagged = panel(page).getByRole('button', { name: 'LINKUSDT: Blue flag' });
+  await expect(flagged).toHaveCSS('color', 'rgb(42, 121, 255)');
+  await flagged.click();
+  await expect.poll(() => market.flagSaves.at(-1)).toEqual({ flags: {}, lastColor: 'green' });
+
+  await row(page, 'BATUSDT').hover();
+  const shadow = panel(page).getByRole('button', { name: 'Flag BATUSDT' });
+  await expect(shadow).toHaveCSS('color', 'rgb(74, 74, 74)'); // the header's gray
+  await shadow.click();
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({ 'BINANCE:BATUSDT': 'green' });
+  await away(page);
+  await expect(panel(page).getByRole('button', { name: 'BATUSDT: Green flag' })).toHaveCSS(
+    'color',
+    'rgb(129, 199, 132)',
+  );
+});
+
+test("resting on a flag shows TradingView's colors: one recolors it and is the next flag's", async ({
+  page,
+  market,
+}) => {
+  market.flags = { flags: { 'BINANCE:LINKUSDT': 'red' }, lastColor: 'red' };
+  await openChart(page);
+  const flag = panel(page).getByRole('button', { name: 'LINKUSDT: Red flag' });
+  await flag.hover();
+  await expect(palette(page)).toBeVisible();
+  // As in the reference: the row highlighted, the flag a darker red, its color the ring.
+  await expect(row(page, 'LINKUSDT')).toHaveCSS('background-color', 'rgb(46, 46, 46)');
+  await expect(flag).toHaveCSS('color', 'rgb(242, 54, 69)');
+  const dots = palette(page).getByRole('button');
+  expect(
+    await dots.evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
+  ).toEqual(['Red (remove the flag)', 'Blue', 'Green', 'Yellow', 'Purple', 'Cyan', 'Pink']);
+  expect(
+    await dots.evaluateAll((items) => items.map((item) => getComputedStyle(item).boxShadow)),
+  ).toEqual(['rgb(255, 82, 82) 0px 0px 0px 2px inset', ...Array(6).fill('none')]);
+
+  await palette(page).getByRole('button', { name: 'Purple' }).click();
+  await expect(palette(page)).toHaveCount(0);
+  await expect
+    .poll(() => market.flagSaves.at(-1))
+    .toEqual({ flags: { 'BINANCE:LINKUSDT': 'purple' }, lastColor: 'purple' });
+
+  // Leaving the flag hides them; its own color takes the flag off.
+  const purple = panel(page).getByRole('button', { name: 'LINKUSDT: Purple flag' });
+  await purple.hover();
+  await expect(palette(page)).toBeVisible();
+  await away(page);
+  await expect(palette(page)).toHaveCount(0);
+  await purple.hover();
+  await palette(page).getByRole('button', { name: 'Purple (remove the flag)' }).click();
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({});
+});
+
+test('the colors point at the flag, centered on its row, their dots as measured', async ({
+  page,
+  market,
+}) => {
+  market.flags = { flags: { 'BINANCE:BATUSDT': 'red' }, lastColor: 'red' };
+  await openChart(page);
+  const bat = row(page, 'BATUSDT');
+  const flag = panel(page).getByRole('button', { name: 'BATUSDT: Red flag' });
+  await flag.hover();
+  await expect(palette(page)).toBeVisible();
+  const [line, button] = [await boxOf(bat), await boxOf(flag)];
+  expect([button.x, button.width, button.height]).toEqual([line.x, 16, 29]);
+  const icon = await boxOf(flag.locator('svg'));
+  expect([icon.x - line.x, icon.y - line.y, icon.width, icon.height]).toEqual([0, 8, 12, 13]);
+  const body = await boxOf(palette(page).locator('div').first());
+  expect([body.x - line.x, body.y - line.y, body.width, body.height]).toEqual([21, -1.5, 176, 32]);
+  const dots = await palette(page)
+    .getByRole('button')
+    .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().x));
+  expect(dots.map((x) => x - body.x)).toEqual([8, 32, 56, 80, 104, 128, 152]);
+});
+
+test('⌥↵ flags and unflags the selected row', async ({ page, market }) => {
+  market.flags = { flags: {}, lastColor: 'cyan' };
+  await openChart(page);
+  await row(page, 'LINKUSDT').click();
+  await page.keyboard.press('Alt+Enter');
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({ 'BINANCE:LINKUSDT': 'cyan' });
+  await page.keyboard.press('Alt+Enter');
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({});
+});
+
+test("a row's right-click menu is TradingView's: flag, colors, unflag all, add section, add symbol", async ({
+  page,
+  market,
+}) => {
+  market.flags = {
+    flags: { 'BINANCE:LINKUSDT': 'red', 'BINANCE:BATUSDT': 'blue' },
+    lastColor: 'red',
+  };
+  await openChart(page);
+  await row(page, 'LINKUSDT').click({ button: 'right' });
+  const menu = rowMenu(page);
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Flag/Unflag LINKUSDT⌥ ↵',
+    'Unflag all symbols',
+    'Add section',
+    'Add symbol',
+  ]);
+  await expect(menu.getByRole('button', { name: 'Red (remove the flag)' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await menu.getByRole('button', { name: 'Green' }).click();
+  await expect(menu).toHaveCount(0);
+  await expect
+    .poll(() => market.flagSaves.at(-1))
+    .toEqual({
+      flags: { 'BINANCE:LINKUSDT': 'green', 'BINANCE:BATUSDT': 'blue' },
+      lastColor: 'green',
+    });
+
+  await row(page, 'LINKUSDT').click({ button: 'right' });
+  await rowMenu(page)
+    .getByRole('menuitem', { name: /^Flag\/Unflag LINKUSDT/ })
+    .click();
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({ 'BINANCE:BATUSDT': 'blue' });
+  await row(page, 'XRPUSDT').click({ button: 'right' });
+  await rowMenu(page).getByRole('menuitem', { name: 'Unflag all symbols' }).click();
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({});
+});
+
+test('Add section starts a section above the row, its name typed at once', async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await row(page, 'MANAUSDT').click({ button: 'right' });
+  await rowMenu(page).getByRole('menuitem', { name: 'Add section' }).click();
+  const name = panel(page).getByRole('textbox', { name: 'Section name' });
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue('Section 1');
+  await page.keyboard.type('Metaverse');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => market.watchlistSaves.at(-1)?.sections.map((s) => [s.title, s.symbols[0]]))
+    .toEqual([
+      ['Crypto', 'BINANCE:XRPUSDT'],
+      ['Metaverse', 'BINANCE:MANAUSDT'],
+    ]);
+
+  // A double-click on a section renames it, leaving it open.
+  await panel(page).getByRole('button', { name: 'Metaverse', exact: true }).dblclick();
+  await expect(name).toBeFocused();
+  await page.keyboard.type('Games');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => market.watchlistSaves.at(-1)?.sections[1])
+    .toMatchObject({ title: 'Games', collapsed: false });
+  await expect(row(page, 'MANAUSDT')).toBeVisible();
+
+  // Escape keeps the name it had.
+  const saves = market.watchlistSaves.length;
+  await panel(page).getByRole('button', { name: 'Games', exact: true }).dblclick();
+  await expect(name).toBeFocused();
+  await page.keyboard.type('Nope');
+  await page.keyboard.press('Escape');
+  await expect(name).toHaveCount(0);
+  await expect(panel(page).getByRole('button', { name: 'Games', exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(market.watchlistSaves.slice(saves).map((save) => save.sections[1]?.title)).not.toContain(
+    'Nope',
+  );
+});
+
+test("Add symbol from a row's menu adds right after that row", async ({ page, market }) => {
+  await openChart(page);
+  await row(page, 'LINKUSDT').click({ button: 'right' });
+  await rowMenu(page).getByRole('menuitem', { name: 'Add symbol' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add symbol' });
+  await dialog.getByRole('combobox').fill('XRPUSDC');
+  await dialog
+    .locator('[role="option"][data-symbol="BINANCE:XRPUSDC"]')
+    .getByRole('button', { name: 'Add to watchlist' })
+    .click();
+  await expect
+    .poll(() => market.watchlistSaves.at(-1)?.sections[0]?.symbols.slice(0, 4))
+    .toEqual(['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT', 'BINANCE:XRPUSDC', 'BINANCE:BATUSDT']);
+});
+
+test("a flag belongs to the symbol: it stays when the row goes and shows when it's back", async ({
+  page,
+  market,
+}) => {
+  market.flags = { flags: { 'BINANCE:BATUSDT': 'pink' }, lastColor: 'red' };
+  await openChart(page);
+  await row(page, 'BATUSDT').click();
+  await page.keyboard.press('Delete');
+  await expect(row(page, 'BATUSDT')).toHaveCount(0);
+  expect(market.flagSaves).toEqual([]);
+
+  await panel(page).getByRole('button', { name: 'Add symbol' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add symbol' });
+  await dialog.getByRole('combobox').fill('BATUSDT');
+  await dialog
+    .locator('[role="option"][data-symbol="BINANCE:BATUSDT"]')
+    .getByRole('button', { name: 'Add to watchlist' })
+    .click({ modifiers: ['Shift'] });
+  await expect(panel(page).getByRole('button', { name: 'BATUSDT: Pink flag' })).toBeVisible();
+});
+
+const FLAGS_REFERENCE = fileURLToPath(
+  new URL('../../../../docs/reference/06-watchlist-flags.png', import.meta.url),
+);
+const MENU_REFERENCE = fileURLToPath(
+  new URL('../../../../docs/reference/07-watchlist-row-menu.png', import.meta.url),
+);
+
+/** Mean green-channel difference over a 2× box, ours at (ox, oy), the reference's at (rx, ry). */
+function grayDiff(
+  ours: PNG,
+  ox: number,
+  oy: number,
+  ref: PNG,
+  rx: number,
+  ry: number,
+  w: number,
+  h: number,
+) {
+  let total = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = ours.data[((oy + y) * ours.width + ox + x) * 4 + 1] ?? 0;
+      const b = ref.data[((ry + y) * ref.width + rx + x) * 4 + 1] ?? 0;
+      total += Math.abs(a - b);
+    }
+  }
+  return total / (w * h);
+}
+
+test('flags and their colors match the reference pixel for pixel', async ({ page, market }) => {
+  market.flags = {
+    flags: { 'BINANCE:LINKUSDT': 'red', 'BINANCE:BATUSDT': 'red' },
+    lastColor: 'red',
+  };
+  await openChart(page);
+  await away(page);
+  const reference = PNG.sync.read(readFileSync(FLAGS_REFERENCE));
+  const aside = await boxOf(panel(page));
+
+  // The column titles' gray flag, from the line under them (the reference's at y 128, 2×).
+  const columns = await boxOf(panel(page).getByText('Symbol', { exact: true }).locator('..'));
+  const lineY = columns.y + columns.height - 1;
+  const header = PNG.sync.read(
+    await page.screenshot({ clip: { x: aside.x, y: lineY - 24, width: 16, height: 24 } }),
+  );
+  expect(grayDiff(header, 0, 0, reference, 12, 128 - 48, 32, 48), 'header flag').toBeLessThan(1.5);
+
+  // A red flag's shape: the same pixels are red (the reference's first row at y 209, 2×).
+  const link = await boxOf(row(page, 'LINKUSDT'));
+  const flag = PNG.sync.read(
+    await page.screenshot({ clip: { x: link.x, y: link.y, width: 16, height: 29 } }),
+  );
+  const red = (png: PNG, x: number, y: number) => {
+    const i = (y * png.width + x) * 4;
+    return (png.data[i] ?? 0) > 150 && (png.data[i + 1] ?? 0) < 130;
+  };
+  let mismatched = 0;
+  for (let y = 0; y < 58; y++) {
+    for (let x = 0; x < 32; x++)
+      if (red(flag, x, y) !== red(reference, 12 + x, 209 + y)) mismatched++;
+  }
+  expect(mismatched, 'red flag pixels that differ').toBeLessThan(8);
+
+  // The colors, resting on a red row's flag under a plain one (the reference's at y 629, 2×):
+  // their gray halo, arrow and bubble between the dots. (Right of it, the reference row's own
+  // price shows, so the halo is compared above.)
+  const bat = await boxOf(row(page, 'BATUSDT'));
+  await panel(page).getByRole('button', { name: 'BATUSDT: Red flag' }).hover();
+  await expect(palette(page)).toBeVisible();
+  const shot = PNG.sync.read(
+    await page.screenshot({ clip: { x: bat.x, y: bat.y - 8, width: 216, height: 44 } }),
+  );
+  const regions: [string, number, number, number, number][] = [
+    ['halo and bubble above the dots', 30, -12, 372, 22],
+    ['arrow', 28, 14, 18, 32],
+    ['between the first dots', 90, 14, 16, 32],
+  ];
+  for (const [name, rx, ry, w, h] of regions) {
+    // Our shot starts 8 px (16 at 2×) above the row.
+    expect(grayDiff(shot, rx, ry + 16, reference, 12 + rx, 629 + ry, w, h), name).toBeLessThan(1.5);
+  }
+});
+
+test("the row menu matches TradingView's pixel for pixel", async ({ page, market }) => {
+  market.flags = { flags: { 'BINANCE:OPUSDT': 'red' }, lastColor: 'red' };
+  await openChart(page);
+  const op = await boxOf(row(page, 'OPUSDT'));
+  await page.mouse.click(op.x + 120, op.y + 15, { button: 'right' });
+  const menu = rowMenu(page);
+  await expect(menu).toBeVisible();
+  const box = await boxOf(menu);
+  expect(box.width).toBe(252);
+  // As in the reference, the pointer rests on the colors' row.
+  const dots = await boxOf(
+    menu.getByRole('button', { name: 'Red (remove the flag)' }).locator('..'),
+  );
+  await page.mouse.move(box.x + 230, dots.y + 8);
+  const ours = PNG.sync.read(await page.screenshot({ clip: box }));
+  const reference = PNG.sync.read(readFileSync(MENU_REFERENCE));
+  // The reference menu's top-left at (246, 60), 2×. Its middle group (lists, compare, notes) isn't
+  // ours, so the last group sits 218 px (2×) higher here. The red ring drawn on it is left out:
+  // it crosses the dividers between x 88 and 357.
+  const regions: [string, number, number, number, number, number][] = [
+    ['top and "Flag/Unflag "', 0, 0, 220, 76, 0],
+    ['its shortcut', 380, 0, 124, 76, 0],
+    ['the colors row, left of the dots', 0, 76, 82, 64, 0],
+    ['the colors row, right of the dots', 454, 76, 50, 64, 0],
+    ...[0, 1, 2, 3, 4, 5].map((gap): [string, number, number, number, number, number] => [
+      `between dots ${gap + 1} and ${gap + 2}`,
+      118 + gap * 56,
+      76,
+      20,
+      64,
+      0,
+    ]),
+    ['"Unflag all symbols"', 0, 140, 504, 66, 0],
+    ['the first line, left of the ring', 0, 206, 84, 20, 0],
+    ['the first line, right of the ring', 360, 206, 144, 20, 0],
+    ['the second line, left of the ring', 0, 424, 84, 16, 218],
+    ['the second line, right of the ring', 360, 424, 144, 16, 218],
+    ['"Add section" and "Add symbol"', 0, 440, 504, 148, 218],
+  ];
+  for (const [name, x, y, w, h, shift] of regions) {
+    expect(grayDiff(ours, x, y - shift, reference, 246 + x, 60 + y, w, h), name).toBeLessThan(1.5);
+  }
+  // The dots' shapes, the first one ringed: the same pixels stand out from the row.
+  const ink = (png: PNG, x: number, y: number) => {
+    const i = (y * png.width + x) * 4;
+    return [0, 1, 2].some((c) => Math.abs((png.data[i + c] ?? 0) - 46) > 40);
+  };
+  let mismatched = 0;
+  for (let y = 80; y < 136; y++) {
+    for (let x = 82; x < 454; x++)
+      if (ink(ours, x, y) !== ink(reference, 246 + x, 60 + y)) mismatched++;
+  }
+  expect(mismatched, 'dot pixels that differ').toBeLessThan(40);
 });
 
 test('rows drag to a new place', async ({ page, market }) => {

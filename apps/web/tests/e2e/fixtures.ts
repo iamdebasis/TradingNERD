@@ -3,10 +3,13 @@ import {
   type Bar,
   barOpenTime,
   type CatalogEntry,
+  DEFAULT_FLAG_STATE,
   DEFAULT_WATCHLIST,
   type ExchangeSummary,
+  type FlagState,
   type LogoStatus,
   PROTOCOL_VERSION,
+  parseFlagState,
   parseResolution,
   parseWatchlist,
   SEARCH_PAGE_SIZE,
@@ -268,6 +271,10 @@ export interface MockMarket {
   watchlist: Watchlist;
   /** Every watchlist the page saved, in order. */
   readonly watchlistSaves: Watchlist[];
+  /** The flags GET /api/flags serves; PUTs replace them. */
+  flags: FlagState;
+  /** Every flag state the page saved, in order. */
+  readonly flagSaves: FlagState[];
   /** While true, watchlist loads fail as if the gateway were unreachable. */
   failWatchlistLoads(failing: boolean): void;
   /** How many watchlist loads were refused. */
@@ -318,6 +325,8 @@ class MockGateway implements MockMarket {
   readonly searchRequests: URLSearchParams[] = [];
   readonly liveExchanges = new Set(MOCK_EXCHANGES.map((exchange) => exchange.id));
   readonly watchlistSaves: Watchlist[] = [];
+  flags: FlagState = structuredClone(DEFAULT_FLAG_STATE);
+  readonly flagSaves: FlagState[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
   private readonly page: Page;
@@ -370,6 +379,17 @@ class MockGateway implements MockMarket {
         },
       }),
     );
+    await this.page.route(/\/api\/flags$/, (route) => {
+      if (route.request().method() === 'PUT') {
+        const saved = parseFlagState(route.request().postDataJSON());
+        if (!saved)
+          return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'x' } });
+        this.flags = saved;
+        this.flagSaves.push(saved);
+        return route.fulfill({ json: saved });
+      }
+      return route.fulfill({ json: this.flags });
+    });
     await this.page.route(/\/api\/watchlist$/, (route) => {
       if (route.request().method() === 'PUT') {
         const saved = parseWatchlist(route.request().postDataJSON());

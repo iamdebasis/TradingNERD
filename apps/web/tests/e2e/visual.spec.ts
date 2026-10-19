@@ -39,6 +39,43 @@ test('a watchlist row under the mouse', async ({ page }) => {
   await expect(watchlist(page)).toHaveScreenshot('watchlist-hover.png', DEVICE);
 });
 
+test('flagged rows, and the flag colors open on one', async ({ page, market }) => {
+  market.flags = {
+    flags: {
+      'BINANCE:XRPUSDT': 'red',
+      'BINANCE:LINKUSDT': 'blue',
+      'BINANCE:ARBUSDT': 'green',
+      'BINANCE:MANAUSDT': 'yellow',
+      'BINANCE:DASHUSDT': 'purple',
+      'BINANCE:OPUSDT': 'cyan',
+      'BINANCE:TIAUSDT': 'pink',
+    },
+    lastColor: 'red',
+  };
+  await openQuiet(page);
+  await watchlist(page).getByRole('button', { name: 'ARBUSDT: Green flag' }).hover();
+  await expect(page.getByRole('group', { name: 'Flag color' })).toBeVisible();
+  const panel = await watchlist(page).boundingBox();
+  if (!panel) throw new Error('no watchlist');
+  await expect(page).toHaveScreenshot('watchlist-flags.png', {
+    ...DEVICE,
+    clip: { x: panel.x, y: panel.y, width: panel.width, height: 400 },
+  });
+});
+
+test("a row's right-click menu", async ({ page, market }) => {
+  market.flags = { flags: { 'BINANCE:LINKUSDT': 'red' }, lastColor: 'red' };
+  await openQuiet(page);
+  await watchlist(page).getByRole('button', { name: 'LINKUSDT', exact: true }).click({
+    button: 'right',
+  });
+  await page.mouse.move(2, 2);
+  await expect(page.getByRole('menu', { name: 'Symbol actions' })).toHaveScreenshot(
+    'watchlist-row-menu.png',
+    DEVICE,
+  );
+});
+
 test("the watchlist's ⋯ menu", async ({ page }) => {
   await openQuiet(page);
   await watchlist(page).getByRole('button', { name: 'More' }).click();

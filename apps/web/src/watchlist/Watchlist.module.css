@@ -68,6 +68,7 @@
 }
 
 .columns {
+  position: relative;
   flex: none;
   height: 28px;
   border-bottom: 1px solid var(--color-chip);
@@ -125,6 +126,23 @@
   cursor: pointer;
 }
 
+/* A section's name while it's typed: in the header's place and style. */
+.sectionName {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  margin-right: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  outline: none;
+}
+
 .row {
   position: relative;
   width: 100%;
@@ -146,8 +164,9 @@
 }
 
 /* Measured from docs/reference/05-watchlist-hover.png: the separators' gray. The chart's
-   symbol keeps its selection color. */
-.rowWrap:hover > .row:not([aria-current="true"]) {
+   symbol keeps its selection color. A row stays so while its flag colors are open. */
+.rowWrap:hover > .row:not([aria-current="true"]),
+.rowWrap[data-flagging] > .row:not([aria-current="true"]) {
   background: var(--color-gutter);
 }
 
@@ -169,8 +188,63 @@
   cursor: default;
 }
 
-.rowWrap:hover > .remove {
+.rowWrap:hover > .remove,
+.rowWrap[data-flagging] > .remove {
   display: flex;
+}
+
+/*
+ * The flag (docs/reference/06-watchlist-flags.png): flush with the panel's left edge, 8 px down,
+ * in its color; on a row under the mouse without one, the header's gray marks where to click.
+ * The button spans the 16 px before the logo.
+ */
+.flag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  width: 16px;
+  height: 29px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-separator);
+  cursor: pointer;
+}
+
+.flag svg {
+  position: absolute;
+  top: 8px;
+  left: 0;
+}
+
+.flag[data-flag],
+.rowWrap:hover > .flag,
+.rowWrap[data-flagging] > .flag {
+  display: block;
+}
+
+.flag[data-flag] {
+  color: var(--flag);
+}
+
+/* Under the pointer, or with its colors showing, a flag turns a shade darker. */
+.flag[data-flag]:hover,
+.flag[data-flag][data-showing] {
+  color: var(--flag-open);
+}
+
+.list[data-dragging] .rowWrap:hover > .flag:not([data-flag]) {
+  display: none;
+}
+
+/* The column titles' flag, in the same gray: 20 px above the line under them. */
+.headerFlag {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  display: flex;
+  color: var(--color-separator);
 }
 
 .list[data-dragging] .rowWrap:hover > .remove {

@@ -13,6 +13,7 @@ import { SecretStore } from './logos/secrets.ts';
 import { MarketService } from './market/MarketService.ts';
 import type { ExchangeAdapter } from './market/types.ts';
 import { buildServer } from './server.ts';
+import { FlagStore } from './storage/FlagStore.ts';
 import { WatchlistStore } from './storage/WatchlistStore.ts';
 
 const config = loadConfig();
@@ -44,6 +45,7 @@ const catalog = new SymbolCatalog({
 });
 
 const watchlist = new WatchlistStore(config.dataDir, warn('data'));
+const flags = new FlagStore(config.dataDir, warn('data'));
 
 const logos = new LogoService({
   client: new CoinGeckoClient(),
@@ -51,7 +53,7 @@ const logos = new LogoService({
   dataDir: config.dataDir,
 });
 
-const app = await buildServer(config, { market, catalog, watchlist, logos });
+const app = await buildServer(config, { market, catalog, watchlist, flags, logos });
 app.addHook('onClose', async () => {
   catalog.close();
   await market.close();

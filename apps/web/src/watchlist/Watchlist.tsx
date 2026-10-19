@@ -11,13 +11,36 @@ import {
 } from 'react';
 import { marketApi } from '../data/api';
 import type { QuoteSource } from '../data/GatewayConnection';
+import { isEditable } from '../lib/dom';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { ChevronDownIcon } from '../toolbar/icons';
-import { AddIcon, AdvancedViewIcon, MoreIcon, SectionCaret } from './icons';
-import { addSymbol, allSymbols, moveSymbol, neighbor, removeSymbol, toggleSection } from './model';
-import { PopupMenu, type PopupMenuItem } from './PopupMenu';
+import { FlagDots } from './FlagDots';
+import { FlagPalette } from './FlagPalette';
+import { flagOf, pickFlag, toggleFlag, unflagAll } from './flagEdits';
+import {
+  AddIcon,
+  AddSectionIcon,
+  AddSymbolIcon,
+  AdvancedViewIcon,
+  FlagIcon,
+  MoreIcon,
+  SectionCaret,
+} from './icons';
+import {
+  addSection,
+  addSymbol,
+  allSymbols,
+  insertSymbol,
+  moveSymbol,
+  neighbor,
+  removeSymbol,
+  renameSection,
+  toggleSection,
+} from './model';
+import { PopupMenu, type PopupMenuEntry, type PopupMenuItem } from './PopupMenu';
 import { QuoteBoard } from './QuoteBoard';
 import { SymbolDirectory } from './SymbolDirectory';
+import { useFlags } from './useFlags';
 import { useWatchlist, type WatchlistApi } from './useWatchlist';
 import styles from './Watchlist.module.css';
 import { WatchlistRow } from './WatchlistRow';
@@ -44,11 +67,19 @@ interface DropTarget {
   edge: 'before' | 'after';
 }
 
+/** The pointer rests this long on a row's flag before its colors show. */
+export const FLAG_HOVER_MS = 300;
+/** And may leave the flag (for the colors, say) this long before they go. */
+export const FLAG_LEAVE_MS = 200;
+/** TradingView's shortcut for "Flag/Unflag", as its menu shows it on a Mac. */
+const FLAG_SHORTCUT = '⌥ ↵';
+
 /**
  * The right-hand watchlist (docs/reference/01-chart-layout.png): sections of symbols with
- * live Last, Chg and Chg%. Click or ↑/↓ shows a symbol on the chart; Delete or the right-click
- * menu removes it; rows drag to a new place; sections fold. Every change is saved by the
- * gateway.
+ * live Last, Chg and Chg%. Click or ↑/↓ shows a symbol on the chart; Delete or a row's remove
+ * button removes it; rows drag to a new place; sections fold. Symbols carry TradingView's flags
+ * (docs/reference/06-watchlist-flags.png, 07-watchlist-row-menu.png). Every change is saved by
+ * the gateway: the list in data/watchlist.json, the flags in data/flags.json.
  */
 export function Watchlist({
   symbol,
@@ -59,6 +90,7 @@ export function Watchlist({
   moreNote,
 }: WatchlistProps) {
   const { list, edit } = useWatchlist(api);
+  const { flags, editFlags } = useFlags();
   const directory = useMemo(() => new SymbolDirectory(marketApi), []);
   const board = useMemo(() => new QuoteBoard(quotes), [quotes]);
   const [selected, setSelected] = useState<SymbolId | null>(symbol);
@@ -66,9 +98,18 @@ export function Watchlist({
   const [dragging, setDragging] = useState<SymbolId | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
   const [adding, setAdding] = useState(false);
+  /** Where "Add symbol" from a row's menu puts the next symbol: after this one. */
+  const [addAfter, setAddAfter] = useState<SymbolId | null>(null);
+  /** The section whose name is being typed. */
+  const [naming, setNaming] = useState<string | null>(null);
+  /** The row whose flag colors show, and its flag button. */
+  const [bubble, setBubble] = useState<{ symbol: SymbolId; button: HTMLElement } | null>(null);
+  const bubbleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const added = useMemo(() => new Set(list ? allSymbols(list) : []), [list]);
   const rows = useRef(new Map<SymbolId, HTMLButtonElement>());
   const more = useRef<HTMLButtonElement>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   useEffect(() => () => board.dispose(), [board]);
   useEffect(() => {
@@ -76,6 +117,22 @@ export function Watchlist({
   }, [board, list]);
   // The chart's symbol is the selected row.
   useEffect(() => setSelected(symbol), [symbol]);
+  useEffect(() => () => clearTimeout(bubbleTimer.current), []);
+
+  // ⌥↵ (Alt+Enter), as in TradingView: flags or unflags the selected symbol.
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Enter' || !event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.defaultPrevented || isEditable(event.target)) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      const target = selectedRef.current;
+      if (!target) return;
+      event.preventDefault();
+      editFlags((current) => toggleFlag(current, target));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editFlags]);
 
   const choose = useCallback(
     (next: SymbolId, focus = true) => {
@@ -113,6 +170,39 @@ export function Watchlist({
       event.preventDefault();
       remove(selected);
     }
+  };
+
+  // ---- flags: a click toggles; resting on a flag shows its colors ----
+  const showColors = (target: SymbolId, button: HTMLElement | null) => {
+    clearTimeout(bubbleTimer.current);
+    if (button) {
+      bubbleTimer.current = setTimeout(() => setBubble({ symbol: target, button }), FLAG_HOVER_MS);
+    } else {
+      bubbleTimer.current = setTimeout(() => setBubble(null), FLAG_LEAVE_MS);
+    }
+  };
+  const keepColors = (over: boolean) => {
+    clearTimeout(bubbleTimer.current);
+    if (!over) bubbleTimer.current = setTimeout(() => setBubble(null), FLAG_LEAVE_MS);
+  };
+  const closeColors = useCallback(() => {
+    clearTimeout(bubbleTimer.current);
+    setBubble(null);
+  }, []);
+
+  // ---- sections ----
+  const startSection = (above: SymbolId) => {
+    let created = '';
+    edit((current) => {
+      const next = addSection(current, above);
+      created = next.id;
+      return next.list;
+    });
+    if (created) setNaming(created);
+  };
+  const finishNaming = (sectionId: string, title: string) => {
+    edit((current) => renameSection(current, sectionId, title));
+    setNaming(null);
   };
 
   // ---- drag and drop ----
@@ -154,20 +244,48 @@ export function Watchlist({
 
   const openRowMenu = (event: MouseEvent, target: SymbolId) => {
     event.preventDefault();
+    closeColors();
     setSelected(target);
     setMenu({ x: event.clientX, y: event.clientY, symbol: target });
   };
 
-  const menuItems: PopupMenuItem[] =
-    menu?.symbol != null
-      ? [
-          {
-            label: 'Remove from watchlist',
-            shortcut: 'Del',
-            onSelect: () => remove(menu.symbol as SymbolId),
-          },
-        ]
-      : [...moreItems];
+  /**
+   * TradingView's row menu (docs/reference/07-watchlist-row-menu.png), without its items for
+   * other lists, compare and notes.
+   */
+  const rowMenu = (target: SymbolId): PopupMenuEntry[] => [
+    {
+      label: `Flag/Unflag ${target.slice(target.indexOf(':') + 1)}`,
+      shortcut: FLAG_SHORTCUT,
+      onSelect: () => editFlags((current) => toggleFlag(current, target)),
+    },
+    {
+      key: 'flag-colors',
+      custom: (
+        <FlagDots
+          current={flagOf(flags, target)}
+          gap={12}
+          onPick={(color) => {
+            editFlags((current) => pickFlag(current, target, color));
+            setMenu(null);
+          }}
+        />
+      ),
+    },
+    { label: 'Unflag all symbols', onSelect: () => editFlags(unflagAll) },
+    'separator',
+    { label: 'Add section', icon: <AddSectionIcon />, onSelect: () => startSection(target) },
+    {
+      label: 'Add symbol',
+      icon: <AddSymbolIcon />,
+      onSelect: () => {
+        setAddAfter(target);
+        setAdding(true);
+      },
+    },
+  ];
+
+  const menuItems: PopupMenuEntry[] = menu?.symbol != null ? rowMenu(menu.symbol) : [...moreItems];
 
   return (
     <div className={styles.watchlist}>
@@ -183,7 +301,10 @@ export function Watchlist({
             className={styles.action}
             aria-label="Add symbol"
             disabled={!list}
-            onClick={() => setAdding(true)}
+            onClick={() => {
+              setAddAfter(null);
+              setAdding(true);
+            }}
           >
             <AddIcon />
           </button>
@@ -207,6 +328,9 @@ export function Watchlist({
         </span>
       </div>
       <div className={styles.columns} aria-hidden>
+        <span className={styles.headerFlag}>
+          <FlagIcon />
+        </span>
         <span>Symbol</span>
         <span className={styles.columnLast}>Last</span>
         <span className={styles.columnChange}>Chg</span>
@@ -217,24 +341,51 @@ export function Watchlist({
         className={styles.list}
         data-dragging={dragging ? '' : undefined}
         onKeyDown={onKeyDown}
+        onScroll={closeColors}
         onDragOver={(event) => dragging && event.preventDefault()}
         onDrop={onDrop}
       >
         {list?.sections.map((section) => (
           <section key={section.id} aria-label={section.title} className={styles.section}>
-            <button
-              type="button"
-              className={styles.sectionHeader}
-              aria-expanded={!section.collapsed}
-              data-drop={
-                drop?.sectionId === section.id && drop.symbol === null ? 'before' : undefined
-              }
-              onClick={() => edit((current: WatchlistDoc) => toggleSection(current, section.id))}
-              onDragOver={(event) => onHeaderDragOver(event, section.id)}
-            >
-              <SectionCaret open={!section.collapsed} />
-              <span>{section.title}</span>
-            </button>
+            {naming === section.id ? (
+              <div className={styles.sectionHeader}>
+                <SectionCaret open={!section.collapsed} />
+                <input
+                  className={styles.sectionName}
+                  aria-label="Section name"
+                  defaultValue={section.title}
+                  maxLength={64}
+                  // biome-ignore lint/a11y/noAutofocus: a new section's name is typed at once
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') finishNaming(section.id, event.currentTarget.value);
+                    else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      setNaming(null);
+                    }
+                  }}
+                  onBlur={(event) => finishNaming(section.id, event.currentTarget.value)}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={styles.sectionHeader}
+                aria-expanded={!section.collapsed}
+                data-drop={
+                  drop?.sectionId === section.id && drop.symbol === null ? 'before' : undefined
+                }
+                onClick={() => edit((current: WatchlistDoc) => toggleSection(current, section.id))}
+                // As in TradingView, a double-click renames it. Its two clicks folded and
+                // unfolded it, so it stays as it was.
+                onDoubleClick={() => setNaming(section.id)}
+                onDragOver={(event) => onHeaderDragOver(event, section.id)}
+              >
+                <SectionCaret open={!section.collapsed} />
+                <span>{section.title}</span>
+              </button>
+            )}
             {!section.collapsed &&
               section.symbols.map((item) => (
                 <WatchlistRow
@@ -244,6 +395,10 @@ export function Watchlist({
                   directory={directory}
                   board={board}
                   dropEdge={drop?.symbol === item && item !== dragging ? drop.edge : null}
+                  flag={flagOf(flags, item)}
+                  flagging={bubble?.symbol === item}
+                  onFlagClick={(target) => editFlags((current) => toggleFlag(current, target))}
+                  onFlagHover={showColors}
                   buttonRef={(element) => {
                     if (element) rows.current.set(item, element);
                     else rows.current.delete(item);
@@ -260,17 +415,41 @@ export function Watchlist({
           </section>
         ))}
       </div>
+      {bubble && flags && (
+        <FlagPalette
+          anchor={bubble.button}
+          current={flagOf(flags, bubble.symbol)}
+          onPick={(color) => {
+            editFlags((current) => pickFlag(current, bubble.symbol, color));
+            closeColors();
+          }}
+          onHover={keepColors}
+          onClose={closeColors}
+        />
+      )}
       {adding && (
         <SymbolSearchDialog
           mode="add"
           added={added}
-          onAdd={(symbol) => edit((current) => addSymbol(current, symbol, selected))}
-          onRemove={(symbol) => remove(symbol, false)}
-          onLocate={(symbol) => {
-            setAdding(false);
-            choose(symbol);
+          onAdd={(next) => {
+            if (addAfter) {
+              const after = addAfter;
+              edit((current) => insertSymbol(current, next, after));
+              setAddAfter(next); // the next one goes after this one
+            } else {
+              edit((current) => addSymbol(current, next, selected));
+            }
           }}
-          onClose={() => setAdding(false)}
+          onRemove={(target) => remove(target, false)}
+          onLocate={(target) => {
+            setAdding(false);
+            setAddAfter(null);
+            choose(target);
+          }}
+          onClose={() => {
+            setAdding(false);
+            setAddAfter(null);
+          }}
         />
       )}
       {menu && (

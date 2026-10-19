@@ -3,10 +3,12 @@ import {
   type BarsResponse,
   type ErrorCode,
   type ExchangeSummary,
+  type FlagState,
   type LogoStatus,
   parseApiError,
   parseBarsResponse,
   parseExchangeList,
+  parseFlagState,
   parseLogoStatus,
   parseSymbolInfo,
   parseSymbolSearchResponse,
@@ -128,6 +130,27 @@ export const watchlistApi = {
       }),
     );
     if (!saved) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
+    return saved;
+  },
+};
+
+/** Flagged symbols, kept by the gateway in data/flags.json. */
+export const flagsApi = {
+  async load(signal?: AbortSignal): Promise<FlagState> {
+    const state = parseFlagState(await getJson(`${API_PREFIX}/flags`, signal));
+    if (!state) throw new ApiError('internal_error', 'The gateway sent malformed flags');
+    return state;
+  },
+
+  async save(state: FlagState): Promise<FlagState> {
+    const saved = parseFlagState(
+      await getJson(`${API_PREFIX}/flags`, undefined, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(state),
+      }),
+    );
+    if (!saved) throw new ApiError('internal_error', 'The gateway sent malformed flags');
     return saved;
   },
 };

@@ -65,3 +65,37 @@ export function RemoveIcon() {
     </svg>
   );
 }
+
+/**
+ * TradingView's row flag (docs/reference/06-watchlist-flags.png): a 12 × 13 pennant with a V
+ * cut into its right side, in currentColor. Traced at 2× to match the reference pixel for pixel.
+ */
+export function FlagIcon() {
+  return (
+    <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor" aria-hidden>
+      <path d="M0 0h11.75L8.5 6.5 12 13H0z" />
+    </svg>
+  );
+}
+
+/**
+ * "Add section" in a row's menu: a dashed line over a slot, traced at 2× from
+ * docs/reference/07-watchlist-row-menu.png (28 px, as TradingView's menu icons).
+ */
+export function AddSectionIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" aria-hidden>
+      <path d="M4 9.5h5M11 9.5h6M19 9.5h5" />
+      <rect x="5.5" y="14.5" width="17" height="5" rx="1.25" />
+    </svg>
+  );
+}
+
+/** "Add symbol" in a row's menu: a 15 px plus, traced as AddSectionIcon. */
+export function AddSymbolIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" aria-hidden>
+      <path d="M14.5 6v15M7 13.5h15" />
+    </svg>
+  );
+}

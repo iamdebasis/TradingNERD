@@ -1,0 +1,31 @@
+/*
+ * Measured from docs/reference/06-watchlist-flags.png at 2× (CSS px): a #575757 bubble 32 px
+ * tall with 4 px corners and 8 px padding, a 5.5 × 11 arrow on its left, and a soft halo; dots
+ * of 16 px, 8 px apart. Positioned (inline) at the arrow's tip, centered on the row.
+ */
+.palette {
+  position: fixed;
+  z-index: 150;
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  align-items: center;
+  transform: translateY(-50%);
+  filter: drop-shadow(0 0 3px rgb(87 87 87 / 80%));
+}
+
+.arrow {
+  width: 5.5px;
+  height: 11px;
+  background: #575757;
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+}
+
+.body {
+  display: flex;
+  padding: 8px;
+  border-radius: 4px;
+  background: #575757;
+}

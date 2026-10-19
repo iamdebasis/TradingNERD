@@ -1,7 +1,8 @@
-import type { SymbolId } from '@tradingnerd/core';
+import type { FlagColor, SymbolId } from '@tradingnerd/core';
 import { type DragEvent, type MouseEvent, type Ref, useEffect, useRef, useState } from 'react';
 import { CoinLogo } from '../logos/CoinLogo';
-import { RemoveIcon } from './icons';
+import { FLAG_NAMES, flagStyle } from './flags';
+import { FlagIcon, RemoveIcon } from './icons';
 import { directionOf, flashSplit, formatChange, formatChangePercent, formatLast } from './numbers';
 import type { QuoteBoard } from './QuoteBoard';
 import type { SymbolDirectory, SymbolLookup } from './SymbolDirectory';
@@ -14,6 +15,13 @@ export interface WatchlistRowProps {
   board: QuoteBoard;
   /** Where a dragged row would land: before or after this one. */
   dropEdge: 'before' | 'after' | null;
+  flag: FlagColor | null;
+  /** Its flag colors are showing. */
+  flagging: boolean;
+  /** Its flag was clicked: off if set, else on in the last color picked. */
+  onFlagClick(symbol: SymbolId): void;
+  /** The pointer rests on its flag (the button), or has left it (null). */
+  onFlagHover(symbol: SymbolId, flagButton: HTMLElement | null): void;
   buttonRef?: Ref<HTMLButtonElement>;
   onChoose(symbol: SymbolId): void;
   onRemove(symbol: SymbolId): void;
@@ -26,8 +34,8 @@ export interface WatchlistRowProps {
 
 /**
  * One watchlist row: avatar, symbol, Last, Chg, Chg%. The numbers are painted straight into
- * the DOM by the QuoteBoard, with the digits that changed in the tick's color. Under the
- * mouse, a remove button covers the row's right end, as in TradingView.
+ * the DOM by the QuoteBoard, with the digits that changed in the tick's color. Its flag sits at
+ * the left edge, and under the mouse a remove button covers its right end, as in TradingView.
  */
 export function WatchlistRow(props: WatchlistRowProps) {
   const { symbol, directory, board } = props;
@@ -97,7 +105,7 @@ export function WatchlistRow(props: WatchlistRowProps) {
   const letter = (lookup?.state === 'ready' ? lookup.info.base : ticker).charAt(0);
 
   return (
-    <div className={styles.rowWrap}>
+    <div className={styles.rowWrap} data-flagging={props.flagging || undefined}>
       <button
         ref={props.buttonRef}
         type="button"
@@ -135,6 +143,20 @@ export function WatchlistRow(props: WatchlistRowProps) {
         </span>
         <span ref={change} className={`${styles.number} ${styles.change}`} />
         <span ref={percent} className={`${styles.number} ${styles.change}`} />
+      </button>
+      <button
+        type="button"
+        className={styles.flag}
+        aria-label={props.flag ? `${ticker}: ${FLAG_NAMES[props.flag]} flag` : `Flag ${ticker}`}
+        tabIndex={-1}
+        data-flag={props.flag ?? undefined}
+        data-showing={props.flagging || undefined}
+        style={props.flag ? flagStyle(props.flag) : undefined}
+        onClick={() => props.onFlagClick(symbol)}
+        onPointerEnter={(event) => props.onFlagHover(symbol, event.currentTarget)}
+        onPointerLeave={() => props.onFlagHover(symbol, null)}
+      >
+        <FlagIcon />
       </button>
       {/* Out of the tab order: Delete removes the focused row. */}
       <button

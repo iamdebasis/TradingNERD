@@ -1,4 +1,5 @@
 export * from './config.ts';
+export * from './flags.ts';
 export * from './intervals.ts';
 export * from './logos.ts';
 export * from './market.ts';

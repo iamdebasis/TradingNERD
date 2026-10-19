@@ -1,11 +1,14 @@
 import type { Watchlist } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
 import {
+  addSection,
   addSymbol,
   allSymbols,
+  insertSymbol,
   moveSymbol,
   neighbor,
   removeSymbol,
+  renameSection,
   toggleSection,
   visibleSymbols,
 } from './model';
@@ -16,6 +19,40 @@ const LIST: Watchlist = {
     { id: 'b', title: 'More', collapsed: false, symbols: ['X:D', 'X:E'] },
   ],
 };
+
+describe('adding at a row', () => {
+  it("puts a symbol right after the row, as a row menu's Add symbol", () => {
+    const list = insertSymbol(LIST, 'X:F', 'X:B');
+    expect(list.sections[0]?.symbols).toEqual(['X:A', 'X:B', 'X:F', 'X:C']);
+    expect(insertSymbol(list, 'X:F', 'X:A')).toBe(list); // already listed
+    expect(insertSymbol(LIST, 'X:F', 'X:NOPE').sections[1]?.symbols).toEqual(['X:D', 'X:E', 'X:F']);
+  });
+
+  it('starts a section above a row, taking it and the rows after it', () => {
+    const { list, id } = addSection(LIST, 'X:B');
+    expect(list.sections.map((s) => [s.id, s.title, s.symbols])).toEqual([
+      ['a', 'Crypto', ['X:A']],
+      ['section-1', 'Section 1', ['X:B', 'X:C']],
+      ['b', 'More', ['X:D', 'X:E']],
+    ]);
+    expect(id).toBe('section-1');
+    const again = addSection(list, 'X:E');
+    expect(again.id).toBe('section-2');
+    expect(again.list.sections.map((s) => s.symbols)).toEqual([
+      ['X:A'],
+      ['X:B', 'X:C'],
+      ['X:D'],
+      ['X:E'],
+    ]);
+  });
+
+  it('renames a section, keeping the old name for an empty one', () => {
+    const renamed = renameSection(LIST, 'b', '  Alts  ');
+    expect(renamed.sections[1]?.title).toBe('Alts');
+    expect(renameSection(renamed, 'b', '   ')).toBe(renamed);
+    expect(renameSection(renamed, 'nope', 'X')).toBe(renamed);
+  });
+});
 
 describe('watchlist edits', () => {
   it('removes a symbol, and leaves the list alone for one it lacks', () => {

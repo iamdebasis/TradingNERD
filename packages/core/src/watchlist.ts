@@ -62,7 +62,7 @@ export const DEFAULT_WATCHLIST: Watchlist = {
 /**
  * A valid watchlist from anything (e.g. a PUT body or a stored file), normalized: canonical
  * symbol ids, each symbol at most once (its first place wins), trimmed titles, unique ids.
- * Null if it isn't a watchlist at all or exceeds the limits.
+ * Null if it isn't a watchlist at all or exceeds the limits. (Flags are kept apart: flags.ts.)
  */
 export function parseWatchlist(value: unknown): Watchlist | null {
   if (typeof value !== 'object' || value === null) return null;

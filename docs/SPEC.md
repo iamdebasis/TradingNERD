@@ -93,6 +93,12 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | The Gestures popup **leaves the chart in use** and lights up the setting each gesture uses | A change can be tried on the chart at once, and it's clear which slider does what. So pressing on the chart doesn't close it; Escape, ✕ or the button do. |
 | 2026-10-19 | Only **changed** gesture settings are kept (`tn.gestures` in this browser) | Settings left at the defaults follow any better defaults later. A dot on the button shows when they differ. |
 | 2026-10-19 | The gesture defaults are **final**: 10% per notch for zoom, pinch and the price scale, scroll 0.80×, the middle of the price range holding | Your call: keep the values as they are. Anyone can still set their own in the Gestures popup. |
+| 2026-10-19 | **Row flags** in TradingView's seven colors | From `docs/reference/06-watchlist-flags.png`. |
+| 2026-10-19 | A flag **belongs to the symbol**, kept by the gateway in `data/flags.json` with the last color used | As in TradingView (§12): a symbol keeps its flag when its row is removed, and shows it again when it's added back. Flags saved earlier in `watchlist.json` (your red LINKUSDT) carry over once. |
+| 2026-10-19 | A click on a set flag **takes it off**; a click on a row's gray flag flags it in the **last color used**; resting on a flag shows the colors | Your answer for the first; TradingView's rule for the color (§12); the colors from reference 06. |
+| 2026-10-19 | **⌥↵** (Alt+Enter) flags or unflags the selected row | TradingView's shortcut (§12). |
+| 2026-10-19 | A row's **right-click menu is TradingView's** (`docs/reference/07-watchlist-row-menu.png`), without its lists, compare and note items. "Remove from watchlist" leaves the menu | Your screenshot and choice. The row's remove button, Delete and Backspace still remove rows. |
+| 2026-10-19 | **Add section** starts a section above the row, its name ready to type; a double-click renames a section. **Add symbol** from the menu adds right after the row | TradingView's help center and blog, and a TradingView community guide for renaming (§12). |
 
 ## 4. Research findings
 
@@ -240,13 +246,26 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Rows:** logo (or letter), ticker, Last, then Chg and Chg% against the previous daily close. The digits from the first changed one take the tick's color, green up or red down, and keep it until the price changes again.
   - **Chg decimals:** at most 5, cut rather than rounded, as the reference's 6-decimal coins show. Chg% rounds to 2.
   - **Live:** every row's quotes come from the gateway and are painted in one animation frame. With all 50 rows changing in the same frame, a frame costs about 1 ms (budget 2 ms).
-  - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace, the row's remove button or right-click → "Remove from watchlist" removes a row. Rows drag to a new place, also into another section. Sections fold.
+  - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace or the row's remove button removes a row (TradingView's row menu has no Remove). Rows drag to a new place, also into another section. Sections fold.
   - **Under the mouse** (M6, measured from `docs/reference/05-watchlist-hover.png`): the row turns `#2E2E2E`, and a 22 px remove button (a bin on `#4A4A4A`) covers its right end, 7 px from the edge. The chart's own row stays blue.
   - **Thousands** are grouped with commas in Last, Chg and Chg% ("1,147.903").
+  - **Flags** (TradingView's behavior from its blog and help center, §12; measured from `docs/reference/06-watchlist-flags.png`):
+    - A 12 × 13 pennant with a V cut into its right side, flush with the panel's left edge, 8 px down the row, in red `#FF5252`, blue `#2A79FF`, green `#81C784`, yellow `#FBC02D`, purple `#BA68C8`, cyan `#00E5FF` or pink `#F48FB1`. The column titles carry the same flag in gray `#4A4A4A`.
+    - A flag belongs to the symbol, not the row. The gateway keeps the flags and the last color used in `data/flags.json`, so a symbol keeps its flag when its row is removed or moved, and shows it again when added back.
+    - Clicking a flag takes it off. A row under the mouse without a flag shows the header's gray flag; clicking it flags the row in the last color used (red at first).
+    - Resting on a flag for 300 ms shows the colors: a `#575757` bubble (176 × 32, 4 px corners, a soft halo) whose 5.5 × 11 arrow points at the flag, centered on the row, with 16 px dots 8 px apart in that order. The flag's own color is a ring (2 px, a 2 px gap, an 8 px dot). Picking another recolors the flag and becomes the last color; picking the ring takes the flag off. Leaving the flag and the bubble hides them after 200 ms, as do Escape and a press elsewhere.
+    - While the colors show, the row looks as under the mouse, and its flag darkens (red to `#F23645`, the others by 12%).
+    - **⌥↵** (Alt+Enter) flags or unflags the selected row, in the last color.
+  - **A row's right-click menu** (measured from `docs/reference/07-watchlist-row-menu.png`; every area compared differs from it by at most 0.11 gray levels on average):
+    - "Flag/Unflag SYMBOL ⌥ ↵", the seven colors (the symbol's own ringed; a pick works as in the bubble), "Unflag all symbols", a divider, "Add section" and "Add symbol".
+    - 252 px wide (wider for a long symbol), rows of 32, labels 42 px in, icons 12 px in, the shortcut 12 px and 20 px from the right; the row under the mouse `#2E2E2E`.
+    - **Add section** puts a new section above the row, holding it and the rows after it, named "Section N" with the name selected to type over: Enter or a click elsewhere keeps the name, Escape keeps "Section N". A double-click on a section's name renames it.
+    - **Add symbol** opens the Add symbol dialog, and what's added goes right after that row, each next one after the last.
+    - Left out, your call: the menu's lists, compare and note items; each color's list (the ⌄ switcher); what the header's flag does; flags in symbol search.
   - **Saved** by the gateway in `data/watchlist.json` on every change, so it survives restarts. A list that couldn't load is retried every 3 s and never overwritten meanwhile.
   - **Unavailable symbols:** red ticker, no prices.
   - **Default list:** your coins from the reference, on Binance. Binance doesn't list XCH and has halted SNT, so they're left out. The reference's second ARB, DASH and XCH rows come from other exchanges; those arrive in M5.
-  - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) TradingView's row flags (the colored markers at a row's left edge in the hover reference) aren't built. The menus and dragging have no reference yet (§11).
+  - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) The ⋯ menu and dragging have no reference yet (§11).
 
 ### 5.4 Add symbol dialog (also used as Symbol search)
 
@@ -439,7 +458,8 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 
 | Path | Contents |
 |---|---|
-| `watchlist.json` | The watchlist |
+| `watchlist.json` | The watchlist: its sections and their symbols |
+| `flags.json` | Flagged symbols and their colors, and the last color used |
 | `settings.json` | Settings the gateway keeps; so far, whether the logo prompt was skipped |
 | `secrets.json` | CoinGecko key (owner-only permissions) |
 | `logos/index.json` | Each exchange's base assets → CoinGecko coins, and image URLs (refreshed weekly) |
@@ -562,7 +582,7 @@ Reference viewport is 1634 px wide.
   - Section header: 30 px, pinned while its rows scroll. Caret 20 px in, then 11 px uppercase `#8C8C8C`.
   - Rows: 30 px with 1 px `#2E2E2E` separators; the first starts 111 px below the panel's top. Numbers are 14 px with tabular digits, right edges at 169.5, 242.5 and 307 px in the default 315 px panel.
   - Avatar: 18 px round, the logo or an 11 px semibold letter in `#636363` on `#2E2E2E`.
-  - Colors: selected row `#132E61`; up `#22AB94`, down `#F23645`; an unlisted symbol's ticker `#F7525F`. The hover color `#1F1F1F` is provisional (§11).
+  - Colors: selected row `#132E61`; up `#22AB94`, down `#F23645`; an unlisted symbol's ticker `#F7525F`. A row under the mouse `#2E2E2E` (M6, from `docs/reference/05-watchlist-hover.png`).
   - Real minus sign; symbols hard-clipped.
 - **Add symbol dialog** (measured from `docs/reference/04-add-symbol.png` at 2×, built in M4; CSS px from the dialog's top-left):
   - 840 × 680, `#1F1F1F`, 6 px corners, centered over a 50% black backdrop.
@@ -631,8 +651,9 @@ Reference viewport is 1634 px wide.
   - The catalog's refresh, retry, save and reload run on simulated time.
   - The browser mock ranks its catalog with the gateway's own search (`searchCatalog`).
   - The dialog's title, field, chips, filters and footer are compared with `docs/reference/04-add-symbol.png` pixel by pixel.
-- **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, the legend's position, and the watchlist's remove button (M6).
-- **Visual regression** (M6, `tests/e2e/visual.spec.ts`): eleven screens against approved screenshots: the chart page, the crosshair, a hovered watchlist row, the ⋯ menu, the interval menu, the Gestures popup, the custom interval dialog, Add symbol, symbol search, the legend during an outage, and the logo prompt. Any changed pixel fails the run.
+- **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, the legend's position, the watchlist's remove button (M6), its flags: the header's gray flag, a red flag's every pixel, and the colors' halo, arrow and bubble (`docs/reference/06-watchlist-flags.png`), and a row's right-click menu: every area but the items left out and the red ring drawn on the reference, and the dots' shapes (`docs/reference/07-watchlist-row-menu.png`).
+- **Visual regression** (M6, `tests/e2e/visual.spec.ts`): thirteen screens against approved screenshots: the chart page, the crosshair, a hovered watchlist row, flagged rows with the colors showing, a row's right-click menu, the ⋯ menu, the interval menu, the Gestures popup, the custom interval dialog, Add symbol, symbol search, the legend during an outage, and the logo prompt. Any changed pixel fails the run.
+- **Flags** (`tests/e2e/watchlist.spec.ts`; the model in `packages/core/src/flags.ts` and `apps/web/src/watchlist/flagEdits.ts`; the gateway in `server.test.ts`): a click taking a flag off, or flagging in the last color; the colors on resting (the ring, recoloring, the last color, taking off) and their size and place; ⌥↵; the row menu's items and order, its colors, Flag/Unflag and Unflag all; Add section (its name typed at once, a double-click renaming) and Add symbol after the row; a removed symbol's flag kept and shown when it's back; flags of unknown colors or symbols dropped; flags in `watchlist.json` carried over.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -714,7 +735,8 @@ Reference viewport is 1634 px wide.
 25. ✓ Answered: your LEOUSD (6-decimal Chg, 0.002800) was added at random from an unknown source, so the 5-decimal cut stays, as your VET, SHIB, LUNC and ZEC rows confirm.
 26. Do TradingView's legend and price axis group thousands too (ours don't)? A chart of BTC would show it.
 27. The remove button under the mouse, and a letter avatar on a hovered row (its gray circle matches the row): no reference shows these yet.
-28. Flags: the colored markers at your rows' left edges aren't built. Say if you want them.
+28. ✓ Flags are built (§5.3). Not in the screenshots, so provisional: what a row without a flag shows under the mouse (ours: the header's gray flag); the darker shade of a flag other than red while its colors show; a dot under the mouse.
+29. Details no TradingView source settles, built this way: the ringed color takes the flag off; "Unflag all symbols" acts at once, without asking; a new section is named "Section N", its name ready to type. (A double-click renaming a section comes from a TradingView community guide.)
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -724,7 +746,7 @@ Reference viewport is 1634 px wide.
 - A menu row under the mouse (hover color, outlined star).
 - The "Add custom interval" dialog.
 - The prompt after typing `5` on the chart.
-- The watchlist's ⋯ menu, and a row's right-click menu.
+- The watchlist's ⋯ menu.
 - A watchlist row being dragged.
 - The Add symbol dialog with a row under the mouse, a filter menu open, and a grouped row's ⌄ opened (TradingView's list of sources).
 - The symbol search opened from the chart (its title and anything that differs from Add symbol).
@@ -745,6 +767,8 @@ Reference viewport is 1634 px wide.
 - TradingView "Stay in focus" (Ctrl/⌘ zoom): https://www.tradingview.com/blog/en/stay-in-focus-15704
 - TradingView Datafeed API: https://www.tradingview.com/charting-library-docs/latest/connecting_data/Datafeed-API/
 - TradingView watchlist change calculation: https://www.tradingview.com/support/solutions/43000653369-how-are-change-and-change-calculated-in-the-watchlist/
+- TradingView flags: https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443 · https://tradingview.com/blog/en/flagged-lists-improved-9521 · https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · https://www.tradingview.com/support/solutions/43000645264-how-to-delete-the-red-list/
+- TradingView watchlist sections and adding at a point: https://www.tradingview.com/support/solutions/43000615520-how-to-add-a-section-to-the-watchlist/ · https://www.tradingview.com/blog/en/add-symbols-to-the-watchlist-at-a-specific-point-in-the-list-22486 · renaming by double-click (community guide): https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

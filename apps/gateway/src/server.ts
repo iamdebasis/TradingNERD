@@ -12,11 +12,13 @@ import type { GatewayConfig } from './config.ts';
 import type { LogoService } from './logos/LogoService.ts';
 import type { MarketService } from './market/MarketService.ts';
 import { MarketError } from './market/types.ts';
+import { registerFlagRoutes } from './routes/flags.ts';
 import { registerLogoRoutes } from './routes/logos.ts';
 import { registerMarketRoutes } from './routes/market.ts';
 import { registerSymbolRoutes } from './routes/symbols.ts';
 import { registerWatchlistRoutes } from './routes/watchlist.ts';
 import { isAllowedOrigin, isLoopbackHost } from './security.ts';
+import type { FlagStore } from './storage/FlagStore.ts';
 import type { WatchlistStore } from './storage/WatchlistStore.ts';
 import { attachSession } from './ws/session.ts';
 
@@ -24,6 +26,7 @@ export interface GatewayDeps {
   market: MarketService;
   catalog: SymbolCatalog;
   watchlist: WatchlistStore;
+  flags: FlagStore;
   logos: LogoService;
 }
 
@@ -80,6 +83,7 @@ export async function buildServer(
   registerMarketRoutes(app, deps.market);
   registerSymbolRoutes(app, deps.catalog);
   registerWatchlistRoutes(app, deps.watchlist);
+  registerFlagRoutes(app, deps.flags);
   registerLogoRoutes(app, deps.logos);
 
   app.get(WS_PATH, { websocket: true }, (socket) => attachSession(socket, deps.market));

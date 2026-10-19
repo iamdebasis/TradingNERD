@@ -1,0 +1,25 @@
+.dots {
+  display: flex;
+}
+
+.dot {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--flag);
+  cursor: pointer;
+}
+
+/* The symbol's own color: a 2 px ring, a 2 px gap, an 8 px dot, its edge softened as in the
+   reference. */
+.dot[aria-pressed="true"] {
+  background: radial-gradient(circle, var(--flag) 0 3.75px, transparent 4.25px);
+  box-shadow: inset 0 0 0 2px var(--flag);
+}
+
+.dot:focus-visible {
+  outline: 1px solid var(--color-text);
+  outline-offset: 2px;
+}

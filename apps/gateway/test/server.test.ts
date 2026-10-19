@@ -1,4 +1,11 @@
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +28,7 @@ import { LogoService } from '../src/logos/LogoService.ts';
 import { SecretStore } from '../src/logos/secrets.ts';
 import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
+import { FlagStore } from '../src/storage/FlagStore.ts';
 import { WatchlistStore } from '../src/storage/WatchlistStore.ts';
 import { FakeCatalogSource, pair } from './helpers/FakeCatalog.ts';
 import { fakeCoinGecko } from './helpers/FakeCoinGecko.ts';
@@ -76,6 +84,7 @@ async function start() {
       market: new MarketService([fake], { emitIntervalMs: 0, quoteIntervalMs: 0 }),
       catalog,
       watchlist: new WatchlistStore(dataDir),
+      flags: new FlagStore(dataDir),
       logos,
     },
   );
@@ -476,6 +485,55 @@ describe('gateway watchlist', () => {
 
   it('keeps the data folder private to the user', () => {
     expect(statSync(dataDir).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe('gateway flags', () => {
+  const call = (app: FastifyInstance, method: 'GET' | 'PUT', payload?: unknown) =>
+    app.inject({
+      method,
+      url: '/api/flags',
+      headers: { host: '127.0.0.1:5180', origin: UI_ORIGIN },
+      ...(payload === undefined ? {} : { payload: payload as Record<string, unknown> }),
+    });
+
+  it("start with none, red next; save a symbol's flag, normalized, and serve it back", async () => {
+    const { app, dataDir } = await start();
+    try {
+      expect((await call(app, 'GET')).json()).toEqual({ flags: {}, lastColor: 'red' });
+      const res = await call(app, 'PUT', {
+        flags: { 'binance:xrpusdt': 'blue', 'KRAKEN:XBTUSD': 'violet' },
+        lastColor: 'blue',
+      });
+      expect(res.statusCode).toBe(200);
+      const saved = { flags: { 'BINANCE:XRPUSDT': 'blue' }, lastColor: 'blue' };
+      expect(res.json()).toEqual(saved);
+      expect((await call(app, 'GET')).json()).toEqual(saved);
+      expect(JSON.parse(readFileSync(join(dataDir, 'flags.json'), 'utf8'))).toEqual(saved);
+      expect((await call(app, 'PUT', { flags: ['red'] })).statusCode).toBe(400);
+      expect((await call(app, 'GET')).json()).toEqual(saved);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('carry over the flags the watchlist file held, once', async () => {
+    const { app, dataDir } = await start();
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(
+        join(dataDir, 'watchlist.json'),
+        JSON.stringify({
+          sections: [{ id: 'crypto', title: 'Crypto', collapsed: false, symbols: [] }],
+          flags: { 'BINANCE:LINKUSDT': 'red' },
+        }),
+      );
+      const carried = { flags: { 'BINANCE:LINKUSDT': 'red' }, lastColor: 'red' };
+      expect((await call(app, 'GET')).json()).toEqual(carried);
+      expect(JSON.parse(readFileSync(join(dataDir, 'flags.json'), 'utf8'))).toEqual(carried);
+    } finally {
+      await app.close();
+    }
   });
 });
 
