@@ -17,7 +17,7 @@ import {
 } from '@tradingnerd/core';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
 import { Feed } from './feed.ts';
-import { fetchSlices, pageBack } from './history.ts';
+import { fetchHistory, fetchSlices, pageBack } from './history.ts';
 import type { BarChange } from './liveBar.ts';
 import { QuoteFeed, type QuoteListener } from './quotes.ts';
 import { nativeLiveBars, ResampledBarAggregator } from './resampledBar.ts';
@@ -112,7 +112,7 @@ export class MarketService {
     await adapter.resolveSymbol(ticker);
     switch (plan.kind) {
       case 'native':
-        return pageBack(
+        return fetchHistory(
           adapter,
           ticker,
           plan.target,

@@ -7,35 +7,40 @@
       "baseCcy": "XRP",
       "quoteCcy": "EUR",
       "state": "live",
-      "instType": "SPOT"
+      "instType": "SPOT",
+      "tickSz": "0.0001"
     },
     {
       "instId": "USDT-EUR",
       "baseCcy": "USDT",
       "quoteCcy": "EUR",
       "state": "live",
-      "instType": "SPOT"
+      "instType": "SPOT",
+      "tickSz": "0.0001"
     },
     {
       "instId": "BTC-USDT",
       "baseCcy": "BTC",
       "quoteCcy": "USDT",
       "state": "live",
-      "instType": "SPOT"
+      "instType": "SPOT",
+      "tickSz": "0.1"
     },
     {
       "instId": "XRP-USDT",
       "baseCcy": "XRP",
       "quoteCcy": "USDT",
       "state": "live",
-      "instType": "SPOT"
+      "instType": "SPOT",
+      "tickSz": "0.0001"
     },
     {
       "instId": "OLD-USDT",
       "baseCcy": "OLD",
       "quoteCcy": "EUR",
       "state": "suspend",
-      "instType": "SPOT"
+      "instType": "SPOT",
+      "tickSz": "0.0001"
     }
   ]
 }

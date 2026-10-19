@@ -110,3 +110,53 @@ test('Add symbol finds XRP on every exchange, and a picked pair is live within a
   expect(elapsed).toBeLessThan(1_000);
   expect(problems).toEqual([]);
 });
+
+test('pairs from Bybit, OKX, Coinbase and Kraken go live within a second of being picked', {
+  tag: '@live',
+}, async ({ page }) => {
+  const problems: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') problems.push(message.text());
+  });
+  page.on('pageerror', (error) => problems.push(error.message));
+  // Your real data/watchlist.json stays as it is: saves are answered here instead.
+  await page.route(/\/api\/watchlist$/, (route) =>
+    route.request().method() === 'PUT'
+      ? route.fulfill({ json: route.request().postDataJSON() })
+      : route.continue(),
+  );
+  await page.goto('/');
+  const panel = page.getByRole('complementary', { name: 'Watchlist' });
+  await expect(panel.locator('button[data-symbol]').first()).toBeVisible({ timeout: 15_000 });
+
+  const timings: string[] = [];
+  for (const symbol of ['BYBIT:XRPUSDT', 'OKX:XRPUSDT', 'COINBASE:XRPUSD', 'KRAKEN:XBTUSD']) {
+    await panel.getByRole('button', { name: 'Add symbol' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add symbol' });
+    await dialog.getByRole('combobox').fill(symbol); // "EXCHANGE:TICKER" lists that one only
+    const add = dialog
+      .locator(`[role="option"][data-symbol="${symbol}"]`)
+      .getByRole('button', { name: 'Add to watchlist' });
+    await expect(add).toBeEnabled({ timeout: 15_000 });
+    const started = Date.now();
+    await add.click({ modifiers: ['Shift'] });
+    await page.waitForFunction(
+      (id) =>
+        /\d\.\d/.test(document.querySelector(`button[data-symbol="${id}"]`)?.textContent ?? ''),
+      symbol,
+      { polling: 'raf', timeout: 5_000 },
+    );
+    const elapsed = Date.now() - started;
+    timings.push(`${symbol} ${elapsed} ms`);
+    expect(elapsed, symbol).toBeLessThan(1_000);
+  }
+  console.log(`Live after the click: ${timings.join(', ')}`);
+
+  // On the chart: Kraken's own data, live.
+  await panel.locator('button[data-symbol="KRAKEN:XBTUSD"]').click();
+  await expect(page.locator('[data-field="title"]')).toHaveText(/ · 1D · Kraken$/);
+  await expect(page.locator('[data-book]')).toHaveAttribute('data-status', 'live', {
+    timeout: 15_000,
+  });
+  expect(problems).toEqual([]);
+});

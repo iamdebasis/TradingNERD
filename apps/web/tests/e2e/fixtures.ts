@@ -68,14 +68,15 @@ const PRECISION: Record<string, number> = {
 /** Coins Binance doesn't list: XCH is the reference's unavailable row. */
 const UNLISTED = new Set(['XCH']);
 
-/** The exchanges the mock's symbol catalog covers; only Binance has live data (until M5). */
+/** The exchanges the mock's symbol catalog covers, all with live data as in the gateway. */
 export const MOCK_EXCHANGES: ExchangeSummary[] = [
   { id: 'BINANCE', name: 'Binance', live: true },
-  { id: 'BYBIT', name: 'Bybit', live: false },
-  { id: 'OKX', name: 'OKX', live: false },
-  { id: 'COINBASE', name: 'Coinbase', live: false },
-  { id: 'KRAKEN', name: 'Kraken', live: false },
+  { id: 'BYBIT', name: 'Bybit', live: true },
+  { id: 'OKX', name: 'OKX', live: true },
+  { id: 'COINBASE', name: 'Coinbase', live: true },
+  { id: 'KRAKEN', name: 'Kraken', live: true },
 ];
+const EXCHANGE_NAMES = new Map(MOCK_EXCHANGES.map((exchange) => [exchange.id, exchange.name]));
 
 const listing = (
   exchange: string,
@@ -91,7 +92,7 @@ const listing = (
   quote,
   description,
   volumeUsd,
-  live: exchange === 'BINANCE',
+  live: true,
 });
 
 /**
@@ -128,21 +129,22 @@ export const MOCK_CATALOG: CatalogEntry[] = [
   ),
 ];
 
-/** SymbolInfo for a Binance pair in the mock catalog, or any BINANCE:…USDT but the unlisted. */
+/** SymbolInfo for any pair in the mock catalog, or any BINANCE:…USDT but the unlisted. */
 export function infoFor(symbol: string): SymbolInfo | null {
   if (symbol === XRP_INFO.id) return XRP_INFO;
-  const listed = MOCK_CATALOG.find(
-    (entry) => entry.exchange === 'BINANCE' && `BINANCE:${entry.ticker}` === symbol,
-  );
+  const listed = MOCK_CATALOG.find((entry) => `${entry.exchange}:${entry.ticker}` === symbol);
   const match = /^BINANCE:([A-Z0-9]+)USDT$/.exec(symbol);
   const base = listed?.base ?? match?.[1];
   const quote = listed?.quote ?? 'USDT';
   if (!base || UNLISTED.has(base)) return null;
+  const exchange = listed?.exchange ?? 'BINANCE';
   const pricePrecision = PRECISION[base] ?? 4;
   return {
     ...XRP_INFO,
     id: symbol,
-    ticker: `${base}${quote}`,
+    exchange,
+    exchangeName: EXCHANGE_NAMES.get(exchange) ?? exchange,
+    ticker: listed?.ticker ?? `${base}${quote}`,
     base,
     quote,
     description: listed?.description ?? `${base} / TetherUS`,
@@ -282,6 +284,8 @@ export interface MockMarket {
   readonly savedKeys: string[];
   /** Query of every symbol search, in order. */
   readonly searchRequests: URLSearchParams[];
+  /** Exchanges the mock says have live data (all five, unless a test takes one away). */
+  readonly liveExchanges: Set<string>;
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
   /** Ids of subscriptions the page still holds. */
@@ -294,6 +298,8 @@ export interface MockMarket {
   subscribed(channel: 'bars' | 'book'): Promise<string>;
   sendBar(bar: Bar, historical?: boolean): Promise<void>;
   sendBook(bid: number, ask: number): Promise<void>;
+  /** Reports the chart's bars subscription as reconnecting or live, as during an exchange outage. */
+  sendBarsState(state: 'live' | 'reconnecting'): Promise<void>;
   /** Drops the page's WebSocket, like a gateway restart. */
   drop(): Promise<void>;
 }
@@ -310,6 +316,7 @@ class MockGateway implements MockMarket {
   };
   readonly savedKeys: string[] = [];
   readonly searchRequests: URLSearchParams[] = [];
+  readonly liveExchanges = new Set(MOCK_EXCHANGES.map((exchange) => exchange.id));
   readonly watchlistSaves: Watchlist[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
@@ -342,16 +349,26 @@ class MockGateway implements MockMarket {
       const params = new URL(route.request().url()).searchParams;
       this.searchRequests.push(params);
       return route.fulfill({
-        json: searchCatalog(MOCK_CATALOG, {
-          query: params.get('query') ?? '',
-          exchange: params.get('exchange'),
-          offset: Number(params.get('offset') ?? 0),
-          limit: Number(params.get('limit') ?? SEARCH_PAGE_SIZE),
-        }),
+        json: searchCatalog(
+          MOCK_CATALOG.map((entry) => ({ ...entry, live: this.liveExchanges.has(entry.exchange) })),
+          {
+            query: params.get('query') ?? '',
+            exchange: params.get('exchange'),
+            offset: Number(params.get('offset') ?? 0),
+            limit: Number(params.get('limit') ?? SEARCH_PAGE_SIZE),
+          },
+        ),
       });
     });
     await this.page.route(/\/api\/exchanges$/, (route) =>
-      route.fulfill({ json: { exchanges: MOCK_EXCHANGES } }),
+      route.fulfill({
+        json: {
+          exchanges: MOCK_EXCHANGES.map((exchange) => ({
+            ...exchange,
+            live: this.liveExchanges.has(exchange.id),
+          })),
+        },
+      }),
     );
     await this.page.route(/\/api\/watchlist$/, (route) => {
       if (route.request().method() === 'PUT') {
@@ -489,6 +506,11 @@ class MockGateway implements MockMarket {
   async sendBook(bid: number, ask: number): Promise<void> {
     const id = await this.subscribed('book');
     this.socket?.send(JSON.stringify({ type: 'book', id, bid, ask }));
+  }
+
+  async sendBarsState(state: 'live' | 'reconnecting'): Promise<void> {
+    const id = await this.subscribed('bars');
+    this.socket?.send(JSON.stringify({ type: 'status', id, state }));
   }
 
   async drop(): Promise<void> {

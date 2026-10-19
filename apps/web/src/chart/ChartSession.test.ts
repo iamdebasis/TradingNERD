@@ -151,6 +151,33 @@ describe('ChartSession', () => {
     expect(feed.book).not.toBeNull();
   });
 
+  it('asks for the best bid and ask while history loads, and for live bars only after', async () => {
+    const { chart, legend, feed } = setup();
+    let release: () => void = () => {};
+    const session = new ChartSession({
+      chart,
+      legend,
+      feed,
+      symbol: 'BINANCE:XRPUSDT',
+      resolution: '1D',
+      api: {
+        resolveSymbol: async () => INFO,
+        getBars: () =>
+          new Promise((resolve) => {
+            release = () => resolve({ bars: history(5), hasMore: false });
+          }),
+      },
+    });
+    const started = session.start();
+    await vi.waitFor(() => expect(feed.book).not.toBeNull());
+    expect(feed.bars).toBeNull();
+    feed.book?.onBook(1.2955, 1.2956);
+    expect(legend.calls.at(-1)).toBe('book 1.2955/1.2956');
+    release();
+    await started;
+    expect(feed.bars).not.toBeNull();
+  });
+
   it('applies live bars and keeps the legend on the latest bar', async () => {
     const { session, chart, legend, feed } = setup();
     await session.start();
@@ -294,6 +321,7 @@ describe('ChartSession', () => {
     // The chart belongs to the pane, which may already show the next interval: untouched.
     expect(chart.calls).toEqual([]);
     expect(feed.bars).toBeNull();
+    expect(feed.unsubscribed).toBe(1); // the best bid and ask, asked for while loading
   });
 
   it('leaves the chart alone until its first page is in, then swaps it over at once', async () => {

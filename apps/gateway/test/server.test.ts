@@ -35,7 +35,10 @@ const config: GatewayConfig = {
   allowedOrigins: [UI_ORIGIN],
   logLevel: 'silent',
   binance: { restUrl: undefined, streamUrl: undefined },
-  catalogUrls: { bybit: undefined, okx: undefined, coinbase: undefined, kraken: undefined },
+  bybit: { restUrl: undefined, streamUrl: undefined },
+  okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
+  coinbase: { restUrl: undefined, streamUrl: undefined },
+  kraken: { restUrl: undefined, streamUrl: undefined },
   dataDir: '', // each server gets its own temporary directory
 };
 

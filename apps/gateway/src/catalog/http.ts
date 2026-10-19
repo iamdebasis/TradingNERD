@@ -1,3 +1,4 @@
+import type { Bar } from '@tradingnerd/core';
 import { MarketError } from '../market/types.ts';
 
 export type Json = Record<string, unknown>;
@@ -22,6 +23,40 @@ export function amount(value: unknown): number {
         ? value
         : Number.NaN;
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** A non-negative decimal from a string or number; null when missing or not one. */
+export function decimal(value: unknown): number | null {
+  const n =
+    typeof value === 'string' && value !== ''
+      ? Number(value)
+      : typeof value === 'number'
+        ? value
+        : Number.NaN;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** A bar from open time (ms) and decimal fields; null when any field is malformed. */
+export function toBar(
+  openMs: number,
+  open: unknown,
+  high: unknown,
+  low: unknown,
+  close: unknown,
+  volume: unknown,
+): Bar | null {
+  const [o, h, l, c, v] = [
+    decimal(open),
+    decimal(high),
+    decimal(low),
+    decimal(close),
+    decimal(volume),
+  ];
+  if (!Number.isSafeInteger(openMs) || openMs < 0 || o === null || h === null || l === null) {
+    return null;
+  }
+  if (c === null || v === null) return null;
+  return { time: Math.floor(openMs / 1000), open: o, high: h, low: l, close: c, volume: v };
 }
 
 export interface FetchOptions {

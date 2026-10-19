@@ -37,16 +37,22 @@ export function fixture(name: string): unknown {
   );
 }
 
-/** A fetch that answers each URL whose path contains a key with that fixture, and 404 otherwise. */
-export function fixtureFetch(routes: Record<string, unknown>) {
+/** A route's answer: a fixed body, or one made from the request's URL. */
+export type Route = unknown | ((url: URL) => unknown);
+
+/**
+ * A fetch that answers each URL whose path contains a key with that route's body (the first
+ * key that matches wins), and 404 otherwise.
+ */
+export function fixtureFetch(routes: Record<string, Route>) {
   const requested: string[] = [];
   const fetchFn = (async (input: string | URL | Request) => {
     const url = String(input instanceof Request ? input.url : input);
     requested.push(url);
     const match = Object.entries(routes).find(([path]) => url.includes(path));
-    return match
-      ? new Response(JSON.stringify(match[1]), { headers: { 'content-type': 'application/json' } })
-      : new Response('{"error":"not found"}', { status: 404 });
+    if (!match) return new Response('{"error":"not found"}', { status: 404 });
+    const body = typeof match[1] === 'function' ? match[1](new URL(url)) : match[1];
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
   return { fetch: fetchFn, requested };
 }

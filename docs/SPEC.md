@@ -71,6 +71,18 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | Descriptions use Binance's asset names, filled in from Coinbase's; Kraken's XBT and XDG count as BTC and DOGE | TradingView shows Binance's names ("XRP / TetherUS"); one name table keeps the same pair described the same everywhere. |
 | 2026-10-19 | Binance symbol lookups are answered from the catalog's full pair list (up to 12 h old) | It saves a round trip: measured live, a picked pair shows its price in 0.25–0.4 s instead of 0.95 s. |
 | 2026-10-19 | Coins on other exchanges take their logo from Binance's mapping of the same code, then market cap | One CoinGecko ticker list per live exchange keeps the weekly refresh cheap; per-exchange lists can come with M5. |
+| 2026-10-19 | One **stream client** for every exchange: reference-counted topics, batched subscribes, reconnect with backoff and resubscribe, keep-alive; a small protocol per exchange | Reconnecting and resubscribing are written and tested once. Binance moved onto it too. |
+| 2026-10-19 | Each exchange is reached through **its own public REST and WebSocket APIs**; CCXT isn't used | Each has stream details of its own (OKX's two connections, Coinbase's heartbeats, Kraken's v2 names); small adapters stay readable and fully tested. |
+| 2026-10-19 | OKX bars use its **UTC intervals** (`1Dutc`, `1Wutc`, …) | OKX's plain 6-hour and longer bars open at 00:00 Hong Kong time; TradingView's open at 00:00 UTC. |
+| 2026-10-19 | Kraken's weeks are **built from its days** | Kraken's weekly bars open on Thursday; TradingView's on Monday. |
+| 2026-10-19 | Coinbase's **quiet periods are filled with flat bars** at the last price; its live bar is polled over REST every 30 s and ticked by every trade | Coinbase's REST leaves out periods without trades, and its stream has only 5-minute candles. The other exchanges send such flat bars themselves; what TradingView shows for Coinbase is checked in §11. |
+| 2026-10-19 | REST requests are **paced per exchange**: Bybit 50 ms, OKX 110 ms, Coinbase 125 ms, Kraken 200 ms apart | Each stays inside the exchange's public limit (§4.3). |
+| 2026-10-19 | Each exchange's **pair list is loaded when the gateway starts**, and refreshed in the background while the old one answers | A first pick on Coinbase waited 0.9 s for its list. Measured live, pick-to-live went from 1.8 s to 0.53–0.61 s. |
+| 2026-10-19 | Coinbase's history windows are **fetched side by side**, and a window of closed bars is shared for 30 s | Coinbase serves 350 bars a request at about 0.35 s each. A 1,000-bar chart went from 1.1 s to 0.6–0.8 s (1.0 s for a quiet pair's minutes), and the look back from a quiet window for its last price reuses the window next to it. |
+| 2026-10-19 | Kraken is **never asked for bars older than it keeps** | It sends the same latest bars whatever is asked: a weekly chart went from 11 requests (2.0 s) to 3 (0.5 s). |
+| 2026-10-19 | The chart asks for the **best bid and ask as soon as the symbol is known**, not after its history | The exchange's stream opens while history loads. Coinbase's Sell/Buy now shows 0.7–0.85 s after opening a chart on an open connection, from about 2 s. |
+| 2026-10-19 | Binance lookups cache the **pair, not its description** | A lookup made while the asset names were still loading after a restart read "XRP / USDT" for an hour. |
+| 2026-10-19 | `<EXCHANGE>_REST_URL` and `<EXCHANGE>_STREAM_URL` (and `OKX_BUSINESS_STREAM_URL`) override each exchange's endpoints | Tests point every exchange at a mock, or at an unreachable address so no test reaches a real exchange by accident. |
 
 ## 4. Research findings
 
@@ -108,10 +120,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 | Exchange | Bars per REST request | History | Live streams worth using |
 |---|---|---|---|
 | Binance | 1,000 | XRPUSDT from 2018-05-04; 1-second bars exist | kline (updates every **2 s**), aggTrade + bookTicker (real-time, ~33 ms) |
-| Bybit | 1,000 | Deep, paged | kline, publicTrade, tickers |
-| OKX | 300 | Deep, paged; 1-second bars | candles (business WS), trades, tickers |
-| Coinbase | 350 | Deep, paged | ticker, market_trades (WS candles are 5-minute only) |
-| Kraken | — | **Only the latest ~720 bars** per interval | ticker, ohlc, trade |
+| Bybit | 1,000 | Deep, paged | kline, publicTrade, orderbook.1 |
+| OKX | 300 recent, 100 older | The recent endpoint reaches back 1,440 bars, history-candles beyond; 1-second bars | candles (business WS), trades, bbo-tbt |
+| Coinbase | 350 | Deep, paged; periods without trades are left out | ticker, market_trades (WS candles are 5-minute only) |
+| Kraken | 720 | **Only the live bar and the 720 before it**, whatever is asked | ticker, ohlc, trade |
 
 - **Access:** all five served REST and WebSockets with no API key and no geo-block, and all returned CORS headers.
 - **Binance's candle stream can lag trades by up to 2 s.** We merge trades into the live candle (§6.4).
@@ -124,6 +136,13 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - Coinbase: about 515 once the 406 "-USDC" products are dropped. Those are aliases of the "-USD" books. The public Advanced Trade `market/products` also names assets ("US Dollar").
   - Kraken: 1,365 online (`AssetPairs` and `Ticker`, volume in the base asset). Bitcoin is XBT and Dogecoin XDG; TradingView keeps Kraken's own tickers (XBTUSD).
   - XRPUSDT is listed on all five.
+- **Measured for M5** (2026-10-19, XRP pairs):
+  - **Candle streams push only when the candle changes**, seconds apart in a quiet market: in 20 s, Bybit pushed 5 times, OKX 6, Kraken 2. Trades keep the live bar ticking, as on Binance.
+  - **OKX's candle pushes carry no time**; the time received stands in.
+  - **A first lookup downloads the pair list:** Coinbase 0.92 s, Kraken 0.26 s, OKX 0.27 s, Bybit 0.12 s.
+  - **Opening a stream** takes Coinbase 1.0–1.2 s and Kraken 0.3–1.3 s. On an open stream, a subscription's first message follows in 0.2–0.4 s (Coinbase) and 0.17 s (Kraken).
+  - **Coinbase REST:** 0.34 s typical, 0.42 s at the 95th percentile, 0.9 s at worst (40 requests).
+  - **Limits:** Bybit 600 requests in 5 s; OKX 20 history requests in 2 s; Coinbase 10 public requests a second; Kraken publishes none for these, and bursts of a dozen passed, so five a second is used.
 - **CoinGecko's exchange ids** (2026-10-19): `binance`, `bybit_spot`, `okex`, `gdax` (Coinbase Exchange), `kraken`; their logos are on its keyless image host.
 
 ### 4.4 CoinGecko (verified 2026-10-18)
@@ -227,8 +246,9 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Done when:** typing "XRP" lists every exchange, and a picked row is live within 1 s.
 - **Status:** built in M4 (2026-10-19).
   - **Opened by:** the watchlist's + ("Add symbol"); the symbol pill, or a letter typed on the chart ("Symbol search", which shows the pick on the chart instead of adding it).
-  - **Catalog:** every trading spot pair on Binance, Bybit, OKX, Coinbase and Kraken (about 5,000), from their public APIs. Typing "XRP" lists all five; measured live, a picked Binance pair shows its price 0.25–0.4 s after the click.
-  - **Only Binance can be picked until M5.** The other exchanges' rows are listed with a dimmed + and say "Live data from … isn't available yet".
+  - **Catalog:** every trading spot pair on Binance, Bybit, OKX, Coinbase and Kraken (about 5,000), from their public APIs. Typing "XRP" lists all five.
+  - **Every exchange can be picked** (M5). Measured live, a picked pair shows its price this soon after the click: Bybit 0.21–0.31 s, Binance 0.24–0.51 s, Kraken 0.30–0.47 s, OKX 0.33–0.40 s, Coinbase 0.53–0.61 s. Once, Coinbase took 1.15 s while its API answered slowly.
+  - **An exchange without live data** would be listed with a dimmed + saying "Live data from … isn't available yet"; none is, now.
   - **Rows:** one per ticker. A ticker listed on several exchanges shows the first one's name, its logos stacked, and ⌄ to list the others. Exchanges with live data come first, then the most traded. Typed text is highlighted in the ticker and the description.
   - **Keyboard:** ↑/↓ highlight a row (none is highlighted at first, as in the reference); Enter adds the highlighted row or, without one, the top match, and the dialog stays open. Shift+Enter or Shift+click adds and closes; Escape closes an open filter, then the dialog.
   - **Filters:** chips All and Crypto (the same in v1, remembered); sources, types (spot) and exchange types (all are centralized).
@@ -273,8 +293,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - 60 fps pan/zoom (120 fps on ProMotion) with 20k bars loaded.
   - Symbol/interval switch under 150 ms when cached, under 700 ms cold.
   - 50 live watchlist rows cost under 2 ms per frame. Measured: about 1 ms with all 50 changing in the same frame (`tests/e2e/perf.spec.ts`).
+  - **History, cold** (1,000 bars, measured live 2026-10-19): Bybit 0.09–0.13 s, Binance 0.16–0.2 s, Kraken 0.29–0.56 s, Coinbase 0.6–1.0 s, OKX 0.69 s. Over the 700 ms target: Coinbase's built intervals, 3-minute 1.4 s and weekly 2.2–2.5 s (its 350 bars a request, 10 requests a second), and OKX's built seconds, 3.1 s a page with fewer bars in it (5S: 720, 45S: 80), as its older candles come 100 at a time. A history cache would answer these from disk (M6).
 - **Security:** the gateway binds to 127.0.0.1 only and rejects foreign Origin and non-loopback Host headers.
 - **Resilience:** exchange disconnects recover automatically, with gap-fill and a visible status dot.
+  - **Measured** (M5, 2026-10-19): with every exchange's stream cut for 30 s by a relay that refuses connections, each was live again 1.8–2.5 s after the link returned, never showed live while cut, and missed no minute.
 
 ## 6. Architecture
 
@@ -294,8 +316,8 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
  │                            │ resampling, SQLite cache     │
  │ Live service: candle +     │ Quote service: Chg%,         │
  │ trade merge                │ bid/ask, throttled updates   │
- │ Exchanges: Binance · Bybit · OKX · Coinbase · Kraken      │
- │            + CCXT for the pair catalog / long tail        │
+ │ Exchanges: Binance · Bybit · OKX · Coinbase · Kraken,     │
+ │ each through its own public REST and WebSocket APIs       │
  └──────────────────────────┬────────────────────────────────┘
                             ▼ public REST + WebSockets, no keys
 ```
@@ -353,14 +375,39 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **How it's built** (M2):
   - **Picking the base:** the coarsest native interval whose bar boundaries all fall on the target's. Intraday bases must divide the day.
   - **Folding:** open of the first base bar, close of the last, highest high, lowest low, summed volume. Base bars without trades are skipped unless none in the period traded. That's exactly how Binance's own bars come out.
-  - **History:** base bars are fetched as parallel time slices, at most 12 requests per page, 6 in flight. The oldest bar is dropped when the slices might not reach its start. An oldest slice that comes back short costs one more request to tell a real start of history from a gap.
+  - **History:** base bars are fetched as parallel time slices, at most 12 requests per page, 6 in flight. The oldest bar is dropped when the slices might not reach its start. An oldest slice that comes back short costs one more request to tell a real start of history from a gap, except on an exchange with a bar in every period (Coinbase, quiet ones filled in), where that is the start.
   - **Live:** the base interval's live bar is merged as usual (§6.4), and the target bar is the fold of its period's base bars. The current and previous periods are kept, so a late final candle corrects the right bar. Nothing is sent until the period's earlier base bars have arrived over REST.
   - **Tick bars:** made from trades, numbered by trade id, from Binance's aggregate trades. Their quantity is shared evenly by the trades.
     - History pages back by aggregate id (12 requests, about 40,000 trades, per page). Each page remembers which aggregate holds the trade before its oldest bar, so the next page starts exactly there. Without that, Binance is asked once.
     - Live, the trade stream extends the bar. A gap in trade ids restarts the feed, and the chart reloads what it missed.
   - Code: `packages/core/src/resample.ts`, `ticks.ts`, `intervals.ts`; `apps/gateway/src/market/history.ts`, `resampledBar.ts`, `ticks.ts`.
 
-### 6.6 Local data (`data/`, gitignored)
+### 6.6 Exchange adapters (M5)
+
+- **One stream client** (`apps/gateway/src/stream/StreamClient.ts`) per exchange connection:
+  - Topics are reference-counted: the first listener subscribes upstream, the last one unsubscribes.
+  - Subscribes and unsubscribes go out in batches, one every 250 ms at most.
+  - After any drop it reconnects with backoff (0.5 s, doubling to 30 s), subscribes again to everything, and reports `up`.
+  - A keep-alive goes out every 20–30 s. Anything received proves the link; one that stays silent is replaced.
+  - With nothing subscribed for 30 s, the connection closes.
+  - Each exchange supplies a small protocol: its subscribe messages, how its frames map to topics, its ping.
+- **Per exchange:**
+
+  | | Candles | Trades | Best bid/ask | History per request | Notes |
+  |---|---|---|---|---|---|
+  | Binance | kline | aggTrade | bookTicker | 1,000 | Seconds and tick bars |
+  | Bybit | kline | publicTrade | orderbook.1 | 1,000 | |
+  | OKX | candle, on the business stream | trades | bbo-tbt | 300 recent, then 100 | Seconds; UTC bars; two connections |
+  | Coinbase | polled over REST every 30 s | market_trades | ticker | 350, side by side | Quiet periods filled; heartbeats keep the link |
+  | Kraken | ohlc | trade | ticker (on bid/ask changes) | its latest 720 only | Weeks built from days |
+
+- **Pair lists:** each adapter keeps its exchange's pairs (tick size, stream names) for 12 h. They're loaded when the gateway starts, and refreshed in the background while the old list answers.
+- **Pacing:** each exchange's REST requests go out in order, spaced under its limit (§3, §4.3).
+- **History:** pages are fetched one after another, each ending where the last began. Coinbase, with a bar in every period, has its pages fetched side by side (§6.5). Kraken is never asked for bars older than it keeps.
+- **Reconnect and gap-fill:** while an exchange's stream is down, its charts say so. When it's back, the live bar is re-seeded over REST and the chart reloads its latest 1,000 bars (§6.4).
+- Code: `apps/gateway/src/exchanges/*/`, `exchanges/shared.ts`, `stream/StreamClient.ts`.
+
+### 6.7 Local data (`data/`, gitignored)
 
 | Path | Contents |
 |---|---|
@@ -377,7 +424,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Atomic writes:** each file is written whole to a temporary file, then renamed into place.
 - **Unreadable files:** one that can't be read is renamed aside (`….invalid-<time>`), and the gateway starts that file fresh.
 
-### 6.7 Security
+### 6.8 Security
 
 - **Loopback only:** the gateway listens on 127.0.0.1.
 - **Request checks:**
@@ -387,7 +434,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **No CORS headers** are sent.
 - **Secrets** are never logged, never returned to the browser, and never committed.
 
-### 6.8 Repo layout and commands
+### 6.9 Repo layout and commands
 
 ```
 apps/web          React UI (Vite)
@@ -406,15 +453,15 @@ data/             Local runtime data (gitignored, created at runtime)
 | `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm test:e2e` | Individual checks |
 | `pnpm format` | Auto-format and apply safe lint fixes |
 | `pnpm verify` | All checks; run before every delivery |
-| `pnpm test:live` | Opt-in checks against real Binance |
+| `pnpm test:live` | Opt-in checks against the real exchanges |
 
-### 6.9 Stack
+### 6.10 Stack
 
 | Layer | Choice |
 |---|---|
 | Chart | Lightweight Charts 5.2 + our own plugins |
 | UI | React 19, TypeScript 7, Vite 8, CSS Modules + CSS variables; Radix primitives and TanStack Virtual when needed |
-| Gateway | Node 26 (native TypeScript), Fastify 5, @fastify/websocket; CCXT and SQLite from M1/M4 |
+| Gateway | Node 26 (native TypeScript), Fastify 5, @fastify/websocket, ws; SQLite planned for the candle cache |
 | Quality | Biome, Vitest, Playwright |
 | Later | Electron desktop shell |
 
@@ -525,8 +572,8 @@ Reference viewport is 1634 px wide.
 | M1 | Chart on Binance: history + scroll-back, live candle merge, legend, countdown, crosshair, gesture handling | XRPUSDT side by side with TradingView: same candles, same gestures. **Committed 2026-10-18** |
 | M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars. **Committed 2026-10-19** |
 | M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass. **Committed 2026-10-19** |
-| M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s. **Built 2026-10-19; awaiting your review** |
-| M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles |
+| M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s. **Committed 2026-10-19** |
+| M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles. **Built 2026-10-19; awaiting your review** |
 | M6 | Feel tuning vs TradingView, visual regression, performance profiling, optional Electron | Parity checklist all passes |
 
 ## 9. Testing strategy
@@ -536,13 +583,15 @@ Reference viewport is 1634 px wide.
   - Fastify `inject` plus real sockets on an ephemeral port.
   - Recorded exchange and CoinGecko responses; no live calls in automated tests.
   - The watchlist and logo routes run against a temporary data folder and a fake CoinGecko.
+  - Each exchange adapter runs against responses and stream messages recorded on 2026-10-19 (`apps/gateway/test/fixtures/exchanges/`), with a local mock stream server for subscribing, routing and reconnecting.
 - **E2E (Playwright, Chromium at 2× scale):** user flows, layout geometry, and no console errors.
   - Market data is mocked in the browser (`tests/e2e/fixtures.ts`): REST routes plus a routed WebSocket, seeded bars ending on the reference's last candle (1.2955), and the clock pinned to 16:09:54 UTC so the countdown reads 07:50:06.
   - Every test fails on any console error or warning.
   - Chromium runs with `--force-device-scale-factor=2`. Emulated 2× alone leaves `ResizeObserver` reporting 1× sizes, and charts then render blurry at half resolution.
   - Not `devices['Desktop Chrome']`: its Windows user agent switches on the Windows wheel handling.
   - Lightweight Charts applies view changes on the next frame, so tests read state after `settle()`.
-  - The mock also serves the watchlist, quotes and logos, and lists any `BINANCE:…USDT` pair except XCH.
+  - The mock also serves the watchlist, quotes and logos, and a pair catalog across all five exchanges; a test can take an exchange's live data away.
+  - An exchange outage: the chart says it's reconnecting, then reloads the bars it missed.
 - **Performance** (`tests/e2e/perf.spec.ts`):
   - Its own Playwright project, run after the rest so parallel tests can't skew the timing.
   - It keeps the page's real clock (`realClock`). The pinned clock replaces `requestAnimationFrame` and `performance.now` with timer-driven, whole-millisecond versions.
@@ -553,7 +602,7 @@ Reference viewport is 1634 px wide.
   - The browser mock ranks its catalog with the gateway's own search (`searchCatalog`).
   - The dialog's title, field, chips, filters and footer are compared with `docs/reference/04-add-symbol.png` pixel by pixel.
 - **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, and the legend's position.
-- **Live (opt-in, `pnpm test:live`):** gateway tests and one browser test against real Binance:
+- **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
   - Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars rebuilt exactly from smaller intervals.
   - Every resampled menu interval on its bar boundaries, up to the live bar.
@@ -563,6 +612,9 @@ Reference viewport is 1634 px wide.
   - CoinGecko rejects a made-up key.
   - Each exchange's real pair list loads, with XRPUSDT among the pairs. Typing "XRP" lists all five exchanges in one row, Binance first.
   - In the browser, a picked Binance pair is live within 1 s of the click. The test answers the watchlist save itself, so your list isn't changed.
+  - Bybit, OKX, Coinbase and Kraken: tick sizes; daily history up to today, one bar a day; intervals built from smaller ones, on their boundaries; the live minute bar; the best bid and ask; quotes against the previous close.
+  - A 30 s outage of all five exchanges' streams, cut by a local relay that refuses connections meanwhile: each recovers by itself, never shows live while cut, and misses no minute.
+  - In the browser, a pair picked from each of Bybit, OKX, Coinbase and Kraken is live within 1 s. Coinbase's slowest API answers (about 1 in 40) can push it just past that.
 - **Feel parity (manual, M1 and M6):** side-by-side checklist against TradingView:
   - zoom anchor, pinch speed, swipe speed, momentum, flick glide
   - price-axis swipe: speed, fixed point, direction
@@ -577,7 +629,8 @@ Reference viewport is 1634 px wide.
 | "Exact feel" details aren't documented | We own the gesture layer and tune constants side by side with TradingView |
 | Lightweight Charts lacks something | Plugin API first; fork (Apache-2.0) only as a last resort |
 | Exchange outages, rate limits, API changes | Isolated adapters, cache, backoff, visible health dot |
-| Shallow history (Kraken ~720 bars) | Show "no more data"; default to deep-history exchanges |
+| Shallow history (Kraken keeps 720 bars) | Its charts end there, and the oldest week or month built from its days can be partial |
+| Small pages and low limits (Coinbase: 350 bars, 10 requests a second) | Windows fetched side by side and shared; a history cache in M6 |
 | Trademarks | Personal/local use only, our own icons, Lightweight Charts attribution kept |
 
 ## 11. Open questions and parity checklist
@@ -615,6 +668,13 @@ Reference viewport is 1634 px wide.
 18. Where TradingView puts a newly added symbol: ours goes to the end of the selected row's section.
 19. Whether TradingView highlights a row before ↑/↓ (the reference shows none, so ours doesn't), and what Enter does without one (ours adds the top match).
 20. TradingView describes Binance's XRPU as "XRP / U"; ours says "XRP / United Stables", Binance's own name for the asset.
+
+**Exchanges (M5):**
+
+21. A quiet Coinbase pair on 1m: ours shows a flat bar at the last price in each minute without trades. Does TradingView show the same, or leave gaps?
+22. Each exchange's chart for the same pair (XRPUSDT on Bybit and OKX, XRPUSD on Coinbase and Kraken) shows the same candles as TradingView's.
+23. How far back TradingView's Kraken charts go: ours end after 720 bars, all that Kraken's API keeps.
+24. Descriptions on other exchanges use Binance's asset names where Binance lists the coin ("XRP / US Dollar" on Coinbase). Do TradingView's read the same?
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 

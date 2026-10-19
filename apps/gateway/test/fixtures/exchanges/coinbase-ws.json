@@ -1,0 +1,108 @@
+{
+  "trades_snapshot": {
+    "channel": "market_trades",
+    "timestamp": "2026-10-19T07:23:02.906797811Z",
+    "sequence_num": 0,
+    "events": [
+      {
+        "type": "snapshot",
+        "trades": [
+          {
+            "product_id": "XRP-USD",
+            "trade_id": "254781998",
+            "price": "1.3152",
+            "size": "839.726097",
+            "time": "2026-10-19T07:23:00.850914Z",
+            "side": "BUY"
+          },
+          {
+            "product_id": "XRP-USD",
+            "trade_id": "254781997",
+            "price": "1.3153",
+            "size": "3800.778399",
+            "time": "2026-10-19T07:23:00.850914Z",
+            "side": "BUY"
+          },
+          {
+            "product_id": "XRP-USD",
+            "trade_id": "254781996",
+            "price": "1.3153",
+            "size": "4271.711355",
+            "time": "2026-10-19T07:23:00.850914Z",
+            "side": "BUY"
+          }
+        ]
+      }
+    ]
+  },
+  "trades_update": {
+    "channel": "market_trades",
+    "timestamp": "2026-10-19T07:23:06.821093598Z",
+    "sequence_num": 16,
+    "events": [
+      {
+        "type": "update",
+        "trades": [
+          {
+            "product_id": "XRP-USD",
+            "trade_id": "254781999",
+            "price": "1.3153",
+            "size": "51.570606",
+            "time": "2026-10-19T07:23:06.777216Z",
+            "side": "BUY"
+          }
+        ]
+      }
+    ]
+  },
+  "ticker": {
+    "channel": "ticker",
+    "timestamp": "2026-10-19T07:23:03.225814247Z",
+    "sequence_num": 8,
+    "events": [
+      {
+        "type": "update",
+        "tickers": [
+          {
+            "type": "ticker",
+            "product_id": "XRP-USD",
+            "price": "1.31549",
+            "volume_24_h": "51477521.649197",
+            "low_24_h": "1.2547",
+            "high_24_h": "1.3166",
+            "low_52_w": "0.9873",
+            "high_52_w": "2.6975",
+            "price_percent_chg_24_h": "1.66074188562597",
+            "best_bid": "1.3153",
+            "best_ask": "1.3154",
+            "best_bid_quantity": "7498.452866",
+            "best_ask_quantity": "8500"
+          }
+        ]
+      }
+    ]
+  },
+  "heartbeat": {
+    "channel": "heartbeats",
+    "timestamp": "2026-10-19T07:23:02.949565388Z",
+    "sequence_num": 7,
+    "events": [
+      {
+        "current_time": "2026-10-19 07:23:02.948086161 +0000 UTC m=+256585.249605484",
+        "heartbeat_counter": 256585
+      }
+    ]
+  },
+  "subscriptions": {
+    "channel": "subscriptions",
+    "timestamp": "2026-10-19T07:23:02.906861202Z",
+    "sequence_num": 1,
+    "events": [
+      {
+        "subscriptions": {
+          "market_trades": ["XRP-USD"]
+        }
+      }
+    ]
+  }
+}

@@ -49,6 +49,11 @@ export interface ExchangeAdapter {
   readonly name: string;
   /** Most bars one fetchBars call can return. */
   readonly maxBarsPerRequest: number;
+  /**
+   * Whether every period has a bar from the first trade on (quiet ones filled in), so history
+   * can be fetched as parallel time slices, and a slice that comes back short is where it starts.
+   */
+  readonly gapless?: boolean;
 
   /** Intervals the exchange serves itself; the gateway resamples the others from these. */
   readonly nativeResolutions: readonly Resolution[];
@@ -89,6 +94,8 @@ export interface ExchangeAdapter {
   isFeedUp(): boolean;
   onFeedState(listener: (state: FeedState) => void): Unsubscribe;
   close(): Promise<void>;
+  /** Loads what a first lookup would otherwise wait for (an exchange's pair list), at start. */
+  prepare?(): Promise<void>;
 }
 
 const HTTP_STATUS: Record<ErrorCode, number> = {

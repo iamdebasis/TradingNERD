@@ -79,6 +79,8 @@ export class ChartSession {
       if (this.disposed) return;
       this.symbolId = info.id;
       legend.setInstrument(info, resolution);
+      // The best bid and ask don't wait for history: the exchange's stream opens meanwhile.
+      this.subscribeBook(info.id);
 
       const { bars, hasMore } = await api.getBars(
         info.id,
@@ -100,7 +102,7 @@ export class ChartSession {
       this.loaded = true;
       this.showLatest();
       // Subscribe only once history is in place; the feed starts with the current bar.
-      this.subscribe(info.id);
+      this.subscribeBars(info.id);
     } catch (error) {
       if (!this.disposed) legend.setStatus('error', messageOf(error));
     }
@@ -153,7 +155,7 @@ export class ChartSession {
     for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe();
   }
 
-  private subscribe(symbolId: string): void {
+  private subscribeBars(symbolId: string): void {
     const { feed, chart, legend } = this.options;
     this.unsubscribes.push(
       feed.subscribeBars(symbolId, this.options.resolution, {
@@ -176,6 +178,12 @@ export class ChartSession {
         },
         onError: (_code, message) => legend.setStatus('error', message),
       }),
+    );
+  }
+
+  private subscribeBook(symbolId: string): void {
+    const { feed, legend } = this.options;
+    this.unsubscribes.push(
       feed.subscribeBook(symbolId, {
         onBook: (bid, ask) => legend.setBook(bid, ask),
         onState: () => {},

@@ -7,7 +7,8 @@ import {
   searchCatalog,
 } from '@tradingnerd/core';
 import { JsonFile } from '../storage/jsonFile.ts';
-import { buildEntries } from './entries.ts';
+import { buildEntries, mergeNames } from './entries.ts';
+import type { AssetNames } from './names.ts';
 import type { CatalogPair, CatalogSnapshot, CatalogSource } from './types.ts';
 
 /** How often each exchange's pair list is fetched again. */
@@ -72,6 +73,8 @@ export interface SymbolCatalogOptions {
   /** Exchanges the gateway has live data from; the others are listed only. */
   live: ReadonlySet<string>;
   dataDir: string;
+  /** Filled with every exchange's asset names, for symbol lookups. */
+  names?: AssetNames;
   refreshMs?: number;
   retryMs?: number;
   now?: () => number;
@@ -87,6 +90,7 @@ export interface SymbolCatalogOptions {
 export class SymbolCatalog {
   private readonly sources: readonly CatalogSource[];
   private readonly live: ReadonlySet<string>;
+  private readonly names: AssetNames | undefined;
   private readonly file: JsonFile<StoredCatalog>;
   private readonly refreshMs: number;
   private readonly retryMs: number;
@@ -106,6 +110,7 @@ export class SymbolCatalog {
   constructor(options: SymbolCatalogOptions) {
     this.sources = options.sources;
     this.live = options.live;
+    this.names = options.names;
     this.file = new JsonFile(join(options.dataDir, 'catalog.json'), parseStored, { indent: 0 });
     this.refreshMs = options.refreshMs ?? CATALOG_REFRESH_MS;
     this.retryMs = options.retryMs ?? CATALOG_RETRY_MS;
@@ -203,7 +208,9 @@ export class SymbolCatalog {
       const list = this.lists.get(source.id);
       return list ? [{ id: source.id, snapshot: list.snapshot }] : [];
     });
-    this.entries = buildEntries(lists, this.live);
+    const names = mergeNames(lists.map(({ snapshot }) => snapshot.names));
+    this.names?.update(names);
+    this.entries = buildEntries(lists, this.live, names);
     if (this.entries.length > 0) this.markFilled();
   }
 

@@ -58,6 +58,7 @@ export class FakeExchange implements ExchangeAdapter {
   readonly id = 'FAKE';
   readonly name = 'Fake';
   readonly maxBarsPerRequest: number;
+  readonly gapless?: boolean;
   readonly nativeResolutions: readonly Resolution[];
   readonly ticks?: TickSource;
 
@@ -80,9 +81,16 @@ export class FakeExchange implements ExchangeAdapter {
     maxBarsPerRequest = 1_000,
     natives = FAKE_INFO.resolutions,
     ticks,
-  }: { maxBarsPerRequest?: number; natives?: string[]; ticks?: TickSource } = {}) {
+    gapless,
+  }: {
+    maxBarsPerRequest?: number;
+    natives?: string[];
+    ticks?: TickSource;
+    gapless?: boolean;
+  } = {}) {
     this.maxBarsPerRequest = maxBarsPerRequest;
     if (ticks) this.ticks = ticks;
+    if (gapless) this.gapless = true;
     this.nativeResolutions = natives.map((text) => {
       const resolution = parseResolution(text);
       if (!resolution) throw new Error(`bad resolution ${text}`);

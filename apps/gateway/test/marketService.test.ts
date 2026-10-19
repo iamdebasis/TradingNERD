@@ -42,6 +42,10 @@ async function errorOf(promise: Promise<unknown>): Promise<MarketError> {
 }
 
 describe('MarketService.getBars', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('returns the latest bars when no end time is given', async () => {
     const { market } = setup();
     const { bars, hasMore } = await market.getBars(SYMBOL, '1D', null, 3);
@@ -56,6 +60,31 @@ describe('MarketService.getBars', () => {
     expect(bars.map((bar) => bar.time)).toEqual([...bars.map((bar) => bar.time)].sort());
     expect(bars.at(-1)?.time).toBe(LAST);
     expect(fake.fetchCalls.map((call) => call.limit)).toEqual([3, 3, 1]);
+  });
+
+  it('fetches the pages of an exchange with a bar in every period side by side', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime((LAST + 43_200) * 1000);
+    const fake = new FakeExchange({ maxBarsPerRequest: 3, gapless: true });
+    fake.bars = dailyBars(10, LAST);
+    const market = new MarketService([fake]);
+    const { bars, hasMore } = await market.getBars(SYMBOL, '1D', null, 7);
+    expect(bars).toEqual(dailyBars(10, LAST).slice(-7));
+    expect(hasMore).toBe(true);
+    // Three 3-day slices ending after today's bar, asked for at once; no one-by-one paging.
+    const end = (LAST + 86_400) * 1000;
+    expect(fake.rangeCalls.map((call) => (end - call.endMs) / 86_400_000)).toEqual([0, 3, 6]);
+    expect(fake.fetchCalls).toEqual([]);
+  });
+
+  it('knows from a short slice where a gapless history starts, without looking further', async () => {
+    const fake = new FakeExchange({ maxBarsPerRequest: 4, gapless: true });
+    fake.bars = dailyBars(10, LAST);
+    const market = new MarketService([fake]);
+    const { bars, hasMore } = await market.getBars(SYMBOL, '1D', LAST, 50);
+    expect(bars).toHaveLength(9);
+    expect(hasMore).toBe(false);
+    expect(fake.fetchCalls).toEqual([]);
   });
 
   it('only returns bars strictly before `to`', async () => {

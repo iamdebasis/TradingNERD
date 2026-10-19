@@ -3,6 +3,12 @@ import { GATEWAY_DEFAULT_PORT, WEB_DEV_PORT } from '@tradingnerd/core';
 
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
 
+/** Where to reach one exchange instead of its public endpoints (tests point them nowhere). */
+export interface Endpoints {
+  restUrl: string | undefined;
+  streamUrl: string | undefined;
+}
+
 export interface GatewayConfig {
   /** Always loopback: the gateway must never be reachable from the network. */
   host: '127.0.0.1';
@@ -10,18 +16,15 @@ export interface GatewayConfig {
   /** Browser origins allowed to call the gateway (the UI dev server). */
   allowedOrigins: readonly string[];
   logLevel: LogLevel;
-  /** Optional endpoint overrides, e.g. for Binance.US: BINANCE_REST_URL / BINANCE_STREAM_URL. */
-  binance: { restUrl: string | undefined; streamUrl: string | undefined };
   /**
-   * REST endpoints of the exchanges listed in symbol search before their live data arrives:
-   * BYBIT_REST_URL, OKX_REST_URL, COINBASE_REST_URL, KRAKEN_REST_URL (tests point them nowhere).
+   * Endpoint overrides: <EXCHANGE>_REST_URL and <EXCHANGE>_STREAM_URL (for Binance.US, say), and
+   * OKX_BUSINESS_STREAM_URL for OKX's candle stream.
    */
-  catalogUrls: {
-    bybit: string | undefined;
-    okx: string | undefined;
-    coinbase: string | undefined;
-    kraken: string | undefined;
-  };
+  binance: Endpoints;
+  bybit: Endpoints;
+  okx: Endpoints & { businessStreamUrl: string | undefined };
+  coinbase: Endpoints;
+  kraken: Endpoints;
   /** Where local data lives (watchlist, secrets, logo cache): DATA_DIR, or the repo's data/. */
   dataDir: string;
 }
@@ -47,16 +50,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     port,
     allowedOrigins: [`http://127.0.0.1:${WEB_DEV_PORT}`, `http://localhost:${WEB_DEV_PORT}`],
     logLevel,
-    binance: {
-      restUrl: env.BINANCE_REST_URL || undefined,
-      streamUrl: env.BINANCE_STREAM_URL || undefined,
-    },
-    catalogUrls: {
-      bybit: env.BYBIT_REST_URL || undefined,
-      okx: env.OKX_REST_URL || undefined,
-      coinbase: env.COINBASE_REST_URL || undefined,
-      kraken: env.KRAKEN_REST_URL || undefined,
-    },
+    binance: endpoints(env, 'BINANCE'),
+    bybit: endpoints(env, 'BYBIT'),
+    okx: { ...endpoints(env, 'OKX'), businessStreamUrl: env.OKX_BUSINESS_STREAM_URL || undefined },
+    coinbase: endpoints(env, 'COINBASE'),
+    kraken: endpoints(env, 'KRAKEN'),
     dataDir: env.DATA_DIR || REPO_DATA_DIR,
+  };
+}
+
+function endpoints(env: NodeJS.ProcessEnv, exchange: string): Endpoints {
+  return {
+    restUrl: env[`${exchange}_REST_URL`] || undefined,
+    streamUrl: env[`${exchange}_STREAM_URL`] || undefined,
   };
 }

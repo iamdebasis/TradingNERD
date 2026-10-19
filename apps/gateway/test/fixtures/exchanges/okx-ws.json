@@ -1,0 +1,62 @@
+{
+  "candle": {
+    "arg": {
+      "channel": "candle1m",
+      "instId": "XRP-USDT"
+    },
+    "data": [
+      [
+        "1792394580000",
+        "1.3169",
+        "1.3169",
+        "1.3169",
+        "1.3169",
+        "1.500000",
+        "1.9753500000",
+        "1.9753500000",
+        "0"
+      ]
+    ]
+  },
+  "trades": {
+    "arg": {
+      "channel": "trades",
+      "instId": "XRP-USDT"
+    },
+    "data": [
+      {
+        "instId": "XRP-USDT",
+        "tradeId": "291814180",
+        "px": "1.3169",
+        "sz": "1997.325284",
+        "side": "buy",
+        "ts": "1792394584237",
+        "count": "1",
+        "source": "0",
+        "seqId": 57639657655
+      }
+    ]
+  },
+  "bbo": {
+    "arg": {
+      "channel": "bbo-tbt",
+      "instId": "XRP-USDT"
+    },
+    "data": [
+      {
+        "asks": [["1.3169", "3943.1", "0", "3"]],
+        "bids": [["1.3168", "7435.4525", "0", "4"]],
+        "ts": "1792394582107",
+        "seqId": 57639656585
+      }
+    ]
+  },
+  "subscribed": {
+    "event": "subscribe",
+    "arg": {
+      "channel": "trades",
+      "instId": "XRP-USDT"
+    },
+    "connId": "df72f441"
+  }
+}

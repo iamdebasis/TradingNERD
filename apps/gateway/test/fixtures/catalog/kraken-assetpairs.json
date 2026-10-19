@@ -6,49 +6,63 @@
       "wsname": "XRP/USD",
       "base": "XXRP",
       "quote": "ZUSD",
-      "status": "online"
+      "status": "online",
+      "tick_size": "0.00001",
+      "pair_decimals": 5
     },
     "XXBTZUSD": {
       "altname": "XBTUSD",
       "wsname": "XBT/USD",
       "base": "XXBT",
       "quote": "ZUSD",
-      "status": "online"
+      "status": "online",
+      "tick_size": "0.1",
+      "pair_decimals": 1
     },
     "XDGUSD": {
       "altname": "XDGUSD",
       "wsname": "XDG/USD",
       "base": "XXDG",
       "quote": "ZUSD",
-      "status": "online"
+      "status": "online",
+      "tick_size": "0.0000001",
+      "pair_decimals": 7
     },
     "XRPUSDT": {
       "altname": "XRPUSDT",
       "wsname": "XRP/USDT",
       "base": "XXRP",
       "quote": "USDT",
-      "status": "online"
+      "status": "online",
+      "tick_size": "0.00001",
+      "pair_decimals": 5
     },
     "USDTZUSD": {
       "altname": "USDTUSD",
       "wsname": "USDT/USD",
       "base": "USDT",
       "quote": "ZUSD",
-      "status": "online"
+      "status": "online",
+      "tick_size": "0.00001",
+      "pair_decimals": 5
     },
     "ZEURZUSD": {
       "altname": "EURUSD",
       "wsname": "EUR/USD",
       "base": "ZEUR",
       "quote": "ZUSD",
-      "status": "online"
+      "status": "online",
+      "tick_size": "0.00001",
+      "pair_decimals": 5
     },
     "ACAEUR": {
       "altname": "ACAEUR",
       "wsname": "ACA/EUR",
       "base": "ACA",
       "quote": "ZEUR",
-      "status": "cancel_only"
+      "status": "cancel_only",
+      "tick_size": "0.00001",
+      "pair_decimals": 5
     }
   }
 }

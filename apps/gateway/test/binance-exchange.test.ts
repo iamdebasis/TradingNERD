@@ -1,5 +1,5 @@
 import { formatResolution, parseResolution, type Resolution } from '@tradingnerd/core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BinanceExchange } from '../src/exchanges/binance/BinanceExchange.ts';
 import { MarketError } from '../src/market/types.ts';
 
@@ -27,7 +27,9 @@ const assets = {
   ],
 };
 
-function exchange(routes: { assets?: () => Response; symbol?: () => Response } = {}) {
+function exchange(
+  routes: { assets?: () => Response | Promise<Response>; symbol?: () => Response } = {},
+) {
   const calls: URL[] = [];
   const fetchMock = vi.fn(async (input: string | URL | Request) => {
     const url = new URL(String(input));
@@ -48,6 +50,10 @@ function exchange(routes: { assets?: () => Response; symbol?: () => Response } =
 }
 
 describe('BinanceExchange.resolveSymbol', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("describes the pair with Binance's own asset names, like TradingView", async () => {
     const { binance } = exchange();
     expect(await binance.resolveSymbol('XRPUSDT')).toEqual({
@@ -85,6 +91,23 @@ describe('BinanceExchange.resolveSymbol', () => {
   it('falls back to asset codes when the names endpoint fails', async () => {
     const { binance } = exchange({ assets: () => new Response('down', { status: 503 }) });
     expect((await binance.resolveSymbol('XRPUSDT')).description).toBe('XRP / USDT');
+  });
+
+  it('names the pair once the names arrive, though a lookup before them showed codes', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let release: () => void = () => {};
+    const { binance, calls } = exchange({
+      assets: () =>
+        new Promise((resolve) => {
+          release = () => resolve(Response.json(assets));
+        }),
+    });
+    const early = binance.resolveSymbol('XRPUSDT');
+    await vi.advanceTimersByTimeAsync(3_000); // as long as a lookup waits for names
+    expect((await early).description).toBe('XRP / USDT');
+    release();
+    expect((await binance.resolveSymbol('XRPUSDT')).description).toBe('XRP / TetherUS');
+    expect(calls.filter((url) => url.pathname === '/api/v3/exchangeInfo')).toHaveLength(1);
   });
 
   it('caches symbols', async () => {

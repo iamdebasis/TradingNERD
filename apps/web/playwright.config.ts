@@ -6,14 +6,18 @@ const viewport = { width: 1634, height: 1000 };
 
 /**
  * Normal runs mock all market data in the browser and must never reach an exchange: a gateway
- * started here gets unreachable Binance endpoints. LIVE=1 (`pnpm test:e2e:live`) runs only the
+ * started here gets unreachable endpoints for every exchange. LIVE=1 (`pnpm test:e2e:live`) runs only the
  * @live tests, against real Binance.
  */
 const live = process.env.LIVE === '1';
-const offlineBinance = {
-  BINANCE_REST_URL: 'http://127.0.0.1:9',
-  BINANCE_STREAM_URL: 'ws://127.0.0.1:9/stream',
-};
+const nowhere = { rest: 'http://127.0.0.1:9', stream: 'ws://127.0.0.1:9' };
+const offlineExchanges = Object.fromEntries(
+  ['BINANCE', 'BYBIT', 'OKX', 'COINBASE', 'KRAKEN'].flatMap((exchange) => [
+    [`${exchange}_REST_URL`, nowhere.rest],
+    [`${exchange}_STREAM_URL`, nowhere.stream],
+  ]),
+);
+offlineExchanges.OKX_BUSINESS_STREAM_URL = nowhere.stream;
 
 /**
  * Not devices['Desktop Chrome']: its Windows user agent would switch on the Windows wheel
@@ -49,7 +53,7 @@ export default defineConfig({
       cwd: '../gateway',
       url: `http://127.0.0.1:${GATEWAY_DEFAULT_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,
-      env: live ? {} : offlineBinance,
+      env: live ? {} : offlineExchanges,
     },
     {
       command: 'pnpm exec vite',

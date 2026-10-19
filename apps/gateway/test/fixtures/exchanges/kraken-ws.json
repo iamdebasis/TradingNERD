@@ -1,0 +1,75 @@
+{
+  "ohlc": {
+    "channel": "ohlc",
+    "type": "update",
+    "timestamp": "2026-10-19T07:23:04.468616678Z",
+    "data": [
+      {
+        "symbol": "BTC/USD",
+        "open": 82741.8,
+        "high": 82741.8,
+        "low": 82741.8,
+        "close": 82741.8,
+        "trades": 1,
+        "volume": 7.655e-5,
+        "vwap": 82741.8,
+        "interval_begin": "2026-10-19T07:23:00.000000000Z",
+        "interval": 1,
+        "timestamp": "2026-10-19T07:24:00.000000Z"
+      }
+    ]
+  },
+  "trade": {
+    "channel": "trade",
+    "type": "update",
+    "data": [
+      {
+        "symbol": "XRP/USD",
+        "side": "buy",
+        "price": 1.31432,
+        "qty": 25.86778054,
+        "ord_type": "limit",
+        "trade_id": 39246908,
+        "timestamp": "2026-10-19T07:12:24.091413Z"
+      }
+    ]
+  },
+  "ticker": {
+    "channel": "ticker",
+    "type": "update",
+    "data": [
+      {
+        "symbol": "XRP/USD",
+        "bid": 1.31543,
+        "bid_qty": 1543.3949999,
+        "ask": 1.31545,
+        "ask_qty": 236.25,
+        "last": 1.31555,
+        "volume": 17584227.80450973,
+        "vwap": 1.2858,
+        "low": 1.25477,
+        "high": 1.31655,
+        "change": 0.02172,
+        "change_pct": 1.68,
+        "trades": 25102,
+        "timestamp": "2026-10-19T07:23:04.309067Z"
+      }
+    ]
+  },
+  "subscribed": {
+    "method": "subscribe",
+    "result": {
+      "channel": "ohlc",
+      "interval": 1,
+      "snapshot": true,
+      "symbol": "XRP/USD",
+      "warnings": ["timestamp is deprecated, use interval_begin"]
+    },
+    "success": true,
+    "time_in": "2026-10-19T07:23:04.012483Z",
+    "time_out": "2026-10-19T07:23:04.012532Z"
+  },
+  "heartbeat": {
+    "channel": "heartbeat"
+  }
+}

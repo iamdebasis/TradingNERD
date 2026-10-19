@@ -27,6 +27,18 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ GATEWAY_PORT: port })).toThrow(/Invalid GATEWAY_PORT/);
   });
 
+  it("reads each exchange's endpoint overrides, unset when empty", () => {
+    const config = loadConfig({
+      KRAKEN_REST_URL: 'http://127.0.0.1:9',
+      KRAKEN_STREAM_URL: 'ws://127.0.0.1:9',
+      OKX_BUSINESS_STREAM_URL: 'ws://127.0.0.1:9',
+      BYBIT_REST_URL: '',
+    });
+    expect(config.kraken).toEqual({ restUrl: 'http://127.0.0.1:9', streamUrl: 'ws://127.0.0.1:9' });
+    expect(config.okx.businessStreamUrl).toBe('ws://127.0.0.1:9');
+    expect(config.bybit).toEqual({ restUrl: undefined, streamUrl: undefined });
+  });
+
   it('rejects an unknown LOG_LEVEL', () => {
     expect(() => loadConfig({ LOG_LEVEL: 'loud' })).toThrow(/Invalid LOG_LEVEL/);
   });

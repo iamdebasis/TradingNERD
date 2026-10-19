@@ -61,7 +61,8 @@ export class BinanceExchange implements ExchangeAdapter, CatalogSource {
   private readonly rest: BinanceRest;
   private readonly stream: BinanceStream;
   private readonly warn: (message: string) => void;
-  private readonly symbols = new Map<string, { info: Promise<SymbolInfo>; expires: number }>();
+  /** Each pair's listing; its description is made per lookup, so it has the latest names. */
+  private readonly symbols = new Map<string, { symbol: Promise<BinanceSymbol>; expires: number }>();
   private assetNames: { names: Promise<Map<string, string>>; expires: number } | null = null;
   /** Every trading pair, from the last catalog fetch: lookups need no request of their own. */
   private listing: { symbols: Map<string, BinanceSymbol>; fetchedAt: number } | null = null;
@@ -98,15 +99,39 @@ export class BinanceExchange implements ExchangeAdapter, CatalogSource {
     };
   }
 
-  resolveSymbol(ticker: string): Promise<SymbolInfo> {
+  async resolveSymbol(ticker: string): Promise<SymbolInfo> {
+    const [symbol, names] = await Promise.all([this.listingOf(ticker), this.displayNames()]);
+    const name = (code: string) => names.get(code) ?? code;
+    return {
+      id: `${this.id}:${symbol.symbol}`,
+      exchange: this.id,
+      exchangeName: this.name,
+      ticker: symbol.symbol,
+      base: symbol.baseAsset,
+      quote: symbol.quoteAsset,
+      description: `${name(symbol.baseAsset)} / ${name(symbol.quoteAsset)}`,
+      type: 'spot',
+      tickSize: symbol.tickSize,
+      pricePrecision: precisionOf(symbol.tickSize),
+      resolutions: [...BINANCE_RESOLUTIONS],
+    };
+  }
+
+  /** The pair's listing, cached; failures aren't. */
+  private listingOf(ticker: string): Promise<BinanceSymbol> {
     const cached = this.symbols.get(ticker);
-    if (cached && cached.expires > Date.now()) return cached.info;
-    const info = this.loadSymbol(ticker);
-    this.symbols.set(ticker, { info, expires: Date.now() + SYMBOL_TTL_MS });
-    info.catch(() => {
-      if (this.symbols.get(ticker)?.info === info) this.symbols.delete(ticker);
+    if (cached && cached.expires > Date.now()) return cached.symbol;
+    // A pair from a recent full list needs no request: picking one goes live a round trip sooner.
+    const listed =
+      this.listing && Date.now() - this.listing.fetchedAt < LISTING_TTL_MS
+        ? this.listing.symbols.get(ticker)
+        : undefined;
+    const symbol = listed ? Promise.resolve(listed) : this.rest.symbol(ticker);
+    this.symbols.set(ticker, { symbol, expires: Date.now() + SYMBOL_TTL_MS });
+    symbol.catch(() => {
+      if (this.symbols.get(ticker)?.symbol === symbol) this.symbols.delete(ticker);
     });
-    return info;
+    return symbol;
   }
 
   // Async, so an unsupported interval rejects rather than throwing at the call.
@@ -204,32 +229,6 @@ export class BinanceExchange implements ExchangeAdapter, CatalogSource {
       throw new MarketError('unsupported_resolution', "Binance doesn't serve this interval");
     }
     return interval;
-  }
-
-  private async loadSymbol(ticker: string): Promise<SymbolInfo> {
-    // A pair from a recent full list needs no request: picking one goes live a round trip sooner.
-    const listed =
-      this.listing && Date.now() - this.listing.fetchedAt < LISTING_TTL_MS
-        ? this.listing.symbols.get(ticker)
-        : undefined;
-    const [symbol, names] = await Promise.all([
-      listed ?? this.rest.symbol(ticker),
-      this.displayNames(),
-    ]);
-    const name = (code: string) => names.get(code) ?? code;
-    return {
-      id: `${this.id}:${symbol.symbol}`,
-      exchange: this.id,
-      exchangeName: this.name,
-      ticker: symbol.symbol,
-      base: symbol.baseAsset,
-      quote: symbol.quoteAsset,
-      description: `${name(symbol.baseAsset)} / ${name(symbol.quoteAsset)}`,
-      type: 'spot',
-      tickSize: symbol.tickSize,
-      pricePrecision: precisionOf(symbol.tickSize),
-      resolutions: [...BINANCE_RESOLUTIONS],
-    };
   }
 
   /**

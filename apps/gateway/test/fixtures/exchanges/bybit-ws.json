@@ -1,0 +1,64 @@
+{
+  "kline": {
+    "type": "snapshot",
+    "topic": "kline.1.XRPUSDT",
+    "data": [
+      {
+        "start": 1792394580000,
+        "end": 1792394639999,
+        "interval": "1",
+        "open": "1.3168",
+        "close": "1.3168",
+        "high": "1.3168",
+        "low": "1.3168",
+        "volume": "0",
+        "turnover": "0",
+        "confirm": false,
+        "timestamp": 1792394580292
+      }
+    ],
+    "ts": 1792394580292
+  },
+  "trade": {
+    "topic": "publicTrade.XRPUSDT",
+    "ts": 1792394582121,
+    "type": "snapshot",
+    "data": [
+      {
+        "i": "2260000001633790652",
+        "T": 1792394582120,
+        "p": "1.3167",
+        "v": "380.07",
+        "S": "Sell",
+        "seq": 195065757919,
+        "s": "XRPUSDT",
+        "BT": false,
+        "RPI": false
+      },
+      {
+        "i": "2260000001633790653",
+        "T": 1792394582120,
+        "p": "1.3167",
+        "v": "0.24",
+        "S": "Sell",
+        "seq": 195065757919,
+        "s": "XRPUSDT",
+        "BT": false,
+        "RPI": false
+      }
+    ]
+  },
+  "book": {
+    "topic": "orderbook.1.XRPUSDT",
+    "ts": 1792394581394,
+    "type": "snapshot",
+    "data": {
+      "s": "XRPUSDT",
+      "b": [["1.3167", "1381.55"]],
+      "a": [["1.3168", "3096.92"]],
+      "u": 58955069,
+      "seq": 195065757704
+    },
+    "cts": 1792394581390
+  }
+}

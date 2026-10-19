@@ -5,10 +5,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { SymbolCatalog } from '../../src/catalog/SymbolCatalog.ts';
 import type { CatalogSource } from '../../src/catalog/types.ts';
 import { BinanceExchange } from '../../src/exchanges/binance/BinanceExchange.ts';
-import { BybitCatalog } from '../../src/exchanges/bybit/catalog.ts';
-import { CoinbaseCatalog } from '../../src/exchanges/coinbase/catalog.ts';
-import { KrakenCatalog } from '../../src/exchanges/kraken/catalog.ts';
-import { OkxCatalog } from '../../src/exchanges/okx/catalog.ts';
+import { BybitExchange } from '../../src/exchanges/bybit/BybitExchange.ts';
+import { CoinbaseExchange } from '../../src/exchanges/coinbase/CoinbaseExchange.ts';
+import { KrakenExchange } from '../../src/exchanges/kraken/KrakenExchange.ts';
+import { OkxExchange } from '../../src/exchanges/okx/OkxExchange.ts';
 
 // Talks to the five exchanges' public APIs. Skipped unless LIVE=1 (`pnpm test:live`).
 const LIVE = process.env.LIVE === '1';
@@ -17,10 +17,10 @@ describe.runIf(LIVE)('symbol catalog, live', () => {
   const binance = new BinanceExchange();
   const sources: CatalogSource[] = [
     binance,
-    new BybitCatalog(),
-    new OkxCatalog(),
-    new CoinbaseCatalog(),
-    new KrakenCatalog(),
+    new BybitExchange(),
+    new OkxExchange(),
+    new CoinbaseExchange(),
+    new KrakenExchange(),
   ];
   afterAll(() => binance.close());
 

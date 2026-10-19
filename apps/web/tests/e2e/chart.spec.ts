@@ -161,6 +161,24 @@ test('after the connection drops, it reconnects and refills recent bars', async 
   expect(market.barRequests.at(-1)?.has('to')).toBe(false);
 });
 
+test('an exchange outage: the chart says so, then fills in what it missed', async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await expect(legend(page)).toHaveAttribute('data-status', 'live');
+  const requestsBefore = market.barRequests.length;
+  // The gateway lost the exchange (docs/SPEC.md §8, M5), while this page's link stayed up.
+  await market.sendBarsState('reconnecting');
+  await expect(legend(page)).toHaveAttribute('data-status', 'reconnecting');
+  await market.sendBarsState('live');
+  await expect(legend(page)).toHaveAttribute('data-status', 'live');
+  await expect.poll(() => market.barRequests.length).toBe(requestsBefore + 1);
+  expect(market.barRequests.at(-1)?.has('to')).toBe(false); // the latest bars, through the gap
+  expect(market.barRequests.at(-1)?.get('countBack')).toBe('1000');
+  expect(market.connections()).toBe(1);
+});
+
 test('an unknown symbol shows a clear error', async ({ page, consoleGuard }) => {
   consoleGuard.allow(/status of 404/);
   await page.goto('/?symbol=BINANCE:NOPE');

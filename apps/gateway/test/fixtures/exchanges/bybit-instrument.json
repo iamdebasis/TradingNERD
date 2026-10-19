@@ -1,0 +1,41 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "spot",
+    "list": [
+      {
+        "symbolId": 11,
+        "symbol": "XRPUSDT",
+        "baseCoin": "XRP",
+        "quoteCoin": "USDT",
+        "innovation": "0",
+        "status": "Trading",
+        "marginTrading": "utaOnly",
+        "stTag": "0",
+        "lotSizeFilter": {
+          "basePrecision": "0.01",
+          "quotePrecision": "0.000001",
+          "minOrderQty": "0.01",
+          "maxOrderQty": "1200000",
+          "minOrderAmt": "5",
+          "maxOrderAmt": "4000000",
+          "maxLimitOrderQty": "1200000",
+          "maxMarketOrderQty": "620000",
+          "postOnlyMaxLimitOrderSize": "6000000"
+        },
+        "priceFilter": {
+          "tickSize": "0.0001"
+        },
+        "riskParameters": {
+          "priceLimitRatioX": "0.005",
+          "priceLimitRatioY": "0.01"
+        },
+        "symbolType": "",
+        "xstockMultiplier": "1"
+      }
+    ]
+  },
+  "retExtInfo": {},
+  "time": 1792393895300
+}

@@ -53,7 +53,7 @@ test('typing XRP lists every exchange, one row per pair, the matches highlighted
   await expect(xrp.locator('mark').first()).toHaveText('XRP');
   await expect(xrp.locator('mark').first()).toHaveCSS('color', 'rgb(41, 98, 255)');
 
-  // The other exchanges listing XRPUSDT, most traded first; their live data arrives in M5.
+  // The other exchanges listing XRPUSDT, most traded first, each one a price source to pick.
   await xrp.getByRole('button', { name: /Show the exchanges/ }).click();
   await expect
     .poll(() => results(addDialog(page)))
@@ -67,8 +67,7 @@ test('typing XRP lists every exchange, one row per pair, the matches highlighted
     ]);
   const okx = result(addDialog(page), 'OKX:XRPUSDT');
   await expect(okx).toContainText('OKX');
-  await expect(okx).toHaveAttribute('title', "Live data from OKX isn't available yet");
-  await expect(okx.getByRole('button', { name: 'Add to watchlist' })).toBeDisabled();
+  await expect(okx.getByRole('button', { name: 'Add to watchlist' })).toBeEnabled();
   await xrp.getByRole('button', { name: /Hide the exchanges/ }).click();
   await expect(result(addDialog(page), 'OKX:XRPUSDT')).toHaveCount(0);
 });
@@ -199,12 +198,17 @@ test('symbol search, from the pill or a letter typed on the chart, switches the 
   await expect(searchDialog(page)).toHaveCount(0);
 });
 
-test("a pair only exchanges without live data list can't be picked yet", async ({ page }) => {
+test("a pair only exchanges without live data list can't be picked yet", async ({
+  page,
+  market,
+}) => {
+  market.liveExchanges.delete('KRAKEN'); // as when an exchange's feed isn't built
   await openChart(page);
   await page.getByRole('button', { name: 'Symbol search: XRPUSDT' }).click();
   await field(searchDialog(page)).fill('XBT');
   const xbt = result(searchDialog(page), 'KRAKEN:XBTUSD');
   await expect(xbt).toHaveAttribute('aria-disabled', 'true');
+  await expect(xbt).toHaveAttribute('title', "Live data from Kraken isn't available yet");
   await page.keyboard.press('Enter');
   await xbt.click({ force: true }); // a person can still click it; nothing happens
   await expect(searchDialog(page)).toBeVisible();
@@ -330,3 +334,31 @@ async function box(locator: Locator) {
   if (!value) throw new Error('not visible');
   return value;
 }
+
+test('a pair from another exchange is added, ticks in the watchlist and charts', async ({
+  page,
+  market,
+}) => {
+  await openAddSymbol(page);
+  await field(addDialog(page)).fill('XBT');
+  const xbt = result(addDialog(page), 'KRAKEN:XBTUSD');
+  await expect(xbt).toContainText('Kraken');
+  await xbt.getByRole('button', { name: 'Add to watchlist' }).click({ modifiers: ['Shift'] });
+  await expect(addDialog(page)).toHaveCount(0);
+  await expect.poll(() => savedSymbols(market.watchlistSaves).at(-1)).toBe('KRAKEN:XBTUSD');
+
+  const row = watchlist(page).getByRole('button', { name: 'XBTUSD', exact: true });
+  await expect(row).toContainText(/\d\.\d/); // its quote arrived
+  await market.sendQuote('KRAKEN:XBTUSD', 82_706.7, 81_000);
+  await expect(row).toContainText('82706.7');
+  await row.click();
+  await expect(page.getByText('Bitcoin / US Dollar · 1D · Kraken')).toBeVisible();
+  await expect.poll(() => market.barRequests.at(-1)?.get('symbol')).toBe('KRAKEN:XBTUSD');
+});
+
+test('the same pair can come from any exchange: the chart says which', async ({ page }) => {
+  await openChart(page, '/?symbol=OKX:XRPUSDT');
+  await expect(page.getByText('XRP / TetherUS · 1D · OKX')).toBeVisible();
+  await openChart(page, '/?symbol=COINBASE:XRPUSD');
+  await expect(page.getByText('XRP / US Dollar · 1D · Coinbase')).toBeVisible();
+});

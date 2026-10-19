@@ -76,8 +76,8 @@ export function mergeNames(
 export function buildEntries(
   exchanges: readonly { id: string; snapshot: CatalogSnapshot }[],
   live: ReadonlySet<string>,
+  names: ReadonlyMap<string, string> = mergeNames(exchanges.map(({ snapshot }) => snapshot.names)),
 ): CatalogEntry[] {
-  const names = mergeNames(exchanges.map(({ snapshot }) => snapshot.names));
   const nameOf = (code: string) => names.get(code) ?? code;
   const entries: CatalogEntry[] = [];
   for (const { id, snapshot } of exchanges) {

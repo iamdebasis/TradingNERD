@@ -16,7 +16,9 @@
       "alias": "",
       "alias_to": ["BTC-USDC"],
       "base_display_symbol": "BTC",
-      "quote_display_symbol": "USD"
+      "quote_display_symbol": "USD",
+      "price_increment": "0.01",
+      "quote_increment": "0.01"
     },
     {
       "product_id": "XRP-USD",
@@ -34,7 +36,9 @@
       "alias": "",
       "alias_to": ["XRP-USDC"],
       "base_display_symbol": "XRP",
-      "quote_display_symbol": "USD"
+      "quote_display_symbol": "USD",
+      "price_increment": "0.0001",
+      "quote_increment": "0.0001"
     },
     {
       "product_id": "XRP-USDC",
@@ -52,7 +56,9 @@
       "alias": "XRP-USD",
       "alias_to": [],
       "base_display_symbol": "XRP",
-      "quote_display_symbol": "USD"
+      "quote_display_symbol": "USD",
+      "price_increment": "0.0001",
+      "quote_increment": "0.0001"
     },
     {
       "product_id": "USDT-USD",
@@ -70,7 +76,9 @@
       "alias": "",
       "alias_to": [],
       "base_display_symbol": "USDT",
-      "quote_display_symbol": "USD"
+      "quote_display_symbol": "USD",
+      "price_increment": "0.00001",
+      "quote_increment": "0.00001"
     },
     {
       "product_id": "XRP-EUR",
@@ -88,7 +96,9 @@
       "alias": "",
       "alias_to": [],
       "base_display_symbol": "XRP",
-      "quote_display_symbol": "EUR"
+      "quote_display_symbol": "EUR",
+      "price_increment": "0.0001",
+      "quote_increment": "0.0001"
     },
     {
       "product_id": "DAI-USD",
@@ -106,7 +116,9 @@
       "alias": "",
       "alias_to": ["DAI-USDC"],
       "base_display_symbol": "DAI",
-      "quote_display_symbol": "USD"
+      "quote_display_symbol": "USD",
+      "price_increment": "0.0001",
+      "quote_increment": "0.0001"
     }
   ],
   "num_products": 6,

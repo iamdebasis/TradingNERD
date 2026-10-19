@@ -44,6 +44,26 @@ export async function pageBack(
 }
 
 /**
+ * `pageBack`'s bars. An exchange with a bar in every period (`gapless`) has its pages fetched
+ * at once, as time slices, instead of one after another.
+ */
+export async function fetchHistory(
+  adapter: ExchangeAdapter,
+  ticker: string,
+  resolution: Resolution,
+  endMs: number | null,
+  count: number,
+): Promise<History> {
+  const pages = Math.ceil(count / adapter.maxBarsPerRequest);
+  if (!adapter.gapless || pages < 2 || resolutionDurationMs(resolution) === null) {
+    return pageBack(adapter, ticker, resolution, endMs, count);
+  }
+  const history = await fetchSlices(adapter, ticker, resolution, endMs, count, pages);
+  if (history.bars.length <= count) return history;
+  return { bars: history.bars.slice(-count), hasMore: true };
+}
+
+/**
  * About `count` native bars opening before `endMs` (up to the live bar when null), fetched as
  * time slices in parallel; at most `maxRequests` slices. Exchanges serve fixed-length
  * intervals without gaps (Binance even returns seconds without trades), so slices of
@@ -75,7 +95,9 @@ export async function fetchSlices(
   const oldestStart = end - slices * span;
   const first = bars[0];
   let hasMore = true;
-  if (!first || first.time * 1000 > oldestStart) {
+  if (adapter.gapless) {
+    hasMore = first !== undefined && first.time * 1000 <= oldestStart;
+  } else if (!first || first.time * 1000 > oldestStart) {
     // The oldest slice isn't full: either history starts there or there's a gap. One look tells.
     const before = await adapter.fetchBars(
       ticker,

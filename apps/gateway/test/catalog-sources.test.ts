@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { BinanceExchange } from '../src/exchanges/binance/BinanceExchange.ts';
 import { parseMiniTickers, parseTradingSymbols } from '../src/exchanges/binance/parse.ts';
-import { BybitCatalog, parseBybitPairs } from '../src/exchanges/bybit/catalog.ts';
-import { CoinbaseCatalog, parseCoinbaseCatalog } from '../src/exchanges/coinbase/catalog.ts';
-import { KrakenCatalog, parseKrakenPairs } from '../src/exchanges/kraken/catalog.ts';
-import { OkxCatalog, parseOkxPairs } from '../src/exchanges/okx/catalog.ts';
+import { BybitExchange } from '../src/exchanges/bybit/BybitExchange.ts';
+import { parseBybitPairs } from '../src/exchanges/bybit/parse.ts';
+import { CoinbaseExchange } from '../src/exchanges/coinbase/CoinbaseExchange.ts';
+import { parseCoinbaseCatalog } from '../src/exchanges/coinbase/parse.ts';
+import { KrakenExchange } from '../src/exchanges/kraken/KrakenExchange.ts';
+import { parseKrakenPairs } from '../src/exchanges/kraken/parse.ts';
+import { OkxExchange } from '../src/exchanges/okx/OkxExchange.ts';
+import { parseOkxPairs } from '../src/exchanges/okx/parse.ts';
 import { MarketError } from '../src/market/types.ts';
 import { fixture, fixtureFetch } from './helpers/FakeCatalog.ts';
 
@@ -82,7 +86,7 @@ describe('Bybit pair list', () => {
       'instruments-info': fixture('bybit-instruments'),
       '/v5/market/tickers': fixture('bybit-tickers'),
     });
-    expect((await new BybitCatalog({ fetch }).fetchCatalog()).pairs).toHaveLength(4);
+    expect((await new BybitExchange({ fetch }).fetchCatalog()).pairs).toHaveLength(4);
     expect(requested.every((url) => url.includes('category=spot'))).toBe(true);
   });
 
@@ -108,7 +112,7 @@ describe('OKX pair list', () => {
       '/public/instruments': fixture('okx-instruments'),
       '/market/tickers': fixture('okx-tickers'),
     });
-    expect((await new OkxCatalog({ fetch }).fetchCatalog()).pairs).toHaveLength(4);
+    expect((await new OkxExchange({ fetch }).fetchCatalog()).pairs).toHaveLength(4);
   });
 
   it('refuses an error answer', () => {
@@ -138,7 +142,7 @@ describe('Coinbase pair list', () => {
       EUR: 'Euro',
     });
     const { fetch, requested } = fixtureFetch({ '/market/products': fixture('coinbase-products') });
-    expect((await new CoinbaseCatalog({ fetch }).fetchCatalog()).pairs).toHaveLength(4);
+    expect((await new CoinbaseExchange({ fetch }).fetchCatalog()).pairs).toHaveLength(4);
     expect(requested[0]).toContain('product_type=SPOT');
   });
 
@@ -160,7 +164,7 @@ describe('Kraken pair list', () => {
       '/0/public/AssetPairs': fixture('kraken-assetpairs'),
       '/0/public/Ticker': fixture('kraken-ticker'),
     });
-    expect((await new KrakenCatalog({ fetch }).fetchCatalog()).pairs).toHaveLength(6);
+    expect((await new KrakenExchange({ fetch }).fetchCatalog()).pairs).toHaveLength(6);
   });
 
   it('refuses an error answer', () => {
@@ -173,18 +177,18 @@ describe('Kraken pair list', () => {
 describe('exchange outages', () => {
   it('names the exchange, and tells rate limiting apart', async () => {
     const down = (async () => new Response('', { status: 503 })) as typeof fetch;
-    await expect(new KrakenCatalog({ fetch: down }).fetchCatalog()).rejects.toMatchObject({
+    await expect(new KrakenExchange({ fetch: down }).fetchCatalog()).rejects.toMatchObject({
       code: 'upstream_error',
       message: 'Kraken answered HTTP 503',
     });
     const busy = (async () => new Response('', { status: 429 })) as typeof fetch;
-    await expect(new OkxCatalog({ fetch: busy }).fetchCatalog()).rejects.toMatchObject({
+    await expect(new OkxExchange({ fetch: busy }).fetchCatalog()).rejects.toMatchObject({
       code: 'rate_limited',
     });
     const offline = (async () => {
       throw new TypeError('fetch failed');
     }) as typeof fetch;
-    await expect(new BybitCatalog({ fetch: offline }).fetchCatalog()).rejects.toMatchObject({
+    await expect(new BybitExchange({ fetch: offline }).fetchCatalog()).rejects.toMatchObject({
       code: 'upstream_error',
       message: 'Bybit is unreachable (fetch failed)',
     });
