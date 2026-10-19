@@ -18,6 +18,7 @@ import {
 import { type Coalescer, createCoalescer } from './coalesce.ts';
 import { Feed } from './feed.ts';
 import { fetchHistory, fetchSlices, pageBack } from './history.ts';
+import { HistoryCache } from './historyCache.ts';
 import type { BarChange } from './liveBar.ts';
 import { QuoteFeed, type QuoteListener } from './quotes.ts';
 import { nativeLiveBars, ResampledBarAggregator } from './resampledBar.ts';
@@ -53,6 +54,8 @@ export interface MarketServiceOptions {
   quoteIntervalMs?: number;
   /** Wait before retrying a failed REST seed, by attempt number (0-based). */
   retryDelayMs?: (attempt: number) => number;
+  /** Keeps recent history pages (default); false fetches every page from the exchange. */
+  cacheHistory?: boolean;
 }
 
 export const MAX_COUNT_BACK = 5_000;
@@ -75,6 +78,7 @@ export class MarketService {
   private readonly tickHistory = new TickHistory();
   private readonly bookFeeds = new Map<string, BookFeed>();
   private readonly quoteFeeds = new Map<string, QuoteFeed>();
+  private readonly history: HistoryCache | null;
   private readonly emitIntervalMs: number;
   private readonly quoteIntervalMs: number;
   private readonly retryDelayMs: (attempt: number) => number;
@@ -84,6 +88,7 @@ export class MarketService {
     this.emitIntervalMs = options.emitIntervalMs ?? 50;
     this.quoteIntervalMs = options.quoteIntervalMs ?? 250;
     this.retryDelayMs = options.retryDelayMs ?? ((n) => Math.min(1_000 * 2 ** n, 30_000));
+    this.history = options.cacheHistory === false ? null : new HistoryCache();
   }
 
   async resolveSymbol(symbolId: string): Promise<SymbolInfo> {
@@ -93,7 +98,8 @@ export class MarketService {
 
   /**
    * Up to `countBack` bars that open strictly before `toSec` (UTC seconds), or the latest bars
-   * when `toSec` is null. Pages through the exchange as needed.
+   * when `toSec` is null. Pages through the exchange as needed; recent pages are kept, so going
+   * back to a chart is instant (historyCache.ts).
    */
   async getBars(
     symbolId: string,
@@ -112,15 +118,17 @@ export class MarketService {
     await adapter.resolveSymbol(ticker);
     switch (plan.kind) {
       case 'native':
-        return fetchHistory(
-          adapter,
-          ticker,
-          plan.target,
-          toSec === null ? null : toSec * 1000,
-          countBack,
-        );
-      case 'resampled':
-        return getResampledBars(adapter, ticker, plan.target, plan.base, toSec, countBack);
+      case 'resampled': {
+        const load = (to: number | null, count: number) =>
+          plan.kind === 'native'
+            ? fetchHistory(adapter, ticker, plan.target, to === null ? null : to * 1000, count)
+            : getResampledBars(adapter, ticker, plan.target, plan.base, to, count);
+        if (!this.history) return load(toSec, countBack);
+        const page = `${id}|${formatResolution(plan.target)}|${countBack}`;
+        return toSec === null
+          ? this.history.latest(page, plan.target, countBack, (count) => load(null, count))
+          : this.history.older(`${page}|${toSec}`, plan.target, () => load(toSec, countBack));
+      }
       case 'ticks':
         // For tick bars `toSec` is a bar number (see Bar.time).
         return this.tickHistory.bars(plan.source, id, ticker, plan.target.count, toSec, countBack);

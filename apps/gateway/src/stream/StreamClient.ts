@@ -32,12 +32,12 @@ export interface StreamClientOptions {
   url: string;
   /** Wait before reconnect attempt n (0-based). */
   reconnectDelayMs?: (attempt: number) => number;
-  /** Close the connection after this long with no subscriptions. */
+  /** Close the connection after this long with no subscriptions (10 min: coming back is instant). */
   idleCloseMs?: number;
   /** How often to ping; with nothing received for `pongTimeoutMs` after, the link is dropped. */
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
-  /** Gap between subscribe and unsubscribe messages. */
+  /** Least gap between subscribe and unsubscribe messages; the first after a pause goes at once. */
   controlIntervalMs?: number;
   onWarning?: (message: string) => void;
 }
@@ -72,6 +72,8 @@ export class StreamClient {
   private shutDown = false;
   private attempt = 0;
   private nextRequestId = 1;
+  /** When the last subscribe or unsubscribe message went out. */
+  private lastControlAt = Number.NEGATIVE_INFINITY;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private controlTimer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -82,7 +84,7 @@ export class StreamClient {
     this.protocol = protocol;
     this.url = options.url;
     this.reconnectDelayMs = options.reconnectDelayMs ?? ((n) => Math.min(500 * 2 ** n, 30_000));
-    this.idleCloseMs = options.idleCloseMs ?? 30_000;
+    this.idleCloseMs = options.idleCloseMs ?? 600_000;
     this.pingIntervalMs = options.pingIntervalMs ?? 20_000;
     this.pongTimeoutMs = options.pongTimeoutMs ?? 10_000;
     this.controlIntervalMs = options.controlIntervalMs ?? 250;
@@ -214,19 +216,27 @@ export class StreamClient {
     this.pongTimer = undefined;
   }
 
+  /**
+   * The first change after a pause goes out at once (with the others made in the same turn);
+   * later ones wait for the window, so the exchange sees at most one message per window.
+   */
   private scheduleControl(): void {
     if (this.controlTimer || !this.connected) return;
     if (this.toSubscribe.size === 0 && this.toUnsubscribe.size === 0) return;
+    const wait = Math.max(0, this.lastControlAt + this.controlIntervalMs - Date.now());
     this.controlTimer = setTimeout(() => {
       this.controlTimer = undefined;
       this.sendControl();
-    }, this.controlIntervalMs);
+    }, wait);
   }
 
-  /** Sends one subscribe or unsubscribe batch; anything left waits for the next window. */
+  /**
+   * Sends one subscribe or unsubscribe batch; anything left waits for the next window.
+   * Subscribes go first: on a switch between two pairs, the new one's data shouldn't wait.
+   */
   private sendControl(): void {
     if (!this.socket || !this.connected) return;
-    const unsubscribing = this.toUnsubscribe.size > 0;
+    const unsubscribing = this.toSubscribe.size === 0;
     const queue = unsubscribing ? this.toUnsubscribe : this.toSubscribe;
     const topics = [...queue].slice(0, this.protocol.maxTopicsPerMessage);
     if (topics.length > 0) {
@@ -236,6 +246,7 @@ export class StreamClient {
         ? this.protocol.unsubscribe(topics, id)
         : this.protocol.subscribe(topics, id);
       for (const frame of frames) this.socket.send(frame);
+      this.lastControlAt = Date.now();
     }
     this.scheduleControl();
   }
@@ -259,6 +270,7 @@ export class StreamClient {
       this.idleTimer = undefined;
       if (this.handlers.size === 0) this.socket?.close();
     }, this.idleCloseMs);
+    this.idleTimer.unref?.(); // an idle link never keeps the process running
   }
 
   private emitState(state: FeedState): void {

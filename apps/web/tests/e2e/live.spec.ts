@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+import { DEFAULT_WATCHLIST } from '@tradingnerd/core';
 
 // Real Binance data through the real gateway. Opt-in: `pnpm test:e2e:live`.
 
@@ -39,6 +40,18 @@ test('real Binance data flows end to end', { tag: '@live' }, async ({ page }) =>
   expect(problems).toEqual([]);
 });
 
+/**
+ * The page sees the default watchlist and its saves are answered here: your real
+ * data/watchlist.json is neither changed nor relied on (pairs you've added can't get in the way).
+ */
+async function useDefaultWatchlist(page: Page) {
+  let list: unknown = structuredClone(DEFAULT_WATCHLIST);
+  await page.route(/\/api\/watchlist$/, (route) => {
+    if (route.request().method() === 'PUT') list = route.request().postDataJSON();
+    return route.fulfill({ json: list });
+  });
+}
+
 test('Add symbol finds XRP on every exchange, and a picked pair is live within a second', {
   tag: '@live',
 }, async ({ page }) => {
@@ -47,12 +60,7 @@ test('Add symbol finds XRP on every exchange, and a picked pair is live within a
     if (message.type() === 'error' || message.type() === 'warning') problems.push(message.text());
   });
   page.on('pageerror', (error) => problems.push(error.message));
-  // Your real data/watchlist.json stays as it is: saves are answered here instead.
-  await page.route(/\/api\/watchlist$/, (route) =>
-    route.request().method() === 'PUT'
-      ? route.fulfill({ json: route.request().postDataJSON() })
-      : route.continue(),
-  );
+  await useDefaultWatchlist(page);
 
   await page.goto('/');
   const panel = page.getByRole('complementary', { name: 'Watchlist' });
@@ -119,12 +127,7 @@ test('pairs from Bybit, OKX, Coinbase and Kraken go live within a second of bein
     if (message.type() === 'error' || message.type() === 'warning') problems.push(message.text());
   });
   page.on('pageerror', (error) => problems.push(error.message));
-  // Your real data/watchlist.json stays as it is: saves are answered here instead.
-  await page.route(/\/api\/watchlist$/, (route) =>
-    route.request().method() === 'PUT'
-      ? route.fulfill({ json: route.request().postDataJSON() })
-      : route.continue(),
-  );
+  await useDefaultWatchlist(page);
   await page.goto('/');
   const panel = page.getByRole('complementary', { name: 'Watchlist' });
   await expect(panel.locator('button[data-symbol]').first()).toBeVisible({ timeout: 15_000 });

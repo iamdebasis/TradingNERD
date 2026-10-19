@@ -350,7 +350,7 @@ test('a pair from another exchange is added, ticks in the watchlist and charts',
   const row = watchlist(page).getByRole('button', { name: 'XBTUSD', exact: true });
   await expect(row).toContainText(/\d\.\d/); // its quote arrived
   await market.sendQuote('KRAKEN:XBTUSD', 82_706.7, 81_000);
-  await expect(row).toContainText('82706.7');
+  await expect(row).toContainText('82,706.7'); // thousands grouped, as TradingView's watchlist
   await row.click();
   await expect(page.getByText('Bitcoin / US Dollar · 1D · Kraken')).toBeVisible();
   await expect.poll(() => market.barRequests.at(-1)?.get('symbol')).toBe('KRAKEN:XBTUSD');

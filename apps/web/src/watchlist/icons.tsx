@@ -51,3 +51,17 @@ export function SectionCaret({ open }: { open: boolean }) {
     </svg>
   );
 }
+
+/**
+ * "Remove from watchlist" on a hovered row: a bin with a lid and handle, centered in its 22 px
+ * button. Traced at 2× from docs/reference/05-watchlist-hover.png; it differs from it by 0.8
+ * gray levels on average (tests/e2e/watchlist.spec.ts).
+ */
+export function RemoveIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" aria-hidden>
+      <path d="M5 6.5h12M8.5 6v-.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1V6" />
+      <path d="M6.5 7l.9 9.6a1 1 0 0 0 1 .9h5.2a1 1 0 0 0 1-.9L15.5 7" />
+    </svg>
+  );
+}

@@ -1,3 +1,5 @@
+import { formatPrice } from '@tradingnerd/chart';
+
 /** TradingView prints negative numbers with a true minus sign, not a hyphen. */
 const MINUS = '−';
 
@@ -13,8 +15,24 @@ export const CHANGE_DECIMALS = 5;
 export function formatChange(value: number, precision: number): string {
   const exact = Math.abs(value).toFixed(precision);
   const cut = precision - CHANGE_DECIMALS;
-  const text = cut > 0 ? exact.slice(0, -cut) : exact;
+  const text = groupThousands(cut > 0 ? exact.slice(0, -cut) : exact);
   return directionOf(value, precision) === 'down' ? `${MINUS}${text}` : text;
+}
+
+/** The last price as the watchlist shows it: the symbol's decimals, thousands grouped. */
+export function formatLast(value: number, precision: number): string {
+  return groupThousands(formatPrice(value, precision));
+}
+
+/**
+ * Whole digits in groups of three, as TradingView's watchlist prints them: ZEC at "1,147.903"
+ * in docs/reference/05-watchlist-hover.png. A leading sign stays in front.
+ */
+export function groupThousands(text: string): string {
+  const dot = text.indexOf('.');
+  const whole = dot === -1 ? text : text.slice(0, dot);
+  const rest = dot === -1 ? '' : text.slice(dot);
+  return whole.replace(/\B(?=(\d{3})+$)/g, ',') + rest;
 }
 
 export function formatChangePercent(value: number): string {

@@ -140,8 +140,41 @@
   cursor: default;
 }
 
-.row:hover {
-  background: var(--color-popup);
+/* A row and, under the mouse, the remove button over its right end. */
+.rowWrap {
+  position: relative;
+}
+
+/* Measured from docs/reference/05-watchlist-hover.png: the separators' gray. The chart's
+   symbol keeps its selection color. */
+.rowWrap:hover > .row:not([aria-current="true"]) {
+  background: var(--color-gutter);
+}
+
+/* 22 px, 4 px corners, 7 px from the row's right edge, centered on the row above its line. */
+.remove {
+  position: absolute;
+  top: 3.5px;
+  right: 7px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-separator);
+  color: var(--color-text);
+  cursor: default;
+}
+
+.rowWrap:hover > .remove {
+  display: flex;
+}
+
+.list[data-dragging] .rowWrap:hover > .remove {
+  display: none;
 }
 
 /* The chart's symbol. */

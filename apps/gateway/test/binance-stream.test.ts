@@ -50,6 +50,7 @@ async function mockBinance(options: { autoPong?: boolean } = {}) {
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -121,6 +122,32 @@ describe('BinanceStream', () => {
     await vi.waitFor(() => expect(subscribed(server.control)).toHaveLength(4));
     expect(server.control).toHaveLength(2);
     expect(server.control[1]?.params).toEqual(['b@aggTrade', 'c@aggTrade', 'd@aggTrade']);
+  });
+
+  it('sends a subscription made after a pause at once, and the next one a window later', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { server, stream } = await setup({}, { controlIntervalMs: 5_000 });
+    stream.subscribe('a@aggTrade', () => {});
+    await vi.waitFor(() => expect(server.control).toHaveLength(1));
+    vi.setSystemTime(Date.now() + 6_000); // a pause longer than the window
+    stream.subscribe('b@aggTrade', () => {});
+    await vi.waitFor(() => expect(server.control).toHaveLength(2), { timeout: 1_000 });
+    stream.subscribe('c@aggTrade', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(server.control).toHaveLength(2);
+  });
+
+  it("sends waiting subscribes before waiting unsubscribes: a new pair needn't wait", async () => {
+    const { server, stream } = await setup();
+    const old = stream.subscribe('a@aggTrade', () => {});
+    await vi.waitFor(() => expect(server.control).toHaveLength(1));
+    old();
+    stream.subscribe('b@aggTrade', () => {});
+    await vi.waitFor(() => expect(server.control).toHaveLength(3));
+    expect(server.control.slice(1).map((c) => [c.method, c.params])).toEqual([
+      ['SUBSCRIBE', ['b@aggTrade']],
+      ['UNSUBSCRIBE', ['a@aggTrade']],
+    ]);
   });
 
   it('never sends an UNSUBSCRIBE for a stream that was dropped before it was subscribed', async () => {

@@ -83,6 +83,12 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | The chart asks for the **best bid and ask as soon as the symbol is known**, not after its history | The exchange's stream opens while history loads. Coinbase's Sell/Buy now shows 0.7–0.85 s after opening a chart on an open connection, from about 2 s. |
 | 2026-10-19 | Binance lookups cache the **pair, not its description** | A lookup made while the asset names were still loading after a restart read "XRP / USDT" for an hour. |
 | 2026-10-19 | `<EXCHANGE>_REST_URL` and `<EXCHANGE>_STREAM_URL` (and `OKX_BUSINESS_STREAM_URL`) override each exchange's endpoints | Tests point every exchange at a mock, or at an unreachable address so no test reaches a real exchange by accident. |
+| 2026-10-19 | A watchlist row under the mouse turns `#2E2E2E` and shows a **remove button**: 22 px, `#4A4A4A`, 4 px corners, a 1 px bin, 7 px from the right edge | Measured from `docs/reference/05-watchlist-hover.png`; ours differs from it by 0.8 gray levels on average. The chart's row keeps its selection color. |
+| 2026-10-19 | Watchlist numbers **group thousands with commas** ("1,147.903") | The same reference shows ZEC that way. The legend and price axis are left as they are: no reference shows them above 1,000 (§11). |
+| 2026-10-19 | The gateway keeps **recent history pages in memory** (64 pages) | Going back to a chart answers from memory: 0.002–0.01 s instead of up to 3 s. A page is answered as it is while only its live bar is out of date (the live feed replaces that bar at once); after that, only the newer bars are fetched. |
+| 2026-10-19 | The first subscription after a pause **goes out at once**, subscribes before unsubscribes; an unused exchange connection stays open 10 minutes | Each saved up to 250 ms on a switch; coming back to an exchange within 10 minutes skips its connect (Coinbase 1.1 s, Kraken up to 1.3 s). |
+| 2026-10-19 | **Visual regression baselines**: ten screens compared with approved screenshots on every run | Catches unintended changes to anything already matched to TradingView. They're this Mac's renderings; `--update-snapshots` replaces them after an intended change. |
+| 2026-10-19 | No Electron app for now | Your call (M6): the browser on localhost is enough. |
 
 ## 4. Research findings
 
@@ -226,11 +232,13 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Rows:** logo (or letter), ticker, Last, then Chg and Chg% against the previous daily close. The digits from the first changed one take the tick's color, green up or red down, and keep it until the price changes again.
   - **Chg decimals:** at most 5, cut rather than rounded, as the reference's 6-decimal coins show. Chg% rounds to 2.
   - **Live:** every row's quotes come from the gateway and are painted in one animation frame. With all 50 rows changing in the same frame, a frame costs about 1 ms (budget 2 ms).
-  - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace or right-click → "Remove from watchlist" removes a row. Rows drag to a new place, also into another section. Sections fold.
+  - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace, the row's remove button or right-click → "Remove from watchlist" removes a row. Rows drag to a new place, also into another section. Sections fold.
+  - **Under the mouse** (M6, measured from `docs/reference/05-watchlist-hover.png`): the row turns `#2E2E2E`, and a 22 px remove button (a bin on `#4A4A4A`) covers its right end, 7 px from the edge. The chart's own row stays blue.
+  - **Thousands** are grouped with commas in Last, Chg and Chg% ("1,147.903").
   - **Saved** by the gateway in `data/watchlist.json` on every change, so it survives restarts. A list that couldn't load is retried every 3 s and never overwritten meanwhile.
   - **Unavailable symbols:** red ticker, no prices.
   - **Default list:** your coins from the reference, on Binance. Binance doesn't list XCH and has halted SNT, so they're left out. The reference's second ARB, DASH and XCH rows come from other exchanges; those arrive in M5.
-  - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) TradingView's row flags aren't built. The row hover color, the menus and dragging have no reference yet (§11).
+  - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) TradingView's row flags (the colored markers at a row's left edge in the hover reference) aren't built. The menus and dragging have no reference yet (§11).
 
 ### 5.4 Add symbol dialog (also used as Symbol search)
 
@@ -293,7 +301,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - 60 fps pan/zoom (120 fps on ProMotion) with 20k bars loaded.
   - Symbol/interval switch under 150 ms when cached, under 700 ms cold.
   - 50 live watchlist rows cost under 2 ms per frame. Measured: about 1 ms with all 50 changing in the same frame (`tests/e2e/perf.spec.ts`).
-  - **History, cold** (1,000 bars, measured live 2026-10-19): Bybit 0.09–0.13 s, Binance 0.16–0.2 s, Kraken 0.29–0.56 s, Coinbase 0.6–1.0 s, OKX 0.69 s. Over the 700 ms target: Coinbase's built intervals, 3-minute 1.4 s and weekly 2.2–2.5 s (its 350 bars a request, 10 requests a second), and OKX's built seconds, 3.1 s a page with fewer bars in it (5S: 720, 45S: 80), as its older candles come 100 at a time. A history cache would answer these from disk (M6).
+  - **History, cold** (1,000 bars, measured live 2026-10-19): Bybit 0.09–0.13 s, Binance 0.16–0.2 s, Kraken 0.29–0.56 s, Coinbase 0.6–1.0 s, OKX 0.69 s. Over the 700 ms target: Coinbase's built intervals, 3-minute 1.4 s and weekly 2.2–2.5 s (its 350 bars a request, 10 requests a second), and OKX's built seconds, 3.1 s a page with fewer bars in it (5S: 720, 45S: 80), as its older candles come 100 at a time.
+  - **History, again** (M6 history cache, measured live): the same charts in 0.002–0.01 s; once newer bars exist, 0.17–0.2 s (OKX 45S was 3.1 s).
+  - **Switching** (M6, from the click to the first frame with the new bars): your app on real data, 0.2–0.33 s the first time and 0.03–0.05 s after; against the mock, 0.04 s (`perf.spec.ts`). Both under the targets.
+  - **Pan and zoom with 20,000 bars** (M6, over 1,000 on screen): each frame draws in 1.0 ms (median), 1.8 ms (95th percentile), 3.5 ms at worst, far inside a 60 Hz frame's 16.7 ms. Frames come every 16.7 ms; the occasional 33 ms gap is headless Chromium, with no script in it.
 - **Security:** the gateway binds to 127.0.0.1 only and rejects foreign Origin and non-loopback Host headers.
 - **Resilience:** exchange disconnects recover automatically, with gap-fill and a visible status dot.
   - **Measured** (M5, 2026-10-19): with every exchange's stream cut for 30 s by a relay that refuses connections, each was live again 1.8–2.5 s after the link returned, never showed live while cut, and missed no minute.
@@ -386,10 +397,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 
 - **One stream client** (`apps/gateway/src/stream/StreamClient.ts`) per exchange connection:
   - Topics are reference-counted: the first listener subscribes upstream, the last one unsubscribes.
-  - Subscribes and unsubscribes go out in batches, one every 250 ms at most.
+  - Subscribes and unsubscribes go out in batches, one every 250 ms at most. The first after a pause goes at once, and subscribes go before unsubscribes, so a switch's new pair needn't wait.
   - After any drop it reconnects with backoff (0.5 s, doubling to 30 s), subscribes again to everything, and reports `up`.
   - A keep-alive goes out every 20–30 s. Anything received proves the link; one that stays silent is replaced.
-  - With nothing subscribed for 30 s, the connection closes.
+  - With nothing subscribed for 10 minutes, the connection closes; coming back sooner skips the connect.
   - Each exchange supplies a small protocol: its subscribe messages, how its frames map to topics, its ping.
 - **Per exchange:**
 
@@ -407,7 +418,16 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Reconnect and gap-fill:** while an exchange's stream is down, its charts say so. When it's back, the live bar is re-seeded over REST and the chart reloads its latest 1,000 bars (§6.4).
 - Code: `apps/gateway/src/exchanges/*/`, `exchanges/shared.ts`, `stream/StreamClient.ts`.
 
-### 6.7 Local data (`data/`, gitignored)
+### 6.7 History cache (M6)
+
+- **What:** the gateway keeps the last 64 history pages it served, in memory (`apps/gateway/src/market/historyCache.ts`).
+- **A latest page** (no `to`) is answered as it is while the bar it ends on is still the live one, and was fetched at least 15 s after that bar opened, so every earlier bar was final (exchanges send a bar's final candle up to a few seconds late). The live bar is out of date, but the chart's live feed replaces it as soon as the chart subscribes.
+- **Once newer bars exist,** only those are fetched (from the first bar that may have changed, with two to spare) and the page is brought up to date, keeping its length. A page more than 500 bars behind, or over 10 minutes old, is fetched whole.
+- **Older pages** (with `to`) are kept for 30 minutes once all their bars are final.
+- **Identical requests** at the same time share one fetch. Failures aren't kept. Tick charts aren't cached.
+- **Checked live:** a Binance 1-second and 5-second page brought up to date equals one fetched afresh, bar for bar.
+
+### 6.8 Local data (`data/`, gitignored)
 
 | Path | Contents |
 |---|---|
@@ -418,13 +438,13 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 | `logos/coins/` | Cached 50 px coin logos |
 | `logos/exchanges/` | Cached exchange logos |
 | `catalog.json` | Every exchange's trading pairs with 24 h volume, and asset names (one compact line, about 230 KB) |
-| `tradingnerd.db` | Planned: SQLite candle cache |
+| `tradingnerd.db` | Not used: the history cache is in memory (§6.7); a copy on disk would make a restart's first loads instant too |
 
 - **Owner-only:** the folder is created owner-only (0700).
 - **Atomic writes:** each file is written whole to a temporary file, then renamed into place.
 - **Unreadable files:** one that can't be read is renamed aside (`….invalid-<time>`), and the gateway starts that file fresh.
 
-### 6.8 Security
+### 6.9 Security
 
 - **Loopback only:** the gateway listens on 127.0.0.1.
 - **Request checks:**
@@ -434,7 +454,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **No CORS headers** are sent.
 - **Secrets** are never logged, never returned to the browser, and never committed.
 
-### 6.9 Repo layout and commands
+### 6.10 Repo layout and commands
 
 ```
 apps/web          React UI (Vite)
@@ -454,14 +474,15 @@ data/             Local runtime data (gitignored, created at runtime)
 | `pnpm format` | Auto-format and apply safe lint fixes |
 | `pnpm verify` | All checks; run before every delivery |
 | `pnpm test:live` | Opt-in checks against the real exchanges |
+| `pnpm exec playwright test visual --update-snapshots` (in `apps/web`) | Approve new visual baselines after an intended change; look at them first |
 
-### 6.10 Stack
+### 6.11 Stack
 
 | Layer | Choice |
 |---|---|
 | Chart | Lightweight Charts 5.2 + our own plugins |
 | UI | React 19, TypeScript 7, Vite 8, CSS Modules + CSS variables; Radix primitives and TanStack Virtual when needed |
-| Gateway | Node 26 (native TypeScript), Fastify 5, @fastify/websocket, ws; SQLite planned for the candle cache |
+| Gateway | Node 26 (native TypeScript), Fastify 5, @fastify/websocket, ws; history cache in memory |
 | Quality | Biome, Vitest, Playwright |
 | Later | Electron desktop shell |
 
@@ -573,8 +594,8 @@ Reference viewport is 1634 px wide.
 | M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars. **Committed 2026-10-19** |
 | M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass. **Committed 2026-10-19** |
 | M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s. **Committed 2026-10-19** |
-| M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles. **Built 2026-10-19; awaiting your review** |
-| M6 | Feel tuning vs TradingView, visual regression, performance profiling, optional Electron | Parity checklist all passes |
+| M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles. **Committed 2026-10-19** |
+| M6 | Feel tuning vs TradingView, visual regression, performance profiling (Electron dropped, your call) | Parity checklist all passes. **Built 2026-10-19, except the feel tuning, which needs your side-by-side session (§11); awaiting your review** |
 
 ## 9. Testing strategy
 
@@ -593,6 +614,7 @@ Reference viewport is 1634 px wide.
   - The mock also serves the watchlist, quotes and logos, and a pair catalog across all five exchanges; a test can take an exchange's live data away.
   - An exchange outage: the chart says it's reconnecting, then reloads the bars it missed.
 - **Performance** (`tests/e2e/perf.spec.ts`):
+  - 50 watchlist rows ticking; panning and zooming through 20,000 bars (frame cost and steadiness); symbol and interval switches under 150 ms.
   - Its own Playwright project, run after the rest so parallel tests can't skew the timing.
   - It keeps the page's real clock (`realClock`). The pinned clock replaces `requestAnimationFrame` and `performance.now` with timer-driven, whole-millisecond versions.
   - Run it alone with `pnpm exec playwright test perf --no-deps` (in `apps/web`).
@@ -601,7 +623,8 @@ Reference viewport is 1634 px wide.
   - The catalog's refresh, retry, save and reload run on simulated time.
   - The browser mock ranks its catalog with the gateway's own search (`searchCatalog`).
   - The dialog's title, field, chips, filters and footer are compared with `docs/reference/04-add-symbol.png` pixel by pixel.
-- **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, and the legend's position.
+- **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, the legend's position, and the watchlist's remove button (M6).
+- **Visual regression** (M6, `tests/e2e/visual.spec.ts`): ten screens against approved screenshots: the chart page, the crosshair, a hovered watchlist row, the ⋯ menu, the interval menu, the custom interval dialog, Add symbol, symbol search, the legend during an outage, and the logo prompt. Any changed pixel fails the run.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
   - Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars rebuilt exactly from smaller intervals.
@@ -614,6 +637,7 @@ Reference viewport is 1634 px wide.
   - In the browser, a picked Binance pair is live within 1 s of the click. The test answers the watchlist save itself, so your list isn't changed.
   - Bybit, OKX, Coinbase and Kraken: tick sizes; daily history up to today, one bar a day; intervals built from smaller ones, on their boundaries; the live minute bar; the best bid and ask; quotes against the previous close.
   - A 30 s outage of all five exchanges' streams, cut by a local relay that refuses connections meanwhile: each recovers by itself, never shows live while cut, and misses no minute.
+  - The history cache: Binance 1-second and 5-second pages brought up to date equal ones fetched afresh.
   - In the browser, a pair picked from each of Bybit, OKX, Coinbase and Kraken is live within 1 s. Coinbase's slowest API answers (about 1 in 40) can push it just past that.
 - **Feel parity (manual, M1 and M6):** side-by-side checklist against TradingView:
   - zoom anchor, pinch speed, swipe speed, momentum, flick glide
@@ -676,6 +700,13 @@ Reference viewport is 1634 px wide.
 23. How far back TradingView's Kraken charts go: ours end after 720 bars, all that Kraken's API keeps.
 24. Descriptions on other exchanges use Binance's asset names where Binance lists the coin ("XRP / US Dollar" on Coinbase). Do TradingView's read the same?
 
+**Watchlist from the hover reference (M6):**
+
+25. Your LEOUSD shows Chg with 6 decimals (0.002800), where ours cut to 5, which your VET, SHIB, LUNC and ZEC rows all confirm. Which exchange is that LEOUSD from? Its price format may explain it.
+26. Do TradingView's legend and price axis group thousands too (ours don't)? A chart of BTC would show it.
+27. The remove button under the mouse, and a letter avatar on a hovered row (its gray circle matches the row): no reference shows these yet.
+28. Flags: the colored markers at your rows' left edges aren't built. Say if you want them.
+
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
 **Still needing a reference screenshot** (built in TradingView's idiom, not yet measured):
@@ -684,7 +715,6 @@ Reference viewport is 1634 px wide.
 - A menu row under the mouse (hover color, outlined star).
 - The "Add custom interval" dialog.
 - The prompt after typing `5` on the chart.
-- A watchlist row under the mouse (hover color).
 - The watchlist's ⋯ menu, and a row's right-click menu.
 - A watchlist row being dragged.
 - The Add symbol dialog with a row under the mouse, a filter menu open, and a grouped row's ⌄ opened (TradingView's list of sources).

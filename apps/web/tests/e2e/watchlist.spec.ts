@@ -1,5 +1,8 @@
-import type { Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { Locator, Page } from '@playwright/test';
 import { DEFAULT_WATCHLIST } from '@tradingnerd/core';
+import { PNG } from 'pngjs';
 import { chartState, expect, openChart, test } from './fixtures';
 
 /**
@@ -17,6 +20,12 @@ const tickers = (page: Page) =>
 const DEFAULT_TICKERS = (DEFAULT_WATCHLIST.sections[0]?.symbols ?? []).map((symbol) =>
   symbol.replace('BINANCE:', ''),
 );
+
+async function boxOf(locator: Locator) {
+  const value = await locator.boundingBox();
+  if (!value) throw new Error('not visible');
+  return value;
+}
 
 test("shows the user's coins under CRYPTO, the chart's symbol selected", async ({ page }) => {
   await openChart(page);
@@ -113,6 +122,59 @@ test('Delete and the right-click menu remove rows, and the list is saved', async
   await expect
     .poll(() => tickers(page))
     .toEqual(DEFAULT_TICKERS.filter((ticker) => ticker !== 'BATUSDT' && ticker !== 'MANAUSDT'));
+});
+
+test("a row under the mouse turns the separators' gray and offers a remove button", async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  const link = row(page, 'LINKUSDT');
+  await link.hover();
+  await expect(link).toHaveCSS('background-color', 'rgb(46, 46, 46)');
+  const remove = panel(page).getByRole('button', { name: 'Remove from watchlist' });
+  await expect(remove).toHaveCount(1); // the hovered row's only
+  await expect(remove).toHaveCSS('background-color', 'rgb(74, 74, 74)');
+  // docs/reference/05-watchlist-hover.png: 22 px, 7 px from the row's right edge, centered.
+  const [button, line] = [await boxOf(remove), await boxOf(link)];
+  expect([button.width, button.height]).toEqual([22, 22]);
+  expect(line.x + line.width - (button.x + button.width)).toBe(7);
+  expect(button.y - line.y).toBe(3.5);
+
+  // The chart's own row keeps its selection color under the mouse.
+  await row(page, 'XRPUSDT').hover();
+  await expect(row(page, 'XRPUSDT')).toHaveCSS('background-color', 'rgb(19, 46, 97)');
+
+  await link.hover();
+  await remove.click();
+  await expect(link).toHaveCount(0);
+  await expect
+    .poll(() => market.watchlistSaves.at(-1)?.sections[0]?.symbols.includes('BINANCE:LINKUSDT'))
+    .toBe(false);
+  await expect(row(page, 'XRPUSDT')).toHaveAttribute('aria-current', 'true');
+});
+
+test('the remove button matches the reference pixel for pixel', async ({ page }) => {
+  await openChart(page);
+  await row(page, 'LINKUSDT').hover();
+  const button = await boxOf(panel(page).getByRole('button', { name: 'Remove from watchlist' }));
+  const ours = PNG.sync.read(await page.screenshot({ clip: button }));
+  const reference = PNG.sync.read(
+    readFileSync(
+      fileURLToPath(new URL('../../../../docs/reference/05-watchlist-hover.png', import.meta.url)),
+    ),
+  );
+  // The reference's button, at 2×: its top-left at (578, 337). Grays, so the green channel.
+  let total = 0;
+  for (let y = 0; y < 44; y++) {
+    for (let x = 0; x < 44; x++) {
+      const a = ours.data[(y * ours.width + x) * 4 + 1] ?? 0;
+      const b = reference.data[((337 + y) * reference.width + 578 + x) * 4 + 1] ?? 0;
+      total += Math.abs(a - b);
+    }
+  }
+  expect([ours.width, ours.height]).toEqual([44, 44]);
+  expect(total / (44 * 44)).toBeLessThan(1.5);
 });
 
 test('rows drag to a new place', async ({ page, market }) => {

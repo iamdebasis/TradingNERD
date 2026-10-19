@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { directionOf, flashSplit, formatChange, formatChangePercent } from './numbers';
+import {
+  directionOf,
+  flashSplit,
+  formatChange,
+  formatChangePercent,
+  formatLast,
+  groupThousands,
+} from './numbers';
 
 describe('watchlist numbers', () => {
   it('writes changes with a real minus and no plus, as TradingView does', () => {
@@ -19,6 +26,19 @@ describe('watchlist numbers', () => {
     expect(formatChange(-0.02495, 5)).toBe('−0.02495'); // BAT: 5 decimals stay whole
     // Chg% rounds: the reference's XCH, 0.0101 on 1.6051, is 0.63%.
     expect(formatChangePercent((0.0101 / 1.6051) * 100)).toBe('0.63%');
+  });
+
+  it('groups thousands with commas, as ZEC reads in docs/reference/05-watchlist-hover.png', () => {
+    expect(formatLast(1_147.90345, 5)).toBe('1,147.90345');
+    expect(formatLast(82_706.7, 1)).toBe('82,706.7');
+    expect(formatLast(1_234_567.8, 1)).toBe('1,234,567.8');
+    expect(formatLast(999.99, 2)).toBe('999.99');
+    expect(formatLast(0.00000498, 8)).toBe('0.00000498');
+    expect(formatChange(18.434081, 6)).toBe('18.43408');
+    expect(formatChange(-1_234.5, 1)).toBe('−1,234.5');
+    expect(formatChangePercent(1_234.567)).toBe('1,234.57%');
+    expect(groupThousands('−1234')).toBe('−1,234');
+    expect(groupThousands('123')).toBe('123');
   });
 
   it('colors by direction, treating what rounds to zero as flat', () => {
@@ -41,6 +61,14 @@ describe('watchlist numbers', () => {
     expect(flashSplit('9.99', '10.01', 0.02)).toEqual({
       same: '',
       changed: '10.01',
+      direction: 'up',
+    });
+  });
+
+  it('flashes grouped prices from the first changed digit, commas included', () => {
+    expect(flashSplit('1,147.903', '1,148.012', 0.109)).toEqual({
+      same: '1,14',
+      changed: '8.012',
       direction: 'up',
     });
   });

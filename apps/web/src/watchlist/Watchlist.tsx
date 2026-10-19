@@ -215,6 +215,7 @@ export function Watchlist({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: arrow keys and Delete for the rows inside */}
       <div
         className={styles.list}
+        data-dragging={dragging ? '' : undefined}
         onKeyDown={onKeyDown}
         onDragOver={(event) => dragging && event.preventDefault()}
         onDrop={onDrop}
@@ -248,6 +249,7 @@ export function Watchlist({
                     else rows.current.delete(item);
                   }}
                   onChoose={(next) => choose(next)}
+                  onRemove={(target) => remove(target, false)}
                   onMenu={openRowMenu}
                   onDragStart={onDragStart}
                   onDragOver={onRowDragOver}
