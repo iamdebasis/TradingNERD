@@ -8,14 +8,20 @@ import {
 } from '@tradingnerd/core';
 import Fastify, { type FastifyInstance, LogController } from 'fastify';
 import type { GatewayConfig } from './config.ts';
+import type { LogoService } from './logos/LogoService.ts';
 import type { MarketService } from './market/MarketService.ts';
 import { MarketError } from './market/types.ts';
+import { registerLogoRoutes } from './routes/logos.ts';
 import { registerMarketRoutes } from './routes/market.ts';
+import { registerWatchlistRoutes } from './routes/watchlist.ts';
 import { isAllowedOrigin, isLoopbackHost } from './security.ts';
+import type { WatchlistStore } from './storage/WatchlistStore.ts';
 import { attachSession } from './ws/session.ts';
 
 export interface GatewayDeps {
   market: MarketService;
+  watchlist: WatchlistStore;
+  logos: LogoService;
 }
 
 export async function buildServer(
@@ -69,6 +75,8 @@ export async function buildServer(
   );
 
   registerMarketRoutes(app, deps.market);
+  registerWatchlistRoutes(app, deps.watchlist);
+  registerLogoRoutes(app, deps.logos);
 
   app.get(WS_PATH, { websocket: true }, (socket) => attachSession(socket, deps.market));
 

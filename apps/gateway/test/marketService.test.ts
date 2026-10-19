@@ -472,3 +472,36 @@ describe('MarketService tick intervals', () => {
     expect(source.pageCalls.length).toBe(seedsBefore + 1);
   });
 });
+
+describe('MarketService.subscribeQuote', () => {
+  it("quotes the daily bar's live price against the previous close, sharing the daily feed", async () => {
+    const { market, fake } = setup();
+    const quotes: string[] = [];
+    market.subscribeQuote(SYMBOL, {
+      onQuote: (last, prevClose) => quotes.push(`${last} ${prevClose}`),
+      onState: () => {},
+      onError: (error) => quotes.push(`error ${error.code}`),
+    });
+    // dailyBars(10, LAST): the previous bar closes at 1.09, the live one at 1.1.
+    await vi.waitFor(() => expect(quotes.at(-1)).toBe('1.1 1.09'));
+    const chart = barRecorder();
+    market.subscribeBars(SYMBOL, '1D', chart.listener);
+    await vi.waitFor(() => expect(chart.events).toContain('state live'));
+    expect(fake.activeStreams()).toBe(2); // one daily feed (candles + trades) for both
+
+    fake.emitTrade({ price: 1.2, quantity: 1, time: LAST * 1000 + HOUR_MS });
+    await vi.waitFor(() => expect(quotes.at(-1)).toBe('1.2 1.09'));
+  });
+
+  it('reports an unknown symbol', async () => {
+    const { market } = setup();
+    const quotes: string[] = [];
+    market.subscribeQuote('FAKE:NOPE', {
+      onQuote: () => {},
+      onState: () => {},
+      onError: (error) => quotes.push(`error ${error.code}`),
+    });
+    await vi.waitFor(() => expect(quotes).toEqual(['error unknown_symbol']));
+    expect(market.feedCount()).toBe(0);
+  });
+});

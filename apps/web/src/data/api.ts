@@ -2,10 +2,14 @@ import {
   API_PREFIX,
   type BarsResponse,
   type ErrorCode,
+  type LogoStatus,
   parseApiError,
   parseBarsResponse,
+  parseLogoStatus,
   parseSymbolInfo,
+  parseWatchlist,
   type SymbolInfo,
+  type Watchlist,
 } from '@tradingnerd/core';
 
 /** A failed gateway call, with the gateway's error code or `network` if it couldn't be reached. */
@@ -31,10 +35,14 @@ export interface MarketApi {
   ): Promise<BarsResponse>;
 }
 
-async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+async function getJson(
+  path: string,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(path, signal ? { signal } : {});
+    response = await fetch(path, signal ? { ...init, signal } : init);
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new ApiError('network', 'The local gateway is not reachable');
@@ -71,3 +79,45 @@ export const marketApi: MarketApi = {
     return bars;
   },
 };
+
+/** The watchlist the gateway keeps in data/watchlist.json. */
+export const watchlistApi = {
+  async load(signal?: AbortSignal): Promise<Watchlist> {
+    const list = parseWatchlist(await getJson(`${API_PREFIX}/watchlist`, signal));
+    if (!list) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
+    return list;
+  },
+
+  async save(list: Watchlist): Promise<Watchlist> {
+    const saved = parseWatchlist(
+      await getJson(`${API_PREFIX}/watchlist`, undefined, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(list),
+      }),
+    );
+    if (!saved) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
+    return saved;
+  },
+};
+
+async function logoStatus(path: string, init: RequestInit = {}): Promise<LogoStatus> {
+  const status = parseLogoStatus(await getJson(`${API_PREFIX}/logos${path}`, undefined, init));
+  if (!status) throw new ApiError('internal_error', 'The gateway sent a malformed logo status');
+  return status;
+}
+
+/** Coin logos: the CoinGecko key lives in the gateway; the browser only ever sees it masked. */
+export const logosApi = {
+  status: () => logoStatus('/status'),
+  saveKey: (key: string) =>
+    logoStatus('/key', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key }),
+    }),
+  removeKey: () => logoStatus('/key', { method: 'DELETE' }),
+  dismissPrompt: () => logoStatus('/prompt-dismissed', { method: 'POST' }),
+};
+
+export type LogosApi = typeof logosApi;

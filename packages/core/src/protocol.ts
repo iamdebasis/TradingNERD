@@ -4,8 +4,11 @@ import type { Bar, BarsResponse, SymbolInfo } from './market.ts';
  * Wire protocol between the UI and the local gateway.
  * Bump PROTOCOL_VERSION on any breaking change so a stale UI can tell it needs a reload.
  */
-/** 3: tick bars, whose `time` is a bar number and `start` their first trade's time. */
-export const PROTOCOL_VERSION = 3;
+/**
+ * 3: tick bars, whose `time` is a bar number and `start` their first trade's time.
+ * 4: the `quotes` channel for watchlist rows.
+ */
+export const PROTOCOL_VERSION = 4;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -44,6 +47,11 @@ export type ServerMessage =
   | { type: 'bar'; id: string; bar: Bar; historical: boolean }
   /** Best bid and ask. */
   | { type: 'book'; id: string; bid: number; ask: number }
+  /**
+   * A watchlist quote: the last price and the previous daily bar's close, which TradingView
+   * measures the day's change against (null for a symbol listed today).
+   */
+  | { type: 'quote'; id: string; last: number; prevClose: number | null }
   | { type: 'status'; id: string; state: StreamState }
   | { type: 'error'; id: string | null; code: ErrorCode; message: string };
 
@@ -52,6 +60,7 @@ export type ClientMessage =
   | { type: 'ping'; t: number }
   | { type: 'subscribe'; id: string; channel: 'bars'; symbol: string; resolution: string }
   | { type: 'subscribe'; id: string; channel: 'book'; symbol: string }
+  | { type: 'subscribe'; id: string; channel: 'quotes'; symbol: string }
   | { type: 'unsubscribe'; id: string };
 
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -160,6 +169,12 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return isShortString(msg.id) && isNumber(msg.bid) && isNumber(msg.ask)
         ? { type: 'book', id: msg.id, bid: msg.bid, ask: msg.ask }
         : null;
+    case 'quote':
+      return isShortString(msg.id) &&
+        isNumber(msg.last) &&
+        (msg.prevClose === null || isNumber(msg.prevClose))
+        ? { type: 'quote', id: msg.id, last: msg.last, prevClose: msg.prevClose }
+        : null;
     case 'status':
       return isShortString(msg.id) && (msg.state === 'live' || msg.state === 'reconnecting')
         ? { type: 'status', id: msg.id, state: msg.state }
@@ -197,8 +212,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
             }
           : null;
       }
-      if (msg.channel === 'book') {
-        return { type: 'subscribe', id: msg.id, channel: 'book', symbol: msg.symbol };
+      if (msg.channel === 'book' || msg.channel === 'quotes') {
+        return { type: 'subscribe', id: msg.id, channel: msg.channel, symbol: msg.symbol };
       }
       return null;
     }

@@ -14,7 +14,8 @@ export function attachSession(
   market: MarketService,
   options: SessionOptions = {},
 ): void {
-  const maxSubscriptions = options.maxSubscriptions ?? 50;
+  // A full watchlist plus the chart's own feeds.
+  const maxSubscriptions = options.maxSubscriptions ?? 200;
   const subscriptions = new Map<string, Unsubscribe>();
 
   const send = (message: ServerMessage) => {
@@ -60,16 +61,27 @@ export function attachSession(
             send({ type: 'error', id, code: error.code, message: error.message });
           },
         };
-        const unsubscribe =
-          message.channel === 'bars'
-            ? market.subscribeBars(message.symbol, message.resolution, {
-                ...handlers,
-                onBar: (bar, historical) => send({ type: 'bar', id, bar, historical }),
-              })
-            : market.subscribeBook(message.symbol, {
-                ...handlers,
-                onBook: ({ bid, ask }) => send({ type: 'book', id, bid, ask }),
-              });
+        let unsubscribe: Unsubscribe;
+        switch (message.channel) {
+          case 'bars':
+            unsubscribe = market.subscribeBars(message.symbol, message.resolution, {
+              ...handlers,
+              onBar: (bar, historical) => send({ type: 'bar', id, bar, historical }),
+            });
+            break;
+          case 'book':
+            unsubscribe = market.subscribeBook(message.symbol, {
+              ...handlers,
+              onBook: ({ bid, ask }) => send({ type: 'book', id, bid, ask }),
+            });
+            break;
+          case 'quotes':
+            unsubscribe = market.subscribeQuote(message.symbol, {
+              ...handlers,
+              onQuote: (last, prevClose) => send({ type: 'quote', id, last, prevClose }),
+            });
+            break;
+        }
         subscriptions.set(id, unsubscribe);
         return;
       }

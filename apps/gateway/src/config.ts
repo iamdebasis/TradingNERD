@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { GATEWAY_DEFAULT_PORT, WEB_DEV_PORT } from '@tradingnerd/core';
 
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
@@ -11,7 +12,12 @@ export interface GatewayConfig {
   logLevel: LogLevel;
   /** Optional endpoint overrides, e.g. for Binance.US: BINANCE_REST_URL / BINANCE_STREAM_URL. */
   binance: { restUrl: string | undefined; streamUrl: string | undefined };
+  /** Where local data lives (watchlist, secrets, logo cache): DATA_DIR, or the repo's data/. */
+  dataDir: string;
 }
+
+/** The repository's data/ folder, which .gitignore keeps out of git. */
+const REPO_DATA_DIR = fileURLToPath(new URL('../../../data', import.meta.url));
 
 const LOG_LEVELS: readonly LogLevel[] = ['silent', 'error', 'warn', 'info', 'debug'];
 
@@ -35,5 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
       restUrl: env.BINANCE_REST_URL || undefined,
       streamUrl: env.BINANCE_STREAM_URL || undefined,
     },
+    dataDir: env.DATA_DIR || REPO_DATA_DIR,
   };
 }

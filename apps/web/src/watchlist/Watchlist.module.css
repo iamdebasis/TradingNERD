@@ -1,0 +1,245 @@
+/*
+ * Measured from docs/reference/01-chart-layout.png at 2× (CSS px, from the panel's top-left):
+ * a 48 px title row, 27 px column titles over a 1 px #3D3D3D line, 5 px of space, then 30 px
+ * rows. Three fixed number columns (77.5, 73, 64.5) and 8 px of padding put the numbers' right
+ * edges at 169.5, 242.5 and 307 in a 315 px panel, exactly as in the reference.
+ */
+.watchlist {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: var(--color-text);
+}
+
+.titleRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 48px;
+  padding: 0 9.5px 0 16px;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 5.5px;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.action:not(:disabled) {
+  cursor: pointer;
+}
+
+.action:not(:disabled):hover {
+  background: var(--color-gutter);
+}
+
+.action:disabled {
+  color: var(--color-text);
+}
+
+.columns,
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 77.5px 73px 64.5px;
+  align-items: center;
+  padding: 0 8px 0 16px;
+}
+
+.columns {
+  flex: none;
+  height: 28px;
+  border-bottom: 1px solid var(--color-chip);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+/* The titles end a little left of the numbers' right edges (measured: at 163.5, 235.5, 298.5). */
+.columnLast,
+.columnChange,
+.columnPercent {
+  text-align: right;
+}
+
+.columnLast {
+  padding-right: 5.5px;
+}
+
+.columnChange {
+  padding-right: 6px;
+}
+
+.columnPercent {
+  padding-right: 8px;
+}
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 5px;
+  scrollbar-color: var(--color-chip) transparent;
+  scrollbar-width: thin;
+}
+
+/* Section headers stay pinned while their rows scroll under them, as in the reference. */
+.sectionHeader {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  height: 30px;
+  padding: 0 0 0 20px;
+  border: 0;
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 13px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.row {
+  position: relative;
+  width: 100%;
+  height: 30px;
+  border: 0;
+  border-bottom: 1px solid var(--color-gutter);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 18px;
+  text-align: left;
+  cursor: default;
+}
+
+.row:hover {
+  background: var(--color-popup);
+}
+
+/* The chart's symbol. */
+.row[aria-current="true"] {
+  background: var(--color-selection);
+}
+
+.row:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* Where a dragged row will land. */
+.row[data-drop]::after,
+.sectionHeader[data-drop]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+.row[data-drop="before"]::after,
+.sectionHeader[data-drop]::after {
+  bottom: -1px;
+}
+
+.row[data-drop="before"]::after {
+  top: -1px;
+  bottom: auto;
+}
+
+.row[data-drop="after"]::after {
+  bottom: -1px;
+}
+
+.symbolCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-gutter);
+  color: var(--color-avatar-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.avatar[data-logo] {
+  background: transparent;
+}
+
+/* Only a logo that has loaded shows; until then (or without one) the letter does. */
+.avatar img {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.avatar[data-logo] img {
+  display: block;
+}
+
+/* Hard-clipped, no ellipsis, like TradingView. */
+.ticker {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.row[data-unavailable] .ticker {
+  color: var(--color-unavailable);
+}
+
+.number {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.flash[data-direction="up"],
+.change[data-direction="up"] {
+  color: var(--color-up-text);
+}
+
+.flash[data-direction="down"],
+.change[data-direction="down"] {
+  color: var(--color-down);
+}

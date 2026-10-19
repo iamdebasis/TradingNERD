@@ -24,23 +24,34 @@ export interface BookHandlers extends StreamHandlers {
   onBook(bid: number, ask: number): void;
 }
 
+export interface QuoteHandlers extends StreamHandlers {
+  /** `prevClose`: the previous daily close that Chg is measured against, or null if unknown. */
+  onQuote(last: number, prevClose: number | null): void;
+}
+
 /** The live-data half of the gateway, as the chart session needs it. */
 export interface LiveFeed {
   subscribeBars(symbol: string, resolution: string, handlers: BarHandlers): () => void;
   subscribeBook(symbol: string, handlers: BookHandlers): () => void;
 }
 
+/** Live watchlist quotes, as the watchlist needs them. */
+export interface QuoteSource {
+  subscribeQuotes(symbol: string, handlers: QuoteHandlers): () => void;
+}
+
 type SubscribeMessage = Extract<ClientMessage, { type: 'subscribe' }>;
 
 type Subscription =
   | { kind: 'bars'; request: SubscribeMessage; handlers: BarHandlers }
-  | { kind: 'book'; request: SubscribeMessage; handlers: BookHandlers };
+  | { kind: 'book'; request: SubscribeMessage; handlers: BookHandlers }
+  | { kind: 'quotes'; request: SubscribeMessage; handlers: QuoteHandlers };
 
 /**
  * The UI's single WebSocket to the local gateway. Subscriptions survive reconnects: they're
  * re-sent after every hello, and each one hears `reconnecting` while the link is down.
  */
-export class GatewayConnection implements LiveFeed {
+export class GatewayConnection implements LiveFeed, QuoteSource {
   private readonly url: string;
   private readonly statusListeners = new Set<() => void>();
   private readonly subscriptions = new Map<string, Subscription>();
@@ -97,6 +108,15 @@ export class GatewayConnection implements LiveFeed {
     });
   }
 
+  subscribeQuotes(symbol: string, handlers: QuoteHandlers): () => void {
+    const id = this.newId();
+    return this.add(id, {
+      kind: 'quotes',
+      request: { type: 'subscribe', id, channel: 'quotes', symbol },
+      handlers,
+    });
+  }
+
   private newId(): string {
     return `s${this.nextId++}`;
   }
@@ -143,6 +163,13 @@ export class GatewayConnection implements LiveFeed {
       case 'book': {
         const subscription = this.subscriptions.get(message.id);
         if (subscription?.kind === 'book') subscription.handlers.onBook(message.bid, message.ask);
+        return;
+      }
+      case 'quote': {
+        const subscription = this.subscriptions.get(message.id);
+        if (subscription?.kind === 'quotes') {
+          subscription.handlers.onQuote(message.last, message.prevClose);
+        }
         return;
       }
       case 'status':

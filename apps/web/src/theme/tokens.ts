@@ -19,6 +19,12 @@ export interface Theme {
     selection: string;
     up: string;
     down: string;
+    /** Positive numbers in text (watchlist changes); candles use `up`. */
+    upText: string;
+    /** The name of a symbol the exchange doesn't list. */
+    unavailable: string;
+    /** The letter on a symbol's placeholder avatar. */
+    avatarText: string;
     /** Buy button, focus rings, matched search text. */
     accent: string;
     crosshair: string;
@@ -55,6 +61,9 @@ export const darkTheme: Theme = {
     selection: '#132E61',
     up: '#089981',
     down: '#F23645',
+    upText: '#22AB94',
+    unavailable: '#F7525F',
+    avatarText: '#636363',
     accent: '#2962FF',
     crosshair: '#9C9C9C',
     labelText: '#FFFFFF',

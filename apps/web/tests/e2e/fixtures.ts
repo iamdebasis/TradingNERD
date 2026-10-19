@@ -1,10 +1,14 @@
-import { test as base, expect, type Page, type WebSocketRoute } from '@playwright/test';
+import { test as base, expect, type Page, type Route, type WebSocketRoute } from '@playwright/test';
 import {
   type Bar,
   barOpenTime,
+  DEFAULT_WATCHLIST,
+  type LogoStatus,
   PROTOCOL_VERSION,
   parseResolution,
+  parseWatchlist,
   type SymbolInfo,
+  type Watchlist,
 } from '@tradingnerd/core';
 
 export { expect };
@@ -18,6 +22,14 @@ export const NOW = Date.parse('2026-10-18T16:09:54Z');
 export const DAY = 86_400;
 /** Open time (UTC seconds) of today's daily bar. */
 export const LAST_DAY = Date.UTC(2026, 9, 18) / 1000;
+
+/** The CoinGecko key the mock gateway accepts. */
+export const MOCK_KEY = 'CG-demo-key-3f9a';
+/** A 1×1 PNG, standing in for a coin logo. */
+const LOGO_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 export const XRP_INFO: SymbolInfo = {
   id: 'BINANCE:XRPUSDT',
@@ -34,6 +46,54 @@ export const XRP_INFO: SymbolInfo = {
 };
 
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
+
+/** Price decimals of the default watchlist's coins on Binance (others: 4). */
+const PRECISION: Record<string, number> = {
+  LINK: 3,
+  ZAMA: 5,
+  DASH: 2,
+  POL: 5,
+  STRK: 5,
+  VET: 6,
+  SHIB: 8,
+  RUNE: 3,
+  PEPE: 8,
+  KSM: 2,
+};
+
+/** Coins Binance doesn't list: XCH is the reference's unavailable row. */
+const UNLISTED = new Set(['XCH']);
+
+/** SymbolInfo for any BINANCE:…USDT pair except the unlisted ones. */
+export function infoFor(symbol: string): SymbolInfo | null {
+  if (symbol === XRP_INFO.id) return XRP_INFO;
+  const match = /^BINANCE:([A-Z0-9]+)USDT$/.exec(symbol);
+  const base = match?.[1];
+  if (!base || UNLISTED.has(base)) return null;
+  const pricePrecision = PRECISION[base] ?? 4;
+  return {
+    ...XRP_INFO,
+    id: symbol,
+    ticker: `${base}USDT`,
+    base,
+    description: `${base} / TetherUS`,
+    tickSize: 10 ** -pricePrecision,
+    pricePrecision,
+  };
+}
+
+/**
+ * A watchlist quote for any symbol: LINK matches the reference's row (11.947, −0.403, −3.26%);
+ * the rest are made up from the symbol's name.
+ */
+export function quoteFor(symbol: string): { last: number; prevClose: number } {
+  if (symbol === 'BINANCE:LINKUSDT') return { last: 11.947, prevClose: 12.35 };
+  if (symbol === 'BINANCE:VETUSDT') return { last: 0.006731, prevClose: 0.006979 };
+  if (symbol === XRP_INFO.id) return { last: 1.2955, prevClose: 1.3115 };
+  const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const last = 0.5 + (seed % 97) / 10;
+  return { last, prevClose: last * (1 + ((seed % 7) - 3) / 100) };
+}
 
 /** Seeded PRNG, so every run draws the same chart. */
 function mulberry32(seed: number) {
@@ -133,6 +193,24 @@ export function makeTickBars(count = 1_500): Bar[] {
 export interface MockMarket {
   /** Daily history served by GET /api/bars (other intervals get makeIntervalBars). */
   bars: Bar[];
+  /** The watchlist GET /api/watchlist serves; PUTs replace it. */
+  watchlist: Watchlist;
+  /** Every watchlist the page saved, in order. */
+  readonly watchlistSaves: Watchlist[];
+  /** While true, watchlist loads fail as if the gateway were unreachable. */
+  failWatchlistLoads(failing: boolean): void;
+  /** How many watchlist loads were refused. */
+  refusedWatchlistLoads(): number;
+  /** Sends a quote for a symbol the page has subscribed to. */
+  sendQuote(symbol: string, last: number, prevClose: number | null): Promise<void>;
+  /** Quote subscription ids by symbol, for streaming quotes in bulk. */
+  quoteIds(): Map<string, string>;
+  /** Sends a quote on a known subscription id, without waiting. */
+  sendQuoteNow(id: string, last: number, prevClose: number | null): void;
+  /** What GET /api/logos/status answers; by default the first-launch prompt was skipped. */
+  logoStatus: LogoStatus;
+  /** Every body the page sent to PUT /api/logos/key. */
+  readonly savedKeys: string[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
   /** Ids of subscriptions the page still holds. */
@@ -151,28 +229,57 @@ export interface MockMarket {
 
 class MockGateway implements MockMarket {
   bars: Bar[] = makeBars();
+  watchlist: Watchlist = structuredClone(DEFAULT_WATCHLIST);
+  logoStatus: LogoStatus = {
+    key: null,
+    promptDismissed: true,
+    syncedAt: null,
+    syncing: false,
+    syncError: null,
+  };
+  readonly savedKeys: string[] = [];
+  readonly watchlistSaves: Watchlist[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
   private readonly page: Page;
   private socket: WebSocketRoute | null = null;
   private openCount = 0;
-  private readonly subscriptions = new Map<string, { channel: string }>();
+  private failingLoads = false;
+  private refusedLoads = 0;
+  private readonly subscriptions = new Map<string, { channel: string; symbol: string }>();
   private readonly series = new Map<string, Bar[]>();
 
   constructor(page: Page) {
     this.page = page;
   }
 
-  async install(): Promise<void> {
-    await this.page.clock.setFixedTime(NOW);
+  async install(pinClock: boolean): Promise<void> {
+    if (pinClock) await this.page.clock.setFixedTime(NOW);
     await this.page.route(/\/api\/symbols\/resolve\?/, (route) => {
-      const symbol = new URL(route.request().url()).searchParams.get('symbol');
-      return symbol === XRP_INFO.id
-        ? route.fulfill({ json: XRP_INFO })
+      const symbol = new URL(route.request().url()).searchParams.get('symbol') ?? '';
+      const info = infoFor(symbol);
+      return info
+        ? route.fulfill({ json: info })
         : route.fulfill({
             status: 404,
             json: { error: 'unknown_symbol', message: 'Binance does not list this symbol' },
           });
+    });
+    await this.page.route(/\/api\/logos\//, (route) => this.logos(route));
+    await this.page.route(/\/api\/watchlist$/, (route) => {
+      if (route.request().method() === 'PUT') {
+        const saved = parseWatchlist(route.request().postDataJSON());
+        if (!saved)
+          return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'x' } });
+        this.watchlist = saved;
+        this.watchlistSaves.push(saved);
+        return route.fulfill({ json: saved });
+      }
+      if (this.failingLoads) {
+        this.refusedLoads++;
+        return route.abort('connectionrefused');
+      }
+      return route.fulfill({ json: this.watchlist });
     });
     await this.page.route(/\/api\/bars\?/, (route) => {
       const params = new URL(route.request().url()).searchParams;
@@ -201,6 +308,70 @@ class MockGateway implements MockMarket {
 
   activeSubscriptions(): string[] {
     return [...this.subscriptions.keys()];
+  }
+
+  /** The gateway's logo routes: MOCK_KEY works; XRP and LINK have logos once synced. */
+  private logos(route: Route) {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/logos/coin/')) {
+      const base = path.split('/').at(-1);
+      return this.logoStatus.syncedAt && (base === 'XRP' || base === 'LINK')
+        ? route.fulfill({ body: LOGO_PNG, contentType: 'image/png' })
+        : route.fulfill({ status: 204 });
+    }
+    if (path === '/api/logos/key' && request.method() === 'PUT') {
+      const key = String((request.postDataJSON() as { key?: unknown }).key ?? '');
+      this.savedKeys.push(key);
+      if (key.trim() !== MOCK_KEY) {
+        return route.fulfill({
+          status: 400,
+          json: { error: 'bad_request', message: 'CoinGecko rejected this key' },
+        });
+      }
+      this.logoStatus = {
+        ...this.logoStatus,
+        key: { masked: '••••3f9a', plan: 'demo', source: 'file' },
+        syncedAt: NOW,
+      };
+    } else if (path === '/api/logos/key' && request.method() === 'DELETE') {
+      this.logoStatus = { ...this.logoStatus, key: null };
+    } else if (path === '/api/logos/prompt-dismissed') {
+      this.logoStatus = { ...this.logoStatus, promptDismissed: true };
+    }
+    return route.fulfill({ json: this.logoStatus });
+  }
+
+  quoteIds(): Map<string, string> {
+    const ids = new Map<string, string>();
+    for (const [id, sub] of this.subscriptions)
+      if (sub.channel === 'quotes') ids.set(sub.symbol, id);
+    return ids;
+  }
+
+  sendQuoteNow(id: string, last: number, prevClose: number | null): void {
+    this.socket?.send(JSON.stringify({ type: 'quote', id, last, prevClose }));
+  }
+
+  failWatchlistLoads(failing: boolean): void {
+    this.failingLoads = failing;
+  }
+
+  refusedWatchlistLoads(): number {
+    return this.refusedLoads;
+  }
+
+  async sendQuote(symbol: string, last: number, prevClose: number | null): Promise<void> {
+    let id: string | undefined;
+    await expect
+      .poll(() => {
+        id = [...this.subscriptions].find(
+          ([, sub]) => sub.channel === 'quotes' && sub.symbol === symbol,
+        )?.[0];
+        return id;
+      })
+      .toBeTruthy();
+    this.socket?.send(JSON.stringify({ type: 'quote', id, last, prevClose }));
   }
 
   connections(): number {
@@ -244,11 +415,28 @@ class MockGateway implements MockMarket {
         type: string;
         id: string;
         channel: string;
+        symbol: string;
         resolution?: string;
       };
       if (message.type === 'subscribe') {
-        this.subscriptions.set(message.id, { channel: message.channel });
+        this.subscriptions.set(message.id, { channel: message.channel, symbol: message.symbol });
+        if (message.channel === 'quotes' && !infoFor(message.symbol)) {
+          socket.send(
+            JSON.stringify({
+              type: 'error',
+              id: message.id,
+              code: 'unknown_symbol',
+              message: 'Binance does not list this symbol',
+            }),
+          );
+          return;
+        }
         socket.send(JSON.stringify({ type: 'status', id: message.id, state: 'live' }));
+        if (message.channel === 'quotes') {
+          const { last, prevClose } = quoteFor(message.symbol);
+          socket.send(JSON.stringify({ type: 'quote', id: message.id, last, prevClose }));
+          return;
+        }
         const resolution = message.resolution ?? '1D';
         if (message.channel === 'bars') this.barSubscriptions.push([message.id, resolution]);
         const last = this.barsFor(resolution).at(-1);
@@ -271,7 +459,16 @@ export interface ConsoleGuard {
   allow(pattern: RegExp): void;
 }
 
-export const test = base.extend<{ market: MockMarket; consoleGuard: ConsoleGuard }>({
+export const test = base.extend<{
+  market: MockMarket;
+  consoleGuard: ConsoleGuard;
+  /**
+   * Leaves the page's clock alone. The pinned clock stands in for requestAnimationFrame and
+   * performance.now with timer-driven, whole-millisecond versions, so frame timing needs this.
+   */
+  realClock: boolean;
+}>({
+  realClock: [false, { option: true }],
   consoleGuard: [
     async ({ page }, use) => {
       const problems: string[] = [];
@@ -288,9 +485,9 @@ export const test = base.extend<{ market: MockMarket; consoleGuard: ConsoleGuard
     { auto: true },
   ],
   market: [
-    async ({ page }, use) => {
+    async ({ page, realClock }, use) => {
       const gateway = new MockGateway(page);
-      await gateway.install();
+      await gateway.install(!realClock);
       await use(gateway);
     },
     { auto: true },

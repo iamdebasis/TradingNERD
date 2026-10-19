@@ -1,0 +1,49 @@
+/* Same idiom as the interval menu: #1F1F1F, 6 px corners, 32 px rows. */
+.menu {
+  position: fixed;
+  z-index: 150;
+  min-width: 200px;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 20%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: var(--color-gutter);
+  outline: none;
+}
+
+.shortcut {
+  color: var(--color-text-secondary);
+}
+
+/* Under a divider like the interval menu's: 1 px #4A4A4A inset 6 px, 6 px above and below. */
+.note {
+  margin: 6px 6px 0;
+  padding: 6px 10px 0;
+  border-top: 1px solid var(--color-separator);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}

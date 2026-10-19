@@ -16,8 +16,10 @@ import {
   type SymbolInfo,
 } from '@tradingnerd/core';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
+import { Feed } from './feed.ts';
 import { fetchSlices, pageBack } from './history.ts';
 import type { BarChange } from './liveBar.ts';
+import { QuoteFeed, type QuoteListener } from './quotes.ts';
 import { nativeLiveBars, ResampledBarAggregator } from './resampledBar.ts';
 import { TickBars, TickHistory } from './ticks.ts';
 import {
@@ -47,6 +49,8 @@ export interface BookListener {
 export interface MarketServiceOptions {
   /** Minimum gap between live updates sent for one subscription, in ms. */
   emitIntervalMs?: number;
+  /** Minimum gap between quote updates for one watchlist row, in ms. */
+  quoteIntervalMs?: number;
   /** Wait before retrying a failed REST seed, by attempt number (0-based). */
   retryDelayMs?: (attempt: number) => number;
 }
@@ -70,12 +74,15 @@ export class MarketService {
   private readonly barFeeds = new Map<string, BarFeed<unknown>>();
   private readonly tickHistory = new TickHistory();
   private readonly bookFeeds = new Map<string, BookFeed>();
+  private readonly quoteFeeds = new Map<string, QuoteFeed>();
   private readonly emitIntervalMs: number;
+  private readonly quoteIntervalMs: number;
   private readonly retryDelayMs: (attempt: number) => number;
 
   constructor(adapters: readonly ExchangeAdapter[], options: MarketServiceOptions = {}) {
     for (const adapter of adapters) this.exchanges.set(adapter.id, adapter);
     this.emitIntervalMs = options.emitIntervalMs ?? 50;
+    this.quoteIntervalMs = options.quoteIntervalMs ?? 250;
     this.retryDelayMs = options.retryDelayMs ?? ((n) => Math.min(1_000 * 2 ** n, 30_000));
   }
 
@@ -174,12 +181,43 @@ export class MarketService {
     return () => feed.remove(listener);
   }
 
+  /**
+   * A watchlist row's live price and previous daily close (see QuoteFeed). Rows of the same
+   * symbol share one feed.
+   */
+  subscribeQuote(symbolId: string, listener: QuoteListener): Unsubscribe {
+    let feed: QuoteFeed;
+    try {
+      const { id } = this.route(symbolId);
+      const existing = this.quoteFeeds.get(id);
+      if (existing) {
+        feed = existing;
+      } else {
+        const daily = {
+          subscribe: (inner: BarListener) => this.subscribeBars(id, '1D', inner),
+          fetchRecent: () => this.getBars(id, '1D', null, 2),
+        };
+        feed = new QuoteFeed(daily, this.quoteIntervalMs, () => {
+          if (this.quoteFeeds.get(id) === feed) this.quoteFeeds.delete(id);
+        });
+        this.quoteFeeds.set(id, feed);
+        feed.start();
+      }
+    } catch (error) {
+      queueMicrotask(() => listener.onError(toMarketError(error)));
+      return () => {};
+    }
+    feed.add(listener);
+    return () => feed.remove(listener);
+  }
+
   /** Number of live upstream feeds; exposed for tests and diagnostics. */
   feedCount(): number {
-    return this.barFeeds.size + this.bookFeeds.size;
+    return this.barFeeds.size + this.bookFeeds.size + this.quoteFeeds.size;
   }
 
   async close(): Promise<void> {
+    for (const feed of [...this.quoteFeeds.values()]) feed.close();
     for (const feed of [...this.barFeeds.values(), ...this.bookFeeds.values()]) feed.close();
     await Promise.all([...this.exchanges.values()].map((adapter) => adapter.close()));
   }
@@ -260,69 +298,6 @@ async function getResampledBars(
 function periodEnd(target: Resolution, ms: number): number {
   const open = barOpenTime(target, ms);
   return open === ms ? ms : barCloseTime(target, open);
-}
-
-interface FeedListener {
-  onState(state: StreamState): void;
-  onError(error: MarketError): void;
-}
-
-/** Shared plumbing for one upstream feed fanned out to many listeners. */
-abstract class Feed<L extends FeedListener> {
-  protected readonly listeners = new Set<L>();
-  protected readonly unsubscribes: Unsubscribe[] = [];
-  protected state: StreamState = 'reconnecting';
-  protected disposed = false;
-  private readonly onDispose: () => void;
-
-  constructor(onDispose: () => void) {
-    this.onDispose = onDispose;
-  }
-
-  add(listener: L): void {
-    this.listeners.add(listener);
-    // Catch the newcomer up asynchronously, never inside the subscribe call itself.
-    queueMicrotask(() => {
-      if (this.disposed || !this.listeners.has(listener) || this.state !== 'live') return;
-      listener.onState('live');
-      this.replay(listener);
-    });
-  }
-
-  remove(listener: L): void {
-    this.listeners.delete(listener);
-    if (this.listeners.size === 0) this.close();
-  }
-
-  close(): void {
-    if (this.disposed) return;
-    this.disposed = true;
-    for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe();
-    this.cleanup();
-    this.onDispose();
-  }
-
-  protected setState(next: StreamState): void {
-    if (next === this.state) return;
-    this.state = next;
-    this.broadcast((listener) => listener.onState(next));
-  }
-
-  protected broadcast(notify: (listener: L) => void): void {
-    for (const listener of [...this.listeners]) notify(listener);
-  }
-
-  /** Ends the feed for everyone; later subscribers start a fresh feed and retry. */
-  protected fail(error: MarketError): void {
-    const listeners = [...this.listeners];
-    this.listeners.clear();
-    this.close();
-    for (const listener of listeners) listener.onError(error);
-  }
-
-  /** Sends the current snapshot to a listener that joined while live. */
-  protected abstract replay(listener: L): void;
-  protected abstract cleanup(): void;
 }
 
 /** How a bar feed builds its live bar from the exchange. */

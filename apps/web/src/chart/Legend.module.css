@@ -33,6 +33,22 @@
   font-weight: 600;
 }
 
+.logo[data-logo] {
+  background: transparent;
+}
+
+/* Only a logo that has loaded shows; until then (or without one) the letter does. */
+.logo img {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.logo[data-logo] img {
+  display: block;
+}
+
 .title {
   font-size: 16px;
 }

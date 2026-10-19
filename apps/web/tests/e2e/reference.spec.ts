@@ -116,14 +116,20 @@ test.describe('matches the TradingView reference pixels', () => {
   });
 
   test('vertical gutters line up exactly', () => {
+    // Inside the watchlist panel (device x 2630–3259), placeholder avatars share the gutter's
+    // gray (#2E2E2E, measured on the reference's unavailable rows); they aren't gutters.
+    const outsideWatchlist = ([start, end]: [number, number]) => !(start >= 2630 && end <= 3259);
     for (const y of [400, 1000, 1700]) {
-      const expected = gutterRuns(reference, 'row', y, reference.width);
+      const expected = gutterRuns(reference, 'row', y, reference.width).filter(outsideWatchlist);
       expect(expected).toEqual([
         [0, 7],
         [2622, 2629],
         [3260, 3261],
       ]);
-      expect(gutterRuns(ours, 'row', y + CROP_TOP, reference.width)).toEqual(expected);
+      const actual = gutterRuns(ours, 'row', y + CROP_TOP, reference.width).filter(
+        outsideWatchlist,
+      );
+      expect(actual).toEqual(expected);
     }
   });
 

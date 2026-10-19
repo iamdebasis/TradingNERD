@@ -1,6 +1,7 @@
 import { formatPrice, formatSignedPercent, formatSignedPrice } from '@tradingnerd/chart';
 import { resolutionLabel } from '@tradingnerd/core';
-import { type Ref, useImperativeHandle, useRef } from 'react';
+import { type Ref, useImperativeHandle, useRef, useState } from 'react';
+import { CoinLogo } from '../logos/CoinLogo';
 import type { LegendView } from './ChartSession';
 import styles from './Legend.module.css';
 
@@ -15,7 +16,8 @@ const setText = (element: HTMLElement | null, text: string) => {
  */
 export function Legend({ ref }: { ref: Ref<LegendView> }) {
   const root = useRef<HTMLDivElement>(null);
-  const logo = useRef<HTMLSpanElement>(null);
+  // The symbol changes rarely, so its logo is rendered by React; everything else is imperative.
+  const [coin, setCoin] = useState<{ id: string; base: string } | null>(null);
   const title = useRef<HTMLSpanElement>(null);
   const open = useRef<HTMLSpanElement>(null);
   const high = useRef<HTMLSpanElement>(null);
@@ -33,7 +35,9 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
     (): LegendView => ({
       setInstrument(info, resolution) {
         precision.current = info.pricePrecision;
-        setText(logo.current, info.base.charAt(0));
+        setCoin((current) =>
+          current?.id === info.id ? current : { id: info.id, base: info.base },
+        );
         setText(
           title.current,
           `${info.description} · ${resolutionLabel(resolution)} · ${info.exchangeName}`,
@@ -81,7 +85,16 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
       data-book="false"
     >
       <div className={styles.titleRow}>
-        <span ref={logo} className={styles.logo} aria-hidden="true" />
+        {coin ? (
+          <CoinLogo
+            symbol={coin.id}
+            base={coin.base}
+            letter={coin.base.charAt(0)}
+            className={styles.logo}
+          />
+        ) : (
+          <span className={styles.logo} aria-hidden="true" />
+        )}
         <span ref={title} className={styles.title} data-field="title" />
         <span className={styles.status} data-field="status" />
         <span className={styles.values}>

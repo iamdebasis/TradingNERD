@@ -1,6 +1,6 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-19** (M0 and M1 committed; M2 built and verified, awaiting review).
+Living document. Last updated **2026-10-19** (M0–M2 committed; M3 built and verified, awaiting review).
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
@@ -56,6 +56,14 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | Toolbar defaults are **the user's own TradingView favorites**, with 8h and 12h as custom intervals | From `docs/reference/02-toolbar.png`; TradingView's built-in list has no 8- or 12-hour entry. |
 | 2026-10-19 | Favorites, added intervals and folded sections kept in `localStorage`; the interval goes in the URL and is remembered for a page opened without one | Survives reloads with no server state; TradingView's own URL format. |
 | 2026-10-19 | Switching interval keeps the chart and swaps the data once it has arrived | No flash of an empty chart, and the zoom level carries over. |
+| 2026-10-19 | The watchlist, settings and logo list are **JSON files in `data/`**, written atomically; SQLite waits for the candle cache | A few small documents need no database or native module. A file that can't be read is set aside, never silently overwritten. |
+| 2026-10-19 | Protocol v4: a **`quotes` channel** carries each symbol's last price and previous daily close, at most every 250 ms and only when one of them changes | Chg and Chg% follow TradingView's definition (§4.3). Quotes ride on the symbol's daily bar feed, so a row and a daily chart always agree. |
+| 2026-10-19 | Watchlist prices are **painted straight into the rows**, all in one animation frame, without React | 50 rows all changing in the same frame cost about 1 ms (budget 2 ms, §5.6). |
+| 2026-10-19 | Changed digits keep their color **until the price changes again** | In the reference nearly every row shows colored digits at once, even slow-trading coins. |
+| 2026-10-19 | Chg shows **at most 5 decimals, cut rather than rounded**, with the real change's sign; Chg% rounds to 2 | Read off the reference: VET at 0.006731 shows −0.00024 at −3.55%, which only a change of −0.000248 gives. SHIB shows −0.00000. XCH's 0.0101 on 1.6051 shows 0.63%. |
+| 2026-10-19 | A coin without a logo gets **204 No Content**; images are PNG, JPEG or WebP from CoinGecko's own hosts only, checked by their first bytes | The row keeps its letter with no console error. SVG can carry script, and the gateway serves these files from its own origin. |
+| 2026-10-19 | Removing the CoinGecko key **keeps the logos already fetched** | They come from CoinGecko's keyless image CDN; only the weekly refresh needs the key. |
+| 2026-10-19 | Performance budgets are tested **on real frames, in their own Playwright project after the rest** | The pinned test clock replaces `requestAnimationFrame` and `performance.now`, and parallel tests skew timing. |
 
 ## 4. Research findings
 
@@ -179,6 +187,15 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Unavailable symbols** show red text and a gray letter avatar.
 - **Persistence:** the panel is resizable and everything is remembered.
 - **Done when:** 50 rows tick smoothly and the list survives a restart.
+- **Status:** built in M3 (2026-10-19).
+  - **Rows:** logo (or letter), ticker, Last, then Chg and Chg% against the previous daily close. The digits from the first changed one take the tick's color, green up or red down, and keep it until the price changes again.
+  - **Chg decimals:** at most 5, cut rather than rounded, as the reference's 6-decimal coins show. Chg% rounds to 2.
+  - **Live:** every row's quotes come from the gateway and are painted in one animation frame. With all 50 rows changing in the same frame, a frame costs about 1 ms (budget 2 ms).
+  - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace or right-click → "Remove from watchlist" removes a row. Rows drag to a new place, also into another section. Sections fold.
+  - **Saved** by the gateway in `data/watchlist.json` on every change, so it survives restarts. A list that couldn't load is retried every 3 s and never overwritten meanwhile.
+  - **Unavailable symbols:** red ticker, no prices.
+  - **Default list:** your coins from the reference, on Binance. Binance doesn't list XCH and has halted SNT, so they're left out. The reference's second ARB, DASH and XCH rows come from other exchanges; those arrive in M5.
+  - **Not yet:** "Add symbol" (+) waits for M4's dialog. "Advanced view" and the list switcher are shown but do nothing (one list in v1). TradingView's row flags aren't built. The row hover color, the menus and dragging have no reference yet (§11).
 
 ### 5.4 Add symbol dialog (also used as Symbol search)
 
@@ -213,13 +230,23 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   3. Fall back to a letter avatar.
   - 50 px images are cached in `data/logos/` and refreshed weekly.
   - Budget: ≈45 calls for the first sync, ≈250/month after that (~2.5% of the free quota).
+- **Status:** built in M3 (2026-10-19). Tested against a mock CoinGecko, plus a live check that CoinGecko rejects a made-up key. Your real key works: logos show in the watchlist and the legend (your check, 2026-10-19).
+  - **Built:**
+    - The first-launch dialog and "Skip for now" (remembered in `data/settings.json`).
+    - The ⋯ menu's "Coin logos (CoinGecko)…", with the masked key, Replace and Remove.
+    - The live key check, with its three errors. A key from `COINGECKO_API_KEY` shows as "Set by COINGECKO_API_KEY".
+    - The dialog is our own design; TradingView has no equivalent.
+  - **Mapping:** Binance's CoinGecko ticker list, most traded first, picks each base asset's coin. The top 500 coins by market cap are the fallback. Calls are spaced 1 s apart.
+  - **Where logos show:** the watchlist and the chart legend. Until a logo loads, and for coins without one, the letter shows.
+  - **Credit:** "Data provided by CoinGecko" appears in the dialog and under the ⋯ menu.
+  - **Not yet:** exchange logos arrive with M4's dialog, the only place that shows exchanges.
 
 ### 5.6 Non-functional
 
 - **Performance:**
   - 60 fps pan/zoom (120 fps on ProMotion) with 20k bars loaded.
   - Symbol/interval switch under 150 ms when cached, under 700 ms cold.
-  - 50 live watchlist rows cost under 2 ms per frame.
+  - 50 live watchlist rows cost under 2 ms per frame. Measured: about 1 ms with all 50 changing in the same frame (`tests/e2e/perf.spec.ts`).
 - **Security:** the gateway binds to 127.0.0.1 only and rejects foreign Origin and non-loopback Host headers.
 - **Resilience:** exchange disconnects recover automatically, with gap-fill and a visible status dot.
 
@@ -264,6 +291,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Transport:**
   - REST for search, history and settings; one WebSocket for live data.
   - Messages are typed in `packages/core`, and any breaking change bumps `PROTOCOL_VERSION`.
+- **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
 
@@ -309,9 +337,16 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 
 | Path | Contents |
 |---|---|
-| `tradingnerd.db` | SQLite: candle cache, symbol catalog, watchlists, favorites, settings |
+| `watchlist.json` | The watchlist |
+| `settings.json` | Settings the gateway keeps; so far, whether the logo prompt was skipped |
 | `secrets.json` | CoinGecko key (owner-only permissions) |
-| `logos/coins/`, `logos/exchanges/` | Cached 50 px logo images |
+| `logos/index.json` | Each exchange's base assets → CoinGecko coins, and image URLs (refreshed weekly) |
+| `logos/coins/` | Cached 50 px coin logos |
+| `tradingnerd.db` | Planned: SQLite candle cache and symbol catalog |
+
+- **Owner-only:** the folder is created owner-only (0700).
+- **Atomic writes:** each file is written whole to a temporary file, then renamed into place.
+- **Unreadable files:** one that can't be read is renamed aside (`….invalid-<time>`), and the gateway starts that file fresh.
 
 ### 6.7 Security
 
@@ -370,6 +405,9 @@ Measured from `docs/reference/` after converting Display P3 → sRGB. Defined on
 | `--color-popup` | `#1F1F1F` | Interval menu, dialogs |
 | `--color-selection` | `#132E61` | Selected watchlist row |
 | `--color-up` / `--color-down` | `#089981` / `#F23645` | Candles and price changes |
+| `--color-up-text` | `#22AB94` | Rising numbers in text: watchlist Chg, digits that went up |
+| `--color-unavailable` | `#F7525F` | Ticker of a symbol the exchange doesn't list |
+| `--color-avatar-text` | `#636363` | Letter on a coin's placeholder avatar |
 | `--color-accent` | `#2962FF` | Buy button, focus rings, matched search text |
 | `--color-crosshair` | `#9C9C9C` | Crosshair lines (dashed) |
 | `--color-text` · `--color-text-secondary` · `--color-axis-text` | `#DBDBDB` · `#8C8C8C` · `#B8B8B8` | Text |
@@ -411,10 +449,14 @@ Reference viewport is 1634 px wide.
   - Sections: 6 px above and below a 1 px `#4A4A4A` divider inset 6 px. Headers 24 px, 11 px uppercase with 0.4 px spacing, `#8C8C8C`, with a caret.
   - Rows: 32 px tall, 14 px regular with tabular digits. Favorites carry a solid 15.5 px star in `#F2F2F2`, 16 px from the right.
   - Scrollbar: a 3 px `#3D3D3D` thumb 1 px from the edge, drawn over the content.
-- **Watchlist rows:**
-  - 30 px tall, with 1 px `#2E2E2E` separators.
-  - The selected row is `#132E61`.
-  - Changed digits flash; real minus sign; symbols hard-clipped.
+- **Watchlist** (measured at 2×, built in M3; every edge here is within half a pixel of the reference):
+  - Title row 48 px: "Watchlist ⌄" 14 px semibold, 16 px in. Three 34 px buttons (Add symbol, Advanced view, ⋯), 4 px apart, 9.5 px from the right.
+  - Column titles: 13 px semibold `#8C8C8C` in a 28 px band over a 1 px `#3D3D3D` line, right edges at 163.5, 235.5 and 298.5 px. Then 5 px of space.
+  - Section header: 30 px, pinned while its rows scroll. Caret 20 px in, then 11 px uppercase `#8C8C8C`.
+  - Rows: 30 px with 1 px `#2E2E2E` separators; the first starts 111 px below the panel's top. Numbers are 14 px with tabular digits, right edges at 169.5, 242.5 and 307 px in the default 315 px panel.
+  - Avatar: 18 px round, the logo or an 11 px semibold letter in `#636363` on `#2E2E2E`.
+  - Colors: selected row `#132E61`; up `#22AB94`, down `#F23645`; an unlisted symbol's ticker `#F7525F`. The hover color `#1F1F1F` is provisional (§11).
+  - Real minus sign; symbols hard-clipped.
 - **Attribution:** the TradingView logo at the bottom left is Lightweight Charts' required attribution, so we keep it.
 
 ### 7.4 Motion and feel
@@ -434,8 +476,8 @@ Reference viewport is 1634 px wide.
 |---|---|---|
 | M0 | Monorepo, tokens, app layout (toolbar, chart, watchlist, gutters, resizable split), gateway skeleton, test harness | Layout lines up with the reference screenshot; `pnpm verify` green |
 | M1 | Chart on Binance: history + scroll-back, live candle merge, legend, countdown, crosshair, gesture handling | XRPUSDT side by side with TradingView: same candles, same gestures. **Committed 2026-10-18** |
-| M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars. **Built 2026-10-19; awaiting your review** |
-| M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass |
+| M2 | Interval bar and dropdown, favorites, custom intervals, resampler, seconds/ticks, type-to-switch | Every menu interval matches TradingView's bars. **Committed 2026-10-19** |
+| M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass. **Built 2026-10-19; awaiting your review** |
 | M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s |
 | M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles |
 | M6 | Feel tuning vs TradingView, visual regression, performance profiling, optional Electron | Parity checklist all passes |
@@ -446,12 +488,18 @@ Reference viewport is 1634 px wide.
 - **Gateway integration:**
   - Fastify `inject` plus real sockets on an ephemeral port.
   - Recorded exchange and CoinGecko responses; no live calls in automated tests.
+  - The watchlist and logo routes run against a temporary data folder and a fake CoinGecko.
 - **E2E (Playwright, Chromium at 2× scale):** user flows, layout geometry, and no console errors.
   - Market data is mocked in the browser (`tests/e2e/fixtures.ts`): REST routes plus a routed WebSocket, seeded bars ending on the reference's last candle (1.2955), and the clock pinned to 16:09:54 UTC so the countdown reads 07:50:06.
   - Every test fails on any console error or warning.
   - Chromium runs with `--force-device-scale-factor=2`. Emulated 2× alone leaves `ResizeObserver` reporting 1× sizes, and charts then render blurry at half resolution.
   - Not `devices['Desktop Chrome']`: its Windows user agent switches on the Windows wheel handling.
   - Lightweight Charts applies view changes on the next frame, so tests read state after `settle()`.
+  - The mock also serves the watchlist, quotes and logos, and lists any `BINANCE:…USDT` pair except XCH.
+- **Performance** (`tests/e2e/perf.spec.ts`):
+  - Its own Playwright project, run after the rest so parallel tests can't skew the timing.
+  - It keeps the page's real clock (`realClock`). The pinned clock replaces `requestAnimationFrame` and `performance.now` with timer-driven, whole-millisecond versions.
+  - Run it alone with `pnpm exec playwright test perf --no-deps` (in `apps/web`).
 - **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, and the legend's position.
 - **Live (opt-in, `pnpm test:live`):** gateway tests and one browser test against real Binance:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -459,6 +507,8 @@ Reference viewport is 1634 px wide.
   - Every resampled menu interval on its bar boundaries, up to the live bar.
   - A 100-tick bar rebuilt exactly from Binance's individual trades.
   - Live 45-second and 10-tick bars.
+  - Watchlist quotes against Binance's own previous daily close.
+  - CoinGecko rejects a made-up key.
 - **Feel parity (manual, M1 and M6):** side-by-side checklist against TradingView:
   - zoom anchor, pinch speed, swipe speed, momentum, flick glide
   - price-axis swipe: speed, fixed point, direction
@@ -500,12 +550,23 @@ Reference viewport is 1634 px wide.
 13. A current interval that isn't a favorite appears among the favorites in time order, highlighted. TradingView's placement is unconfirmed.
 14. Typing "15m" in the interval prompt gives 15 minutes, and "1M" a month. TradingView's handling of a lowercase "m" is unconfirmed.
 
+**Watchlist and logos (M3):**
+
+15. Chg and Chg% match TradingView's for the same coins at the same moment. Both measure against the previous daily close (00:00 UTC). Include a coin priced to 6 decimals, such as VET, whose Chg shows 5.
+16. A new price colors the digits from the first changed one, green up or red down. The color stays until the price changes again.
+17. ✓ Your real CoinGecko key works: logos show in the watchlist and the legend (your check, 2026-10-19).
+
+**Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
+
 **Still needing a reference screenshot** (built in TradingView's idiom, not yet measured):
 
 - The menu scrolled to the bottom (Hours and Days sections, with the current interval's row).
 - A menu row under the mouse (hover color, outlined star).
 - The "Add custom interval" dialog.
 - The prompt after typing `5` on the chart.
+- A watchlist row under the mouse (hover color).
+- The watchlist's ⋯ menu, and a row's right-click menu.
+- A watchlist row being dragged.
 
 **Calibrating the gesture constants** (TradingView doesn't publish them):
 

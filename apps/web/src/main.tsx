@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { chartRoute } from './chart/route';
 import { GatewayConnection, gatewaySocketUrl } from './data/GatewayConnection';
-import { LAST_INTERVAL_KEY } from './layout/AppShell';
+import { LAST_INTERVAL_KEY, LAST_SYMBOL_KEY } from './layout/AppShell';
 import { readJson } from './lib/storage';
 import { applyTheme } from './theme/cssVariables';
 import { darkTheme } from './theme/tokens';
@@ -24,7 +24,11 @@ createRoot(root).render(
   <StrictMode>
     <App
       gateway={gateway}
-      route={chartRoute(window.location.search, readJson(LAST_INTERVAL_KEY))}
+      route={chartRoute(
+        window.location.search,
+        readJson(LAST_INTERVAL_KEY),
+        readJson(LAST_SYMBOL_KEY),
+      )}
     />
   </StrictMode>,
 );

@@ -53,6 +53,8 @@ describe('parseServerMessage', () => {
     ['bar', { type: 'bar', id: 's1', bar, historical: false }],
     ['historical bar', { type: 'bar', id: 's1', bar, historical: true }],
     ['book', { type: 'book', id: 's2', bid: 1.2955, ask: 1.2956 }],
+    ['quote', { type: 'quote', id: 's3', last: 1.2955, prevClose: 1.3115 }],
+    ['quote of a symbol listed today', { type: 'quote', id: 's3', last: 1.2955, prevClose: null }],
     ['status live', { type: 'status', id: 's1', state: 'live' }],
     ['status reconnecting', { type: 'status', id: 's1', state: 'reconnecting' }],
     ['error', { type: 'error', id: 's1', code: 'unknown_symbol', message: 'No such symbol' }],
@@ -73,6 +75,8 @@ describe('parseServerMessage', () => {
     ['a JSON array', '[1,2]'],
     ['null', 'null'],
     ['an unknown type', json({ type: 'quotes' })],
+    ['a quote without a last price', json({ type: 'quote', id: 's3', prevClose: 1 })],
+    ['a quote with a string close', json({ type: 'quote', id: 's3', last: 1, prevClose: '1' })],
     ['a hello with a string version', json({ type: 'hello', protocolVersion: '2', serverTime: 1 })],
     ['a bar with a bad bar', json({ type: 'bar', id: 's1', bar: { time: 1 }, historical: false })],
     ['a bar without historical', json({ type: 'bar', id: 's1', bar })],
@@ -96,6 +100,10 @@ describe('parseClientMessage', () => {
     [
       'book subscription',
       { type: 'subscribe', id: 's2', channel: 'book', symbol: 'BINANCE:XRPUSDT' },
+    ],
+    [
+      'quotes subscription',
+      { type: 'subscribe', id: 's3', channel: 'quotes', symbol: 'BINANCE:LINKUSDT' },
     ],
     ['unsubscribe', { type: 'unsubscribe', id: 's1' }],
   ])('accepts %s', (_label, message) => {

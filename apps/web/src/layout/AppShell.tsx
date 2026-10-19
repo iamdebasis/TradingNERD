@@ -1,29 +1,57 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChartPane } from '../chart/ChartPane';
 import { IntervalPrompt, promptKey } from '../chart/IntervalPrompt';
-import { type ChartRoute, withInterval } from '../chart/route';
-import { useGatewayStatus } from '../data/GatewayContext';
+import { type ChartRoute, withInterval, withSymbol } from '../chart/route';
+import { useGateway, useGatewayStatus } from '../data/GatewayContext';
 import { isEditable } from '../lib/dom';
 import { writeJson } from '../lib/storage';
+import { useLogos } from '../logos/LogoContext';
+import { LogoDialog } from '../logos/LogoDialog';
 import { Toolbar } from '../toolbar/Toolbar';
+import { Watchlist } from '../watchlist/Watchlist';
 import styles from './AppShell.module.css';
 import { Splitter } from './Splitter';
 import { useWatchlistWidth } from './useWatchlistWidth';
 
-/** Where the last interval is remembered, for a page opened without one in its URL. */
+/** Where the last interval and symbol are remembered, for a page opened without them. */
 export const LAST_INTERVAL_KEY = 'tn.chart.interval';
+export const LAST_SYMBOL_KEY = 'tn.chart.symbol';
 
 export function AppShell({ route }: { route: ChartRoute }) {
+  const gateway = useGateway();
   const gatewayStatus = useGatewayStatus();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const watchlist = useWatchlistWidth(workspaceRef);
   const [resolution, setResolution] = useState(route.resolution);
+  const [symbol, setSymbol] = useState(route.symbol);
   const [prompt, setPrompt] = useState<string | null>(null);
+  const logos = useLogos();
+  const [logoDialog, setLogoDialog] = useState<'first-launch' | 'menu' | null>(null);
+  const firstLaunchShown = useRef(false);
+
+  // Coin logos need a CoinGecko key: ask once, at first launch, unless it was skipped before.
+  useEffect(() => {
+    const status = logos.status;
+    if (!status || firstLaunchShown.current) return;
+    firstLaunchShown.current = true;
+    if (!status.key && !status.promptDismissed) setLogoDialog('first-launch');
+  }, [logos.status]);
+
+  const watchlistMenu = useMemo(
+    () => [{ label: 'Coin logos (CoinGecko)…', onSelect: () => setLogoDialog('menu') }],
+    [],
+  );
 
   const changeInterval = useCallback((next: string) => {
     setResolution(next);
     writeJson(LAST_INTERVAL_KEY, next);
     window.history.replaceState(null, '', withInterval(window.location.search, next));
+  }, []);
+
+  const changeSymbol = useCallback((next: string) => {
+    setSymbol(next);
+    writeJson(LAST_SYMBOL_KEY, next);
+    window.history.replaceState(null, '', withSymbol(window.location.search, next));
   }, []);
 
   // Typing a number on the chart opens the interval prompt, as on TradingView.
@@ -48,14 +76,14 @@ export function AppShell({ route }: { route: ChartRoute }) {
 
   return (
     <div className={styles.app} data-gateway-status={gatewayStatus}>
-      <Toolbar symbol={route.symbol} interval={resolution} onIntervalChange={changeInterval} />
+      <Toolbar symbol={symbol} interval={resolution} onIntervalChange={changeInterval} />
       <div
         ref={workspaceRef}
         className={styles.workspace}
         style={{ '--watchlist-width': `${watchlist.width}px` } as CSSProperties}
       >
         <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
-          <ChartPane symbol={route.symbol} resolution={resolution} />
+          <ChartPane symbol={symbol} resolution={resolution} />
           {prompt !== null && (
             <IntervalPrompt
               initial={prompt}
@@ -74,7 +102,21 @@ export function AppShell({ route }: { route: ChartRoute }) {
           onPreview={previewWidth}
           onCommit={watchlist.commit}
         />
-        <aside className={`${styles.panel} ${styles.watchlist}`} aria-label="Watchlist" />
+        {logoDialog && (
+          <LogoDialog
+            firstLaunch={logoDialog === 'first-launch'}
+            onClose={() => setLogoDialog(null)}
+          />
+        )}
+        <aside className={`${styles.panel} ${styles.watchlist}`} aria-label="Watchlist">
+          <Watchlist
+            symbol={symbol}
+            onChoose={changeSymbol}
+            quotes={gateway}
+            moreItems={watchlistMenu}
+            moreNote="Data provided by CoinGecko"
+          />
+        </aside>
       </div>
     </div>
   );

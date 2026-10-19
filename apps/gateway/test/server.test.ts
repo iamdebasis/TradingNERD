@@ -1,11 +1,25 @@
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { PROTOCOL_VERSION, parseServerMessage, type ServerMessage } from '@tradingnerd/core';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  DEFAULT_WATCHLIST,
+  PROTOCOL_VERSION,
+  parseLogoStatus,
+  parseServerMessage,
+  type ServerMessage,
+} from '@tradingnerd/core';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import type { GatewayConfig } from '../src/config.ts';
+import { CoinGeckoClient } from '../src/logos/coingecko.ts';
+import { LogoService } from '../src/logos/LogoService.ts';
+import { SecretStore } from '../src/logos/secrets.ts';
 import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
+import { WatchlistStore } from '../src/storage/WatchlistStore.ts';
+import { fakeCoinGecko } from './helpers/FakeCoinGecko.ts';
 import { dailyBars, FAKE_INFO, FakeExchange } from './helpers/FakeExchange.ts';
 
 const UI_ORIGIN = 'http://127.0.0.1:5173';
@@ -17,15 +31,34 @@ const config: GatewayConfig = {
   allowedOrigins: [UI_ORIGIN],
   logLevel: 'silent',
   binance: { restUrl: undefined, streamUrl: undefined },
+  dataDir: '', // each server gets its own temporary directory
 };
 
 async function start() {
   const fake = new FakeExchange();
   fake.bars = dailyBars(10, LAST);
-  const app = await buildServer(config, {
-    market: new MarketService([fake], { emitIntervalMs: 0 }),
+  // Not created yet: the gateway makes it on the first write.
+  const dataDir = join(mkdtempSync(join(tmpdir(), 'tradingnerd-test-')), 'data');
+  const coingecko = fakeCoinGecko({
+    tickers: [['LINK', 'chainlink']],
+    coins: [['chainlink', 'link']],
   });
-  return { app, fake };
+  const logos = new LogoService({
+    client: new CoinGeckoClient({ fetch: coingecko.fetch }),
+    secrets: new SecretStore(dataDir, {}),
+    dataDir,
+    fetch: coingecko.fetch,
+    paceMs: 0,
+  });
+  const app = await buildServer(
+    { ...config, dataDir },
+    {
+      market: new MarketService([fake], { emitIntervalMs: 0, quoteIntervalMs: 0 }),
+      watchlist: new WatchlistStore(dataDir),
+      logos,
+    },
+  );
+  return { app, fake, dataDir, logos };
 }
 
 describe('gateway HTTP', () => {
@@ -223,6 +256,17 @@ describe('gateway WebSocket', () => {
     ws.close();
   });
 
+  it('streams watchlist quotes: the live price against the previous daily close', async () => {
+    const { ws, next, send } = connect();
+    await next(); // hello
+    send({ type: 'subscribe', id: 'q1', channel: 'quotes', symbol: SYMBOL });
+    expect(await next()).toEqual({ type: 'status', id: 'q1', state: 'live' });
+    // dailyBars(10, LAST): the previous day closed at 1.09, today's bar stands at 1.1.
+    expect(await next()).toEqual({ type: 'quote', id: 'q1', last: 1.1, prevClose: 1.09 });
+    send({ type: 'unsubscribe', id: 'q1' });
+    ws.close();
+  });
+
   it('reports subscription errors with the subscription id', async () => {
     const { ws, next, send } = connect();
     await next();
@@ -270,5 +314,139 @@ describe('gateway WebSocket', () => {
       });
     });
     expect(result).toEqual({ status: 403, closed: true });
+  });
+});
+
+describe('gateway watchlist', () => {
+  let app: FastifyInstance;
+  let dataDir: string;
+  beforeAll(async () => {
+    ({ app, dataDir } = await start());
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const request = (method: 'GET' | 'PUT', payload?: unknown) =>
+    app.inject({
+      method,
+      url: '/api/watchlist',
+      headers: { host: '127.0.0.1:5180', origin: UI_ORIGIN },
+      ...(payload === undefined ? {} : { payload: payload as Record<string, unknown> }),
+    });
+
+  it("starts from the user's TradingView coins", async () => {
+    const res = await request('GET');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(DEFAULT_WATCHLIST);
+  });
+
+  it('saves a watchlist, normalized, and serves it back', async () => {
+    const res = await request('PUT', {
+      sections: [
+        {
+          id: 'crypto',
+          title: 'Crypto',
+          collapsed: true,
+          symbols: ['binance:opusdt', 'BINANCE:XRPUSDT'],
+        },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    const saved = {
+      sections: [
+        {
+          id: 'crypto',
+          title: 'Crypto',
+          collapsed: true,
+          symbols: ['BINANCE:OPUSDT', 'BINANCE:XRPUSDT'],
+        },
+      ],
+    };
+    expect(res.json()).toEqual(saved);
+    expect((await request('GET')).json()).toEqual(saved);
+    const file = join(dataDir, 'watchlist.json');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(saved);
+    expect(readdirSync(dataDir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('refuses something that is not a watchlist, keeping what was saved', async () => {
+    const before = (await request('GET')).json();
+    const res = await request('PUT', {
+      sections: [{ id: 'x', title: 'X', collapsed: false, symbols: ['nope'] }],
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'bad_request' });
+    expect((await request('GET')).json()).toEqual(before);
+  });
+
+  it('moves an unreadable file aside instead of losing it', async () => {
+    writeFileSync(join(dataDir, 'watchlist.json'), '{ broken');
+    expect((await request('GET')).json()).toEqual(DEFAULT_WATCHLIST);
+    const kept = readdirSync(dataDir).filter((name) => name.startsWith('watchlist.json.invalid-'));
+    expect(kept).toHaveLength(1);
+    expect(readFileSync(join(dataDir, kept[0] as string), 'utf8')).toBe('{ broken');
+  });
+
+  it('keeps the data folder private to the user', () => {
+    expect(statSync(dataDir).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe('gateway logos', () => {
+  let app: FastifyInstance;
+  let logos: LogoService;
+  beforeAll(async () => {
+    ({ app, logos } = await start());
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const call = (method: 'GET' | 'PUT' | 'POST' | 'DELETE', url: string, payload?: unknown) =>
+    app.inject({
+      method,
+      url,
+      headers: { host: '127.0.0.1:5180', origin: UI_ORIGIN },
+      ...(payload === undefined ? {} : { payload: payload as Record<string, unknown> }),
+    });
+
+  it('starts without a key, and without logos', async () => {
+    const status = await call('GET', '/api/logos/status');
+    expect(parseLogoStatus(status.json())).toEqual({
+      key: null,
+      promptDismissed: false,
+      syncedAt: null,
+      syncing: false,
+      syncError: null,
+    });
+    const logo = await call('GET', '/api/logos/coin/BINANCE/LINK');
+    expect(logo.statusCode).toBe(204);
+  });
+
+  it('refuses a key CoinGecko rejects, with the reason', async () => {
+    const res = await call('PUT', '/api/logos/key', { key: 'CG-wrong-key-0000' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'bad_request', message: 'CoinGecko rejected this key' });
+  });
+
+  it('takes a working key, shows it masked, and serves logos once synced', async () => {
+    const res = await call('PUT', '/api/logos/key', { key: 'CG-demo-key-3f9a' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().key).toEqual({ masked: '••••3f9a', plan: 'demo', source: 'file' });
+    expect(res.body).not.toContain('CG-demo-key');
+    await logos.whenIdle();
+    const logo = await call('GET', '/api/logos/coin/binance/link');
+    expect(logo.statusCode).toBe(200);
+    expect(logo.headers['content-type']).toBe('image/png');
+    expect(logo.headers['x-content-type-options']).toBe('nosniff');
+    for (const url of ['/api/logos/status', '/api/watchlist', '/api/health']) {
+      expect((await call('GET', url)).body).not.toContain('CG-demo-key');
+    }
+  });
+
+  it('remembers a skipped prompt and removes the key', async () => {
+    expect((await call('POST', '/api/logos/prompt-dismissed')).json().promptDismissed).toBe(true);
+    expect((await call('DELETE', '/api/logos/key')).json().key).toBeNull();
   });
 });

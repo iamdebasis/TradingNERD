@@ -8,6 +8,7 @@ import {
 } from '@tradingnerd/core';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BinanceExchange } from '../../src/exchanges/binance/BinanceExchange.ts';
+import { CoinGeckoClient, CoinGeckoError } from '../../src/logos/coingecko.ts';
 import { MarketService } from '../../src/market/MarketService.ts';
 
 const r = (text: string): Resolution => {
@@ -219,5 +220,40 @@ describe.runIf(LIVE)('Binance, live', () => {
     for (const [i, value] of numbers.entries()) {
       if (i > 0) expect(value).toBeGreaterThanOrEqual(numbers[i - 1] ?? 0);
     }
+  }, 30_000);
+
+  it("quotes watchlist rows against Binance's previous daily close", async () => {
+    const binance = new BinanceExchange();
+    const daily = await binance.fetchBars('LINKUSDT', r('1D'), null, 2);
+    await binance.close();
+    const previous = daily.at(-2) as Bar;
+    const quotes: { last: number; prevClose: number | null }[] = [];
+    const states: string[] = [];
+    const stop = market.subscribeQuote('BINANCE:LINKUSDT', {
+      onQuote: (last, prevClose) => quotes.push({ last, prevClose }),
+      onState: (state) => states.push(state),
+      onError: (error) => {
+        throw error;
+      },
+    });
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline && quotes.length < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    stop();
+    expect(states).toContain('live');
+    expect(quotes.length).toBeGreaterThanOrEqual(1);
+    expect(quotes[0]?.prevClose).toBe(previous.close);
+    const last = quotes.at(-1)?.last ?? 0;
+    expect(Math.abs(last / previous.close - 1)).toBeLessThan(0.5); // a sane price
+  }, 30_000);
+});
+
+describe.runIf(LIVE)('CoinGecko, live (no key needed)', () => {
+  it('rejects a key it does not know', async () => {
+    const client = new CoinGeckoClient();
+    const error = await client.check('CG-not-a-real-key-0000').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CoinGeckoError);
+    expect((error as CoinGeckoError).problem).toBe('rejected');
   }, 30_000);
 });
