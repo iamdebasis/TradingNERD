@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
+import { GesturesPopup } from '../gestures/GesturesPopup';
+import { isChanged, useGestureSettings } from '../gestures/gestureSettings';
 import { AddIntervalDialog } from './AddIntervalDialog';
 import { IntervalMenu } from './IntervalMenu';
-import { CandlesIcon, ChevronDownIcon } from './icons';
+import { CandlesIcon, ChevronDownIcon, GesturesIcon } from './icons';
 import {
   addCustom,
   menuSections,
@@ -25,13 +27,16 @@ export interface ToolbarProps {
 
 /**
  * TradingView's top bar, v1 slice: the symbol pill, the favorite intervals and the interval
- * menu (docs/reference/02-toolbar.png and 03-interval-menu.png).
+ * menu (docs/reference/02-toolbar.png and 03-interval-menu.png), then our own Gestures button.
  */
 export function Toolbar({ symbol, interval, onIntervalChange, onSymbolSearch }: ToolbarProps) {
   const [prefs, setPrefs] = useIntervalPrefs();
   const [menuOpen, setMenuOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [gesturesOpen, setGesturesOpen] = useState(false);
   const arrow = useRef<HTMLButtonElement>(null);
+  const gesturesButton = useRef<HTMLButtonElement>(null);
+  const gesturesChanged = isChanged(useGestureSettings());
   const ticker = symbol.slice(symbol.indexOf(':') + 1);
 
   const choose = (next: string) => {
@@ -77,6 +82,25 @@ export function Toolbar({ symbol, interval, onIntervalChange, onSymbolSearch }: 
           <ChevronDownIcon />
         </button>
       </fieldset>
+      <span className={styles.separator} />
+      <button
+        ref={gesturesButton}
+        type="button"
+        className={styles.tool}
+        aria-expanded={gesturesOpen}
+        data-open={gesturesOpen}
+        data-changed={gesturesChanged || undefined}
+        title={
+          gesturesChanged ? 'Gesture settings (changed from the defaults)' : 'Gesture settings'
+        }
+        onClick={() => setGesturesOpen(!gesturesOpen)}
+      >
+        <GesturesIcon />
+        Gestures
+      </button>
+      {gesturesOpen && (
+        <GesturesPopup anchor={gesturesButton} onClose={() => setGesturesOpen(false)} />
+      )}
       {menuOpen && (
         <IntervalMenu
           anchor={arrow}

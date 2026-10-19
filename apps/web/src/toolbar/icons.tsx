@@ -100,3 +100,22 @@ export function CloseIcon() {
     </svg>
   );
 }
+
+/** "Gestures": two fingers swiping sideways. */
+export function GesturesIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6.5 10.5V4a1.25 1.25 0 0 1 2.5 0v5.5M9 9.5V5.25a1.25 1.25 0 0 1 2.5 0V10.5" />
+      <path d="M3 14.5h12M5 12.5l-2 2 2 2M13 12.5l2 2-2 2" />
+    </svg>
+  );
+}

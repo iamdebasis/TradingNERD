@@ -29,7 +29,12 @@ import { AXIS_LABEL, axisLabelWidth, PRICE_AXIS_MIN_WIDTH } from './plugins/axis
 import { CrosshairPrimitive } from './plugins/CrosshairPrimitive';
 import { LastPricePrimitive } from './plugins/LastPricePrimitive';
 import type { ChartTheme } from './theme';
-import { DEFAULT_GESTURE_TUNING, type GestureTuning, sanitizeTuning } from './tuning';
+import {
+  DEFAULT_GESTURE_TUNING,
+  type GestureTuning,
+  sanitizeTuning,
+  type TuningNumber,
+} from './tuning';
 import { zoomRange } from './zoom';
 
 /** TradingView defaults: 6 px bars and a right margin of 10 bars. */
@@ -56,6 +61,8 @@ export interface ChartControllerOptions {
   onHover?: (info: HoverInfo | null) => void;
   /** Called when less than two screens of history remain to the left of the view. */
   onNeedHistory?: () => void;
+  /** Each gesture setting a wheel or trackpad gesture used (see WheelOptions.onGesture). */
+  onGesture?: (setting: TuningNumber) => void;
 }
 
 /** A snapshot of the chart's state for tests and diagnostics. */
@@ -212,6 +219,7 @@ export class ChartController {
       installWheel(this.chart, this.series, this.viewport, {
         tuning: () => this.tuning,
         lastPrice: () => this.bars.at(-1)?.close ?? null,
+        ...(options.onGesture ? { onGesture: options.onGesture } : {}),
       }),
       () => this.viewport.clear(),
       installVerticalDrag(this.chart, this.series),

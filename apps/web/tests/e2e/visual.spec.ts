@@ -58,6 +58,16 @@ test('the interval menu', async ({ page }) => {
   );
 });
 
+test('the Gestures popup', async ({ page }) => {
+  await openQuiet(page);
+  await toolbar(page).getByRole('button', { name: 'Gestures' }).click();
+  await page.mouse.move(2, 2);
+  await expect(page.getByRole('region', { name: 'Gestures' })).toHaveScreenshot(
+    'gestures-popup.png',
+    DEVICE,
+  );
+});
+
 test('the custom interval dialog', async ({ page }) => {
   await openQuiet(page);
   await toolbar(page).getByRole('button', { name: 'Interval menu', exact: true }).click();

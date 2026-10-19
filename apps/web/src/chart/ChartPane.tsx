@@ -1,7 +1,8 @@
 import { ChartController } from '@tradingnerd/chart';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { marketApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
+import { gestureSettings } from '../gestures/gestureSettings';
 import { darkTheme } from '../theme/tokens';
 import styles from './ChartPane.module.css';
 import { ChartSession, type LegendView } from './ChartSession';
@@ -9,11 +10,6 @@ import { toChartTheme } from './chartTheme';
 import { Legend } from './Legend';
 
 const chartTheme = toChartTheme(darkTheme);
-
-/** TEMPORARY gesture calibration panel: dev builds only, opened with `?tune` in the URL. */
-const TuningPanel = import.meta.env.DEV
-  ? lazy(() => import('../dev/TuningPanel').then((module) => ({ default: module.TuningPanel })))
-  : null;
 
 declare global {
   interface Window {
@@ -39,10 +35,17 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
       theme: chartTheme,
       onHover: (info) => session.current?.hover(info),
       onNeedHistory: () => void session.current?.loadOlder(),
+      onGesture: (setting) => gestureSettings.gestured(setting),
     });
+    // The user's gesture settings (the top bar's Gestures popup), now and as they change.
+    created.setGestureTuning(gestureSettings.get());
+    const stopSettings = gestureSettings.subscribe(() =>
+      created.setGestureTuning(gestureSettings.get()),
+    );
     setChart(created);
     if (import.meta.env.DEV) window.__tradingNerd = { chart: created };
     return () => {
+      stopSettings();
       created.destroy();
       setChart(null);
       if (import.meta.env.DEV) window.__tradingNerd = { chart: null };
@@ -67,17 +70,10 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
     };
   }, [chart, gateway, symbol, resolution]);
 
-  const tuning = import.meta.env.DEV && new URLSearchParams(window.location.search).has('tune');
-
   return (
     <div className={styles.pane}>
       <div ref={container} className={styles.chart} />
       <Legend ref={legend} />
-      {TuningPanel && tuning && chart && (
-        <Suspense fallback={null}>
-          <TuningPanel chart={chart} />
-        </Suspense>
-      )}
     </div>
   );
 }

@@ -121,3 +121,46 @@
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
 }
+
+/* Our own: the Gestures button (icon and label), with a dot once the settings are changed. */
+.tool {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 5.5px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.tool:hover {
+  background: var(--color-gutter);
+}
+
+.tool[data-open="true"] {
+  background: var(--color-chip);
+}
+
+.tool[data-changed]::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 19px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.tool:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}

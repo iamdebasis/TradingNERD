@@ -2,8 +2,8 @@ import { WHEEL_PAN_FACTOR, ZOOM_STEP } from './zoom';
 
 /**
  * Gesture constants that TradingView doesn't publish. The defaults are provisional until they've
- * been calibrated side by side with TradingView (docs/SPEC.md §11) using the dev-only tuning
- * panel (`?tune` in the URL); the calibrated values then become the defaults here.
+ * been calibrated side by side with TradingView (docs/SPEC.md §11); anyone can set their own in
+ * the top bar's Gestures popup (apps/web/src/gestures/).
  */
 
 /** The price that keeps its place while a wheel over the price axis stretches the scale. */

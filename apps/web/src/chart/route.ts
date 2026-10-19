@@ -31,7 +31,7 @@ export function chartRoute(
   };
 }
 
-/** The page's query with `interval` set, keeping every other parameter (like `?tune`). */
+/** The page's query with `interval` set, keeping every other parameter. */
 export function withInterval(search: string, interval: string): string {
   return withParam(search, 'interval', interval);
 }

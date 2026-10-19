@@ -37,3 +37,11 @@ export function writeJson(key: string, value: unknown): void {
     // Storage unavailable: the preference just won't survive a reload.
   }
 }
+
+export function removeKey(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable: nothing was kept to remove.
+  }
+}

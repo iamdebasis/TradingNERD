@@ -47,7 +47,7 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-18 | `?symbol=BINANCE:XRPUSDT&interval=1D` in the URL | TradingView's own URL format; the only way to switch symbol or interval until M2/M4. |
 | 2026-10-18 | Browser tests: mock gateway, clock pinned to 16:09:54 UTC, true 2× rendering | Deterministic, offline, and pixel-comparable with the reference (see §9). |
 | 2026-10-18 | A wheel or two-finger vertical swipe **over the price axis** stretches the price scale, not time | TradingView does this; Lightweight Charts doesn't ([issue #1237](https://github.com/tradingview/lightweight-charts/issues/1237)). Speed, fixed point and direction aren't published, so they start provisional and are calibrated (§11). |
-| 2026-10-18 | Temporary, dev-only **gesture tuning panel** (`?tune` in the URL) | Matches the unpublished gesture constants side by side with TradingView. Not in production builds; deleted once the values are fixed in `packages/chart/src/tuning.ts`. |
+| 2026-10-18 | Temporary, dev-only **gesture tuning panel** (`?tune` in the URL) | Matches the unpublished gesture constants side by side with TradingView. Not in production builds; deleted once the values are fixed in `packages/chart/src/tuning.ts`. **Replaced on 2026-10-19 by the Gestures popup.** |
 | 2026-10-19 | Intervals an exchange lacks are **resampled in the gateway** from its coarsest native interval that nests exactly | The browser asks for any interval the same way; one implementation serves every exchange. Rebuilding Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars this way matches them exactly (live test). |
 | 2026-10-19 | When folding, base bars **without trades are skipped** unless the whole bar had none | They're placeholders at the previous close. Binance builds its own minutes from its seconds exactly this way: 45 of 45 live minutes matched, versus 28 of 45 when folding every second. |
 | 2026-10-19 | Resampled history is fetched as **parallel time slices**, at most 12 requests per page | A 45-second chart needs 45 one-second bars per bar; slicing keeps a page under a second. |
@@ -89,6 +89,9 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-19 | The first subscription after a pause **goes out at once**, subscribes before unsubscribes; an unused exchange connection stays open 10 minutes | Each saved up to 250 ms on a switch; coming back to an exchange within 10 minutes skips its connect (Coinbase 1.1 s, Kraken up to 1.3 s). |
 | 2026-10-19 | **Visual regression baselines**: ten screens compared with approved screenshots on every run | Catches unintended changes to anything already matched to TradingView. They're this Mac's renderings; `--update-snapshots` replaces them after an intended change. |
 | 2026-10-19 | No Electron app for now | Your call (M6): the browser on localhost is enough. |
+| 2026-10-19 | The gesture settings are **everyone's own**: a **Gestures** button in the top bar opens them, replacing the `?tune` panel | Your call: anyone can tune the feel to their liking. Values set in the old panel carry over once. |
+| 2026-10-19 | The Gestures popup **leaves the chart in use** and lights up the setting each gesture uses | A change can be tried on the chart at once, and it's clear which slider does what. So pressing on the chart doesn't close it; Escape, ✕ or the button do. |
+| 2026-10-19 | Only **changed** gesture settings are kept (`tn.gestures` in this browser) | Settings left at the defaults follow any better defaults later. A dot on the button shows when they differ. |
 
 ## 4. Research findings
 
@@ -211,6 +214,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Interval prompt:** digits or "," on the chart; the line under the input says what Enter will switch to, or "Not applicable".
   - **Choices persist:** favorites, added intervals and folded sections survive reloads. The interval is in the URL and comes back for a page opened without one.
   - **Symbol search** (M4): the pill opens it, as does a letter typed on the chart (§5.4).
+  - **Gestures** (ours, not TradingView's; 2026-10-19): after a separator, a button that opens the gesture settings under it.
+    - **Settings:** Zoom (two-finger swipe up or down, or the wheel), Pinch zoom (pinch, or Ctrl + wheel), Scroll (two-finger swipe sideways, or Shift + wheel) and Price scale (swipe or wheel over the price axis) speeds; which price the scale holds (the middle, the pointer or the last price); and its direction. Each slider marks its default with a dot.
+    - **While it's open** the chart works as usual, so each change can be tried at once, and the setting a gesture uses lights up as it's made. Escape, ✕ or the button close it.
+    - **Kept** in this browser and applied on every visit. A blue dot on the button shows they differ from the defaults; Reset to defaults undoes them, and Copy values copies them.
   - **Not yet:** the menu's lower half, the hover and current-row colors, the add dialog and the prompt have no reference screenshot yet (§11).
 
 ### 5.3 Watchlist
@@ -595,7 +602,7 @@ Reference viewport is 1634 px wide.
 | M3 | Watchlist: live quotes, TradingView Chg%, digit flash, keyboard, sections, reorder, persistence; CoinGecko logos | 50 rows tick smoothly; survives restart; logo tests pass. **Committed 2026-10-19** |
 | M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s. **Committed 2026-10-19** |
 | M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles. **Committed 2026-10-19** |
-| M6 | Feel tuning vs TradingView, visual regression, performance profiling (Electron dropped, your call) | Parity checklist all passes. **Built 2026-10-19, except the feel tuning, which needs your side-by-side session (§11); awaiting your review** |
+| M6 | Feel tuning vs TradingView, visual regression, performance profiling (Electron dropped, your call) | Parity checklist all passes. **Built 2026-10-19**, with the gesture settings in the top bar for your side-by-side session (§11); awaiting your review |
 
 ## 9. Testing strategy
 
@@ -624,7 +631,8 @@ Reference viewport is 1634 px wide.
   - The browser mock ranks its catalog with the gateway's own search (`searchCatalog`).
   - The dialog's title, field, chips, filters and footer are compared with `docs/reference/04-add-symbol.png` pixel by pixel.
 - **Visual:** pixel checks against `docs/reference/`: gutter positions, surface colors, corner radius, the last-price label's size and text placement, the legend's position, and the watchlist's remove button (M6).
-- **Visual regression** (M6, `tests/e2e/visual.spec.ts`): ten screens against approved screenshots: the chart page, the crosshair, a hovered watchlist row, the ⋯ menu, the interval menu, the custom interval dialog, Add symbol, symbol search, the legend during an outage, and the logo prompt. Any changed pixel fails the run.
+- **Visual regression** (M6, `tests/e2e/visual.spec.ts`): eleven screens against approved screenshots: the chart page, the crosshair, a hovered watchlist row, the ⋯ menu, the interval menu, the Gestures popup, the custom interval dialog, Add symbol, symbol search, the legend during an outage, and the logo prompt. Any changed pixel fails the run.
+- **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
   - Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars rebuilt exactly from smaller intervals.
@@ -643,7 +651,7 @@ Reference viewport is 1634 px wide.
   - zoom anchor, pinch speed, swipe speed, momentum, flick glide
   - price-axis swipe: speed, fixed point, direction
   - vertical drag, axis drag, double-click reset, shortcuts
-  - Speeds are matched with the dev-only tuning panel (`?tune`); the fixed point is measured from screenshot pairs (§11).
+  - Speeds are matched in the Gestures popup; the fixed point is measured from screenshot pairs (§11).
 - **Live smoke tests (manual):** real exchange streams; real CoinGecko key.
 
 ## 10. Risks
@@ -702,7 +710,7 @@ Reference viewport is 1634 px wide.
 
 **Watchlist from the hover reference (M6):**
 
-25. Your LEOUSD shows Chg with 6 decimals (0.002800), where ours cut to 5, which your VET, SHIB, LUNC and ZEC rows all confirm. Which exchange is that LEOUSD from? Its price format may explain it.
+25. ✓ Answered: your LEOUSD (6-decimal Chg, 0.002800) was added at random from an unknown source, so the 5-decimal cut stays, as your VET, SHIB, LUNC and ZEC rows confirm.
 26. Do TradingView's legend and price axis group thousands too (ours don't)? A chart of BTC would show it.
 27. The remove button under the mouse, and a letter avatar on a hovered row (its gray circle matches the row): no reference shows these yet.
 28. Flags: the colored markers at your rows' left edges aren't built. Say if you want them.
@@ -722,10 +730,10 @@ Reference viewport is 1634 px wide.
 
 **Calibrating the gesture constants** (TradingView doesn't publish them):
 
-1. Open `http://127.0.0.1:5173/?tune`. A "Gesture tuning" panel appears (dev builds only). It sets chart zoom, pinch zoom, sideways pan and price-axis speeds, the price-axis fixed point and direction. Values apply instantly and survive reloads, but only while `?tune` is in the URL.
+1. Press **Gestures** in the top bar. The popup sets the zoom, pinch, scroll and price-scale speeds, which price the scale holds, and its direction. Changes apply at once and are kept.
 2. **Fixed point:** in TradingView, with auto-scale on, take a screenshot, do one short swipe over the price axis near its top, and take another. Repeat near the bottom. The axis labels in each pair show which price stayed put.
 3. **Speeds and direction:** do the same swipe in both apps and move each slider until they match. Then press **Copy values** and paste the result into the chat.
-4. The values become the defaults in `packages/chart/src/tuning.ts`, and the panel is deleted.
+4. The values become the defaults in `packages/chart/src/tuning.ts`; your own settings stay as you set them.
 
 ## 12. References
 

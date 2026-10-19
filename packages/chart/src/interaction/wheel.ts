@@ -1,6 +1,6 @@
 import type { IChartApi, ISeriesApi, SeriesType } from 'lightweight-charts';
 import { type PriceRange, scalePriceRange } from '../priceZoom';
-import type { GestureTuning } from '../tuning';
+import type { GestureTuning, TuningNumber } from '../tuning';
 import { normalizeWheel, panRange, type SpacingLimits, wheelZoomScale, zoomRange } from '../zoom';
 import type { TimeViewport } from './viewport';
 
@@ -20,6 +20,8 @@ export interface WheelOptions {
   tuning(): GestureTuning;
   /** The latest price, for the `lastPrice` anchor. */
   lastPrice(): number | null;
+  /** Each setting a wheel event used, e.g. so a settings panel can show which one is in play. */
+  onGesture?(setting: TuningNumber): void;
 }
 
 /** Whether a point (px from the chart's top-left) is on the right price axis, beside the pane. */
@@ -80,6 +82,7 @@ export function installWheel(
     let zoomTime = dy !== 0;
     if (zoomTime && isOverPriceAxis(x, y, chart.paneSize())) {
       scalePrice(tuning, dy, y);
+      options.onGesture?.('priceStep');
       zoomTime = false;
     }
     if (!zoomTime && dx === 0) return;
@@ -91,8 +94,12 @@ export function installWheel(
       const anchorX = event.ctrlKey || event.metaKey ? x : null;
       const step = event.ctrlKey ? tuning.pinchStep : tuning.zoomStep;
       range = zoomRange(range, width, wheelZoomScale(dy), anchorX, spacingLimits(chart), step);
+      options.onGesture?.(event.ctrlKey ? 'pinchStep' : 'zoomStep');
     }
-    if (dx !== 0) range = panRange(range, width, dx * tuning.panFactor);
+    if (dx !== 0) {
+      range = panRange(range, width, dx * tuning.panFactor);
+      options.onGesture?.('panFactor');
+    }
     viewport.set(range);
   };
 
