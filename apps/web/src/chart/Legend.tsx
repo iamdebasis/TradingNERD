@@ -28,6 +28,7 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
   const ask = useRef<HTMLSpanElement>(null);
   const spread = useRef<HTMLSpanElement>(null);
   const message = useRef<HTMLDivElement>(null);
+  const delayed = useRef<HTMLSpanElement>(null);
   const precision = useRef(2);
 
   useImperativeHandle(
@@ -42,6 +43,14 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
           title.current,
           `${info.description} · ${resolutionLabel(resolution)} · ${info.exchangeName}`,
         );
+        // TradingView's "Data is delayed" (D) sign, for symbols whose data runs behind.
+        const minutes = Math.round(info.delayMs / 60_000);
+        if (delayed.current) {
+          delayed.current.hidden = info.delayMs <= 0;
+          const text = `Data is delayed by ${minutes} minutes`;
+          delayed.current.title = text;
+          delayed.current.setAttribute('aria-label', text);
+        }
       },
       showBar(bar, previous) {
         const digits = precision.current;
@@ -97,6 +106,9 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
         )}
         <span ref={title} className={styles.title} data-field="title" />
         <span className={styles.status} data-field="status" />
+        <span ref={delayed} className={styles.delayed} data-field="delayed" role="img" hidden>
+          D
+        </span>
         <span className={styles.values}>
           <span className={styles.key}>O</span>
           <span ref={open} className={styles.value} data-field="open" />

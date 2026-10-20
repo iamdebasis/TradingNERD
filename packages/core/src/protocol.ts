@@ -1,4 +1,5 @@
-import type { Bar, BarsResponse, SymbolInfo } from './market.ts';
+import { type Bar, type BarsResponse, isSymbolKind, type SymbolInfo } from './market.ts';
+import { parseMarketSchedule } from './schedule.ts';
 
 /**
  * Wire protocol between the UI and the local gateway.
@@ -7,8 +8,9 @@ import type { Bar, BarsResponse, SymbolInfo } from './market.ts';
 /**
  * 3: tick bars, whose `time` is a bar number and `start` their first trade's time.
  * 4: the `quotes` channel for watchlist rows.
+ * 5: US stocks: symbol kinds, time zones, data delays and trading calendars; `needs_key`.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -27,6 +29,8 @@ export const ERROR_CODES = [
   'rate_limited',
   'too_many_subscriptions',
   'internal_error',
+  /** The data needs a key the user hasn't given yet (US stocks: Alpaca's). */
+  'needs_key',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -120,13 +124,17 @@ export function parseSymbolInfo(value: unknown): SymbolInfo | null {
   const v = value as Record<string, unknown>;
   const strings = ['id', 'exchange', 'exchangeName', 'ticker', 'base', 'quote', 'description'];
   if (!strings.every((key) => typeof v[key] === 'string')) return null;
-  if (v.type !== 'spot' || !isNumber(v.tickSize) || v.tickSize <= 0) return null;
+  if (!isSymbolKind(v.type) || !isNumber(v.tickSize) || v.tickSize <= 0) return null;
   if (!isNumber(v.pricePrecision) || !Number.isInteger(v.pricePrecision) || v.pricePrecision < 0) {
     return null;
   }
   if (!Array.isArray(v.resolutions) || !v.resolutions.every((r) => typeof r === 'string'))
     return null;
-  return {
+  if (typeof v.timezone !== 'string' || v.timezone === '') return null;
+  if (!isNumber(v.delayMs) || v.delayMs < 0 || typeof v.hasBook !== 'boolean') return null;
+  const schedule = v.schedule === undefined ? undefined : parseMarketSchedule(v.schedule);
+  if (schedule === null) return null;
+  const info: SymbolInfo = {
     id: v.id as string,
     exchange: v.exchange as string,
     exchangeName: v.exchangeName as string,
@@ -134,11 +142,16 @@ export function parseSymbolInfo(value: unknown): SymbolInfo | null {
     base: v.base as string,
     quote: v.quote as string,
     description: v.description as string,
-    type: 'spot',
+    type: v.type,
     tickSize: v.tickSize,
     pricePrecision: v.pricePrecision,
     resolutions: [...(v.resolutions as string[])],
+    timezone: v.timezone,
+    delayMs: v.delayMs,
+    hasBook: v.hasBook,
   };
+  if (schedule) info.schedule = schedule;
+  return info;
 }
 
 /** Validates a REST error body. */

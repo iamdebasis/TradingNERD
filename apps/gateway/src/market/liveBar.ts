@@ -1,4 +1,4 @@
-import { type Bar, barOpenTime, type Resolution } from '@tradingnerd/core';
+import { type Bar, type BarClock, type Resolution, UTC_CLOCK } from '@tradingnerd/core';
 import type { CandleUpdate, Trade } from './types.ts';
 
 export interface BarChange {
@@ -19,12 +19,14 @@ const MAX_PENDING_TRADES = 10_000;
  */
 export class LiveBarAggregator {
   private readonly resolution: Resolution;
+  private readonly clock: BarClock;
   private bar: Bar | null = null;
   /** Trades newer than the latest snapshot, which doesn't include them yet. */
   private pending: Trade[] = [];
 
-  constructor(resolution: Resolution) {
+  constructor(resolution: Resolution, clock: BarClock = UTC_CLOCK) {
     this.resolution = resolution;
+    this.clock = clock;
   }
 
   current(): Bar | null {
@@ -68,7 +70,7 @@ export class LiveBarAggregator {
 
   applyTrade(trade: Trade): BarChange[] {
     if (!this.bar) return []; // nothing to build on until a snapshot arrives
-    const openMs = barOpenTime(this.resolution, trade.time);
+    const openMs = this.clock.open(this.resolution, trade.time);
     const currentMs = this.bar.time * 1000;
     if (openMs < currentMs) return []; // late trade for an earlier bar; its final snapshot fixes it
 

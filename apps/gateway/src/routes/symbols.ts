@@ -2,7 +2,9 @@ import {
   API_PREFIX,
   type ExchangeList,
   MAX_QUERY_LENGTH,
+  SEARCH_CATEGORIES,
   SEARCH_PAGE_SIZE,
+  type SearchCategory,
   type SymbolSearchResponse,
 } from '@tradingnerd/core';
 import type { FastifyInstance } from 'fastify';
@@ -26,10 +28,23 @@ export function registerSymbolRoutes(app: FastifyInstance, catalog: SymbolCatalo
     if (type !== null && type !== 'spot') {
       throw new MarketError('bad_request', 'Query parameter "type" must be "spot"');
     }
+    const category = optionalString(query, 'category', 16);
+    if (category !== null && !SEARCH_CATEGORIES.includes(category as SearchCategory)) {
+      throw new MarketError(
+        'bad_request',
+        `Query parameter "category" must be one of ${SEARCH_CATEGORIES.join(', ')}`,
+      );
+    }
     const offset = optionalInteger(query, 'offset', 0, MAX_OFFSET) ?? 0;
     const limit = optionalInteger(query, 'limit', 1, MAX_LIMIT) ?? SEARCH_PAGE_SIZE;
     await catalog.ready(READY_WAIT_MS);
-    return catalog.search({ query: text, exchange, offset, limit });
+    return catalog.search({
+      query: text,
+      exchange,
+      category: category as SearchCategory | null,
+      offset,
+      limit,
+    });
   });
 
   app.get(

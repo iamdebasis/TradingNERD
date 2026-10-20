@@ -9,6 +9,7 @@ import { useLogos } from '../logos/LogoContext';
 import { LogoDialog } from '../logos/LogoDialog';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { searchKey } from '../search/searchPrefs';
+import { useStockKeys } from '../stocks/stockKeys';
 import { Toolbar } from '../toolbar/Toolbar';
 import { Watchlist } from '../watchlist/Watchlist';
 import styles from './AppShell.module.css';
@@ -41,9 +42,13 @@ export function AppShell({ route }: { route: ChartRoute }) {
     if (!status.key && !status.promptDismissed) setLogoDialog('first-launch');
   }, [logos.status]);
 
+  const stockKeys = useStockKeys();
   const watchlistMenu = useMemo(
-    () => [{ label: 'Coin logos (CoinGecko)…', onSelect: () => setLogoDialog('menu') }],
-    [],
+    () => [
+      { label: 'Coin logos (CoinGecko)…', onSelect: () => setLogoDialog('menu') },
+      { label: 'US stock data (Alpaca)…', onSelect: stockKeys.prompt },
+    ],
+    [stockKeys.prompt],
   );
 
   const changeInterval = useCallback((next: string) => {

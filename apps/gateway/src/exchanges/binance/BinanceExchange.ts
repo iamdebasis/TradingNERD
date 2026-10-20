@@ -5,6 +5,7 @@ import {
   precisionOf,
   type Resolution,
   type SymbolInfo,
+  UTC_ZONE,
 } from '@tradingnerd/core';
 import type { CatalogSnapshot, CatalogSource } from '../../catalog/types.ts';
 import {
@@ -114,6 +115,9 @@ export class BinanceExchange implements ExchangeAdapter, CatalogSource {
       tickSize: symbol.tickSize,
       pricePrecision: precisionOf(symbol.tickSize),
       resolutions: [...BINANCE_RESOLUTIONS],
+      timezone: UTC_ZONE,
+      delayMs: 0,
+      hasBook: true,
     };
   }
 

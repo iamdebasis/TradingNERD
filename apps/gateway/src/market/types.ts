@@ -1,4 +1,4 @@
-import type { AggTrade, Bar, ErrorCode, Resolution, SymbolInfo } from '@tradingnerd/core';
+import type { AggTrade, Bar, BarClock, ErrorCode, Resolution, SymbolInfo } from '@tradingnerd/core';
 
 export type Unsubscribe = () => void;
 
@@ -57,6 +57,10 @@ export interface ExchangeAdapter {
 
   /** Intervals the exchange serves itself; the gateway resamples the others from these. */
   readonly nativeResolutions: readonly Resolution[];
+  /** Where its bars begin and end: its sessions, for markets that close (UTC when absent). */
+  readonly clock?: BarClock;
+  /** How far behind real time its data runs, ms (0 when absent). */
+  readonly delayMs?: number;
   /** Numbered trades, for tick bars; exchanges without them have no tick intervals. */
   readonly ticks?: TickSource;
 
@@ -106,6 +110,7 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
   rate_limited: 503,
   too_many_subscriptions: 429,
   internal_error: 500,
+  needs_key: 424,
 };
 
 /** An error with a protocol error code, safe to show to the UI. */

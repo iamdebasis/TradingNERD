@@ -1,4 +1,10 @@
-import { type Bar, barOpenTime, type Resolution, resampleBars } from '@tradingnerd/core';
+import {
+  type Bar,
+  type BarClock,
+  type Resolution,
+  resampleBars,
+  UTC_CLOCK,
+} from '@tradingnerd/core';
 import { type BarChange, LiveBarAggregator } from './liveBar.ts';
 import type { CandleUpdate, Trade } from './types.ts';
 
@@ -13,8 +19,8 @@ export interface LiveBars {
 }
 
 /** An interval the exchange streams itself. */
-export function nativeLiveBars(resolution: Resolution): LiveBars {
-  const aggregator = new LiveBarAggregator(resolution);
+export function nativeLiveBars(resolution: Resolution, clock: BarClock = UTC_CLOCK): LiveBars {
+  const aggregator = new LiveBarAggregator(resolution, clock);
   return {
     current: () => aggregator.current(),
     reset: () => aggregator.reset(),
@@ -45,18 +51,20 @@ interface Period {
  */
 export class ResampledBarAggregator implements LiveBars {
   private readonly target: Resolution;
+  private readonly clock: BarClock;
   private readonly base: LiveBarAggregator;
   private period: Period | null = null;
   private previous: Period | null = null;
   private seeded = false;
 
-  constructor(target: Resolution, base: Resolution) {
+  constructor(target: Resolution, base: Resolution, clock: BarClock = UTC_CLOCK) {
     this.target = target;
-    this.base = new LiveBarAggregator(base);
+    this.clock = clock;
+    this.base = new LiveBarAggregator(base, clock);
   }
 
   current(): Bar | null {
-    return this.seeded && this.period ? fold(this.period, this.target) : null;
+    return this.seeded && this.period ? fold(this.period, this.target, this.clock) : null;
   }
 
   reset(): void {
@@ -118,20 +126,23 @@ export class ResampledBarAggregator implements LiveBars {
         changed = this.previous;
       }
       if (changed && this.seeded) {
-        out.push({ bar: fold(changed, this.target), historical: changed !== this.period });
+        out.push({
+          bar: fold(changed, this.target, this.clock),
+          historical: changed !== this.period,
+        });
       }
     }
     return out;
   }
 
   private openOf(bar: Bar): number {
-    return barOpenTime(this.target, bar.time * 1000);
+    return this.clock.open(this.target, bar.time * 1000);
   }
 }
 
-function fold(period: Period, target: Resolution): Bar {
+function fold(period: Period, target: Resolution, clock: BarClock): Bar {
   const bars = [...period.bars.values()].sort((a, b) => a.time - b.time);
-  const [bar] = resampleBars(bars, target);
+  const [bar] = resampleBars(bars, target, clock);
   if (!bar) throw new Error('A period always holds at least one bar');
   return bar;
 }

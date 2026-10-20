@@ -13,6 +13,7 @@ import { marketApi } from '../data/api';
 import type { QuoteSource } from '../data/GatewayConnection';
 import { isEditable } from '../lib/dom';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
+import { useStockKeys } from '../stocks/stockKeys';
 import { ChevronDownIcon } from '../toolbar/icons';
 import { FlagDots } from './FlagDots';
 import { FlagPalette } from './FlagPalette';
@@ -91,8 +92,12 @@ export function Watchlist({
 }: WatchlistProps) {
   const { list, edit } = useWatchlist(api);
   const { flags, editFlags } = useFlags();
-  const directory = useMemo(() => new SymbolDirectory(marketApi), []);
-  const board = useMemo(() => new QuoteBoard(quotes), [quotes]);
+  // A saved Alpaca key looks the stocks up and subscribes to them again.
+  const { version: stockKeyVersion } = useStockKeys();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new key starts over
+  const directory = useMemo(() => new SymbolDirectory(marketApi), [stockKeyVersion]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new key starts over
+  const board = useMemo(() => new QuoteBoard(quotes), [quotes, stockKeyVersion]);
   const [selected, setSelected] = useState<SymbolId | null>(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; symbol: SymbolId | null } | null>(null);
   const [dragging, setDragging] = useState<SymbolId | null>(null);

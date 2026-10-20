@@ -1,9 +1,10 @@
 import {
   type Bar,
-  barCloseTime,
-  barOpenTime,
+  type BarClock,
   isIntraday,
   type Resolution,
+  timeZone,
+  UTC_CLOCK,
 } from '@tradingnerd/core';
 import {
   type CandlestickData,
@@ -47,6 +48,12 @@ export interface ChartInstrument {
   pricePrecision: number;
   tickSize: number;
   resolution: Resolution;
+  /** The exchange's time zone, which the time axis shows (UTC when absent). */
+  timezone?: string;
+  /** Where its bars begin and end, for the countdown (UTC bars when absent). */
+  clock?: BarClock;
+  /** How far behind real time its data runs, ms. */
+  delayMs?: number;
 }
 
 export interface HoverInfo {
@@ -82,13 +89,15 @@ export interface ChartDebugState {
   priceAxisWidth: number;
 }
 
-const toCandle = (bar: Bar): CandlestickData<Time> => ({
-  time: bar.time as UTCTimestamp,
+const toCandle = (bar: Bar, time: number): CandlestickData<Time> => ({
+  time: time as UTCTimestamp,
   open: bar.open,
   high: bar.high,
   low: bar.low,
   close: bar.close,
 });
+
+const UTC_ZONES = new Set(['Etc/UTC', 'UTC']);
 
 /** Index of the bar opening at `time` in an ascending array, or -1. */
 function indexOfTime(bars: readonly Bar[], time: number): number {
@@ -119,7 +128,11 @@ export class ChartController {
   private readonly cleanups: (() => void)[] = [];
   private readonly viewport: TimeViewport;
   private bars: Bar[] = [];
+  /** The chart's time for each bar: its UTC time shifted to the exchange's local clock. */
+  private displayTimes: number[] = [];
   private instrument: ChartInstrument | null = null;
+  /** Seconds to add to a UTC time for the exchange's local time, or null for UTC. */
+  private shift: ((seconds: number) => number) | null = null;
   private tuning: GestureTuning = DEFAULT_GESTURE_TUNING;
   private countdownTimer: ReturnType<typeof setTimeout> | undefined;
   private axisWidth = 0;
@@ -235,6 +248,13 @@ export class ChartController {
   setInstrument(instrument: ChartInstrument): void {
     this.instrument = instrument;
     const { pricePrecision: precision, tickSize, resolution } = instrument;
+    // Lightweight Charts has no time zones; it shows UTC, so local times go in as if they were
+    // (its docs' own advice). Bars keep their real times everywhere else.
+    const zone =
+      instrument.timezone && !UTC_ZONES.has(instrument.timezone)
+        ? timeZone(instrument.timezone)
+        : null;
+    this.shift = zone ? (seconds) => seconds + zone.offset(seconds * 1000) / 1000 : null;
     this.series.applyOptions({ priceFormat: { type: 'price', precision, minMove: tickSize } });
     this.chart.applyOptions({
       localization: {
@@ -263,7 +283,7 @@ export class ChartController {
   /** Replaces all data. */
   setBars(bars: readonly Bar[]): void {
     this.bars = [...bars];
-    this.series.setData(this.bars.map(toCandle));
+    this.setSeriesData();
     this.refreshLastPrice();
   }
 
@@ -273,7 +293,7 @@ export class ChartController {
     const fresh = older.filter((bar) => bar.time < first);
     if (fresh.length === 0) return;
     this.bars = [...fresh, ...this.bars];
-    this.series.setData(this.bars.map(toCandle));
+    this.setSeriesData();
   }
 
   /** Replaces everything from the first of `recent` onward, e.g. to refill a gap after a reconnect. */
@@ -281,7 +301,7 @@ export class ChartController {
     const first = recent[0];
     if (!first) return;
     this.bars = [...this.bars.filter((bar) => bar.time < first.time), ...recent];
-    this.series.setData(this.bars.map(toCandle));
+    this.setSeriesData();
     this.refreshLastPrice();
   }
 
@@ -292,16 +312,18 @@ export class ChartController {
   updateBar(bar: Bar, historical = false): void {
     const last = this.bars.at(-1);
     if (!last || bar.time > last.time) {
+      const time = this.displayTime(bar.time, this.displayTimes.at(-1));
       this.bars.push(bar);
-      this.series.update(toCandle(bar));
+      this.displayTimes.push(time);
+      this.series.update(toCandle(bar, time));
     } else if (bar.time === last.time) {
       this.bars[this.bars.length - 1] = bar;
-      this.series.update(toCandle(bar));
+      this.series.update(toCandle(bar, this.displayTimes.at(-1) ?? bar.time));
     } else {
       const index = historical ? indexOfTime(this.bars, bar.time) : -1;
       if (index < 0) return;
       this.bars[index] = bar;
-      this.series.update(toCandle(bar), true);
+      this.series.update(toCandle(bar, this.displayTimes[index] ?? bar.time), true);
     }
     this.refreshLastPrice();
   }
@@ -399,7 +421,8 @@ export class ChartController {
   /** The crosshair's time label for a bar time, as the chart draws it. */
   timeLabel(time: number): string {
     const formatter = this.chart.options().localization.timeFormatter;
-    return formatter ? formatter(time as Time) : String(time);
+    const shown = this.shift ? this.shift(time) : time;
+    return formatter ? formatter(shown as Time) : String(time);
   }
 
   destroy(): void {
@@ -450,14 +473,45 @@ export class ChartController {
     return formatPrice(price, this.instrument?.pricePrecision ?? 2);
   }
 
+  /**
+   * The time left in the current bar, TradingView's way: none while the market is closed, and
+   * with delayed data none until the bar it shows closes after now (with a 15-minute delay,
+   * only intervals over 15 minutes have one).
+   */
   private countdownText(lastBar: Bar): string | null {
     const resolution = this.instrument?.resolution;
     if (!resolution || resolution.unit === 'tick') return null;
+    const clock = this.instrument?.clock ?? UTC_CLOCK;
     const now = Date.now();
-    const currentOpen = barOpenTime(resolution, now);
+    const shown = now - (this.instrument?.delayMs ?? 0);
+    if (!clock.isOpen(shown)) return null;
+    const currentOpen = clock.open(resolution, shown);
     // No countdown for stale data (e.g. a delisted market): only for the current or previous bar.
-    if (barCloseTime(resolution, lastBar.time * 1000) < currentOpen) return null;
-    return formatCountdown(barCloseTime(resolution, currentOpen) - now);
+    if (clock.close(resolution, lastBar.time * 1000) < currentOpen) return null;
+    const left = clock.close(resolution, currentOpen) - now;
+    return left > 0 ? formatCountdown(left) : null;
+  }
+
+  /** Hands every bar to the series at its local time, each after the one before. */
+  private setSeriesData(): void {
+    const times: number[] = [];
+    const candles: CandlestickData<Time>[] = [];
+    for (const bar of this.bars) {
+      const time = this.displayTime(bar.time, times.at(-1));
+      times.push(time);
+      candles.push(toCandle(bar, time));
+    }
+    this.displayTimes = times;
+    this.series.setData(candles);
+  }
+
+  /**
+   * A bar's time on the chart: its exchange's local clock time. Where clocks turn back, local
+   * times can repeat, so a time is never allowed before the previous one.
+   */
+  private displayTime(time: number, previous: number | undefined): number {
+    const local = this.shift ? this.shift(time) : time;
+    return previous !== undefined && local <= previous ? previous + 1 : local;
   }
 
   private refreshLastPrice(): void {

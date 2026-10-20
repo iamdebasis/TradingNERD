@@ -7,6 +7,7 @@ import {
   parseServerMessage,
   parseSymbolInfo,
 } from './protocol.ts';
+import { NYSE_2026 } from './testing.ts';
 
 const bar = {
   time: 1_792_281_600,
@@ -170,10 +171,34 @@ describe('parseSymbolInfo', () => {
     tickSize: 0.0001,
     pricePrecision: 4,
     resolutions: ['1', '1D'],
+    timezone: 'Etc/UTC',
+    delayMs: 0,
+    hasBook: true,
+  };
+  const stock = {
+    ...info,
+    id: 'NYSE:JPM/PD',
+    exchange: 'NYSE',
+    exchangeName: 'NYSE',
+    ticker: 'JPM/PD',
+    base: 'JPM',
+    quote: 'USD',
+    description: 'JPMorgan Chase & Co. Depositary Shares, Series DD',
+    type: 'preferred',
+    tickSize: 0.01,
+    pricePrecision: 2,
+    timezone: 'America/New_York',
+    delayMs: 900_000,
+    hasBook: false,
+    schedule: NYSE_2026,
   };
 
   it('accepts complete symbol info', () => {
     expect(parseSymbolInfo(info)).toEqual(info);
+  });
+
+  it("accepts a stock's, with its delay and trading calendar", () => {
+    expect(parseSymbolInfo(JSON.parse(JSON.stringify(stock)))).toEqual(stock);
   });
 
   it.each([
@@ -182,6 +207,10 @@ describe('parseSymbolInfo', () => {
     ['a fractional precision', { ...info, pricePrecision: 1.5 }],
     ['an unknown type', { ...info, type: 'perp' }],
     ['non-string resolutions', { ...info, resolutions: [1] }],
+    ['no time zone', { ...info, timezone: undefined }],
+    ['a negative delay', { ...info, delayMs: -1 }],
+    ['no book flag', { ...info, hasBook: undefined }],
+    ['a broken schedule', { ...stock, schedule: { ...NYSE_2026, regular: [960, 570] } }],
   ])('rejects %s', (_label, value) => {
     expect(parseSymbolInfo(value)).toBeNull();
   });

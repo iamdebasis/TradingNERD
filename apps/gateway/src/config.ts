@@ -25,6 +25,12 @@ export interface GatewayConfig {
   okx: Endpoints & { businessStreamUrl: string | undefined };
   coinbase: Endpoints;
   kraken: Endpoints;
+  /**
+   * US stocks: ALPACA_DATA_URL and ALPACA_TRADING_URL instead of Alpaca's hosts, and
+   * US_LISTINGS_URL instead of Nasdaq's symbol directory (a folder holding its two files).
+   */
+  alpaca: { dataUrl: string | undefined; tradingUrl: string | undefined };
+  usListingsUrl: string | undefined;
   /** Where local data lives (watchlist, secrets, logo cache): DATA_DIR, or the repo's data/. */
   dataDir: string;
 }
@@ -55,6 +61,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     okx: { ...endpoints(env, 'OKX'), businessStreamUrl: env.OKX_BUSINESS_STREAM_URL || undefined },
     coinbase: endpoints(env, 'COINBASE'),
     kraken: endpoints(env, 'KRAKEN'),
+    alpaca: {
+      dataUrl: env.ALPACA_DATA_URL || undefined,
+      tradingUrl: env.ALPACA_TRADING_URL || undefined,
+    },
+    usListingsUrl: env.US_LISTINGS_URL || undefined,
     dataDir: env.DATA_DIR || REPO_DATA_DIR,
   };
 }

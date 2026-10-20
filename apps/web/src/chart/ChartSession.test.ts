@@ -26,6 +26,9 @@ const INFO: SymbolInfo = {
   tickSize: 0.0001,
   pricePrecision: 4,
   resolutions: ['1D'],
+  timezone: 'Etc/UTC',
+  delayMs: 0,
+  hasBook: true,
 };
 
 const makeBar = (time: number, close = 1): Bar => ({

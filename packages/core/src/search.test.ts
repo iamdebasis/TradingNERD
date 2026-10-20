@@ -18,7 +18,7 @@ const entry = (
   description: string,
   volumeUsd: number,
   live = exchange === 'BINANCE',
-): CatalogEntry => ({ exchange, ticker, base, quote, description, volumeUsd, live });
+): CatalogEntry => ({ exchange, ticker, base, quote, description, volumeUsd, live, kind: 'spot' });
 
 const CATALOG: CatalogEntry[] = [
   entry('BYBIT', 'XRPUSDT', 'XRP', 'USDT', 'XRP / TetherUS', 20e6),
@@ -172,5 +172,71 @@ describe('parsing search responses', () => {
       }),
     ).toBeNull();
     expect(parseExchangeList({ exchanges: [{ id: 'BINANCE', live: true }] })).toBeNull();
+  });
+});
+
+describe('US stocks and funds in the search', () => {
+  const stock = (
+    exchange: string,
+    ticker: string,
+    description: string,
+    volumeUsd: number,
+    kind: CatalogEntry['kind'] = 'stock',
+    exchangeName?: string,
+  ): CatalogEntry => {
+    const base = ticker.split(/[./]/)[0] ?? ticker;
+    const listing: CatalogEntry = {
+      exchange,
+      ticker,
+      base,
+      quote: 'USD',
+      description,
+      volumeUsd,
+      live: true,
+      kind,
+    };
+    if (exchangeName) listing.exchangeName = exchangeName;
+    return listing;
+  };
+  const MIXED: CatalogEntry[] = [
+    ...CATALOG,
+    stock('NASDAQ', 'AAPL', 'Apple Inc.', 12e9),
+    stock('NYSE', 'BRK.B', 'Berkshire Hathaway Inc. Class B', 1.5e9),
+    stock('NYSE', 'BRK.A', 'Berkshire Hathaway Inc. Class A', 0.3e9),
+    stock('NYSE', 'JPM', 'JPMorgan Chase & Co.', 3e9),
+    stock('NYSE', 'JPM/PD', 'JPMorgan Chase & Co. Depositary Shares, Series DD', 5e6, 'preferred'),
+    stock('AMEX', 'SPY', 'SPDR S&P 500 ETF Trust', 30e9, 'etf', 'NYSE Arca'),
+    stock('AMEX', 'XRP', 'Bitwise XRP ETF', 40e6, 'etf', 'NYSE Arca'),
+    stock('AMEX', 'BTC', 'Grayscale Bitcoin Mini Trust (BTC)', 200e6, 'etf', 'NYSE Arca'),
+  ];
+  const find = (query: string, options = {}) =>
+    searchCatalog(MIXED, { query, ...options }).matches.map((match) => match.ticker);
+
+  it('matches tickers however they are punctuated', () => {
+    expect(find('BRKB')[0]).toBe('BRK.B');
+    expect(find('brk.b')[0]).toBe('BRK.B');
+    expect(find('JPM/PD')[0]).toBe('JPM/PD');
+    // The common share first, then the preferred (its root is "JPM").
+    expect(find('JPM')).toEqual(['JPM', 'JPM/PD']);
+  });
+
+  it("filters by TradingView's tabs", () => {
+    expect(find('', { category: 'funds' })).toEqual(['SPY', 'BTC', 'XRP']);
+    expect(find('', { category: 'stocks' })).toEqual(['AAPL', 'JPM', 'BRK.B', 'BRK.A', 'JPM/PD']);
+    expect(find('XRP', { category: 'crypto' })).not.toContain('XRP');
+    expect(find('XRP', { category: 'funds' })).toEqual(['XRP']);
+  });
+
+  it('keeps a stock apart from crypto pairs, and names its venue', () => {
+    const btc = searchCatalog(MIXED, { query: 'BTC' }).matches.find(
+      (match) => match.type === 'etf',
+    );
+    expect(btc).toMatchObject({
+      ticker: 'BTC',
+      type: 'etf',
+      listings: [{ id: 'AMEX:BTC', exchange: 'AMEX', live: true, exchangeName: 'NYSE Arca' }],
+    });
+    const response = searchCatalog(MIXED, { query: 'SPY' });
+    expect(parseSymbolSearchResponse(JSON.parse(JSON.stringify(response)))).toEqual(response);
   });
 });

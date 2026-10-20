@@ -39,6 +39,16 @@ describe('loadConfig', () => {
     expect(config.bybit).toEqual({ restUrl: undefined, streamUrl: undefined });
   });
 
+  it('reads the US stock overrides, unset when empty', () => {
+    const config = loadConfig({
+      ALPACA_DATA_URL: 'http://127.0.0.1:9',
+      ALPACA_TRADING_URL: '',
+      US_LISTINGS_URL: 'http://127.0.0.1:9/directory/',
+    });
+    expect(config.alpaca).toEqual({ dataUrl: 'http://127.0.0.1:9', tradingUrl: undefined });
+    expect(config.usListingsUrl).toBe('http://127.0.0.1:9/directory/');
+  });
+
   it('rejects an unknown LOG_LEVEL', () => {
     expect(() => loadConfig({ LOG_LEVEL: 'loud' })).toThrow(/Invalid LOG_LEVEL/);
   });

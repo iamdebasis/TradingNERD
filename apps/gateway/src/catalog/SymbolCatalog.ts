@@ -68,8 +68,18 @@ const toPair = ([ticker, base, quote, quoteVolume, last]: StoredPair): CatalogPa
   last,
 });
 
+/** Listings from elsewhere that search alongside the pairs (US stocks and funds). */
+export interface ExtraListings {
+  entries(): readonly CatalogEntry[];
+  exchanges(): ExchangeSummary[];
+  /** Resolves once there's something to search, or after `timeoutMs`. */
+  ready(timeoutMs: number): Promise<void>;
+}
+
 export interface SymbolCatalogOptions {
   sources: readonly CatalogSource[];
+  /** US stocks and funds, searched with the pairs. */
+  extra?: ExtraListings;
   /** Exchanges the gateway has live data from; the others are listed only. */
   live: ReadonlySet<string>;
   dataDir: string;
@@ -89,6 +99,13 @@ export interface SymbolCatalogOptions {
  */
 export class SymbolCatalog {
   private readonly sources: readonly CatalogSource[];
+  private readonly extra: ExtraListings | undefined;
+  /** The pairs and the extra listings together, rebuilt when either changes. */
+  private combined: {
+    pairs: readonly CatalogEntry[];
+    extra: readonly CatalogEntry[];
+    all: readonly CatalogEntry[];
+  } | null = null;
   private readonly live: ReadonlySet<string>;
   private readonly names: AssetNames | undefined;
   private readonly file: JsonFile<StoredCatalog>;
@@ -109,6 +126,7 @@ export class SymbolCatalog {
 
   constructor(options: SymbolCatalogOptions) {
     this.sources = options.sources;
+    this.extra = options.extra;
     this.live = options.live;
     this.names = options.names;
     this.file = new JsonFile(join(options.dataDir, 'catalog.json'), parseStored, { indent: 0 });
@@ -143,20 +161,38 @@ export class SymbolCatalog {
     const timeout = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, timeoutMs);
     });
-    await Promise.race([this.filled, this.firstRound, timeout]);
+    await Promise.all([
+      Promise.race([this.filled, this.firstRound, timeout]),
+      this.extra?.ready(timeoutMs),
+    ]);
     clearTimeout(timer);
   }
 
   search(options: SearchOptions): SymbolSearchResponse {
-    return searchCatalog(this.entries, options);
+    return searchCatalog(this.allEntries(), options);
   }
 
   exchanges(): ExchangeSummary[] {
-    return this.sources.map((source) => ({
-      id: source.id,
-      name: source.name,
-      live: this.live.has(source.id),
-    }));
+    return [
+      ...this.sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        live: this.live.has(source.id),
+        market: 'crypto' as const,
+      })),
+      ...(this.extra?.exchanges() ?? []),
+    ];
+  }
+
+  private allEntries(): readonly CatalogEntry[] {
+    if (!this.extra) return this.entries;
+    const extra = this.extra.entries();
+    const combined = this.combined;
+    if (combined && combined.pairs === this.entries && combined.extra === extra)
+      return combined.all;
+    const all = [...this.entries, ...extra];
+    this.combined = { pairs: this.entries, extra, all };
+    return all;
   }
 
   /** When each exchange's list was last fetched (epoch ms), for diagnostics and tests. */

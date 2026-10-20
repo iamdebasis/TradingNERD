@@ -5,6 +5,7 @@ import {
   precisionOf,
   type Resolution,
   type SymbolInfo,
+  UTC_ZONE,
 } from '@tradingnerd/core';
 import type { AssetNames } from '../catalog/names.ts';
 import {
@@ -126,6 +127,9 @@ export function symbolInfo(
     tickSize: instrument.tickSize,
     pricePrecision: precisionOf(instrument.tickSize),
     resolutions: [...resolutions],
+    timezone: UTC_ZONE,
+    delayMs: 0,
+    hasBook: true,
   };
 }
 

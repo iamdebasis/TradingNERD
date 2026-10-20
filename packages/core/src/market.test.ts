@@ -10,7 +10,13 @@ describe('parseSymbolId', () => {
     expect(parseSymbolId(' binance:xrpusdt ')).toEqual({ exchange: 'BINANCE', ticker: 'XRPUSDT' });
   });
 
-  it.each(['XRPUSDT', 'BINANCE:', ':XRPUSDT', 'BINANCE:XRP/USDT', 'BIN ANCE:XRP', 'A:B:C', ''])(
+  it("takes TradingView's US stock tickers: classes, preferreds and warrants", () => {
+    expect(parseSymbolId('NYSE:BRK.B')).toEqual({ exchange: 'NYSE', ticker: 'BRK.B' });
+    expect(parseSymbolId('nyse:jpm/pd')).toEqual({ exchange: 'NYSE', ticker: 'JPM/PD' });
+    expect(parseSymbolId('NYSE:ACHR/W')).toEqual({ exchange: 'NYSE', ticker: 'ACHR/W' });
+  });
+
+  it.each(['XRPUSDT', 'BINANCE:', ':XRPUSDT', 'BINANCE:/XRP', 'BIN ANCE:XRP', 'A:B:C', ''])(
     'rejects %j',
     (id) => {
       expect(parseSymbolId(id)).toBeNull();

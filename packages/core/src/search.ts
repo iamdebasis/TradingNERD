@@ -1,4 +1,14 @@
-import type { SymbolId } from './market.ts';
+import { isSymbolKind, type SymbolId, type SymbolKind } from './market.ts';
+
+/** The search dialog's tabs past "All", as TradingView names them. */
+export const SEARCH_CATEGORIES = ['stocks', 'funds', 'crypto'] as const;
+export type SearchCategory = (typeof SEARCH_CATEGORIES)[number];
+
+/** Which tab a kind of symbol shows under: ETFs are funds, the other securities stocks. */
+export function categoryOf(kind: SymbolKind): SearchCategory {
+  if (kind === 'spot') return 'crypto';
+  return kind === 'etf' ? 'funds' : 'stocks';
+}
 
 /** One exchange's listing of a pair. */
 export interface SymbolListing {
@@ -8,6 +18,8 @@ export interface SymbolListing {
   exchange: string;
   /** Whether the gateway has live data from this exchange yet; the others are listed only. */
   live: boolean;
+  /** The listing venue, where an exchange code covers several ("NYSE Arca" under AMEX). */
+  exchangeName?: string;
 }
 
 /** One search result: a pair, with every exchange that lists it under that ticker. */
@@ -19,7 +31,7 @@ export interface SymbolMatch {
   quote: string;
   /** "XRP / TetherUS" */
   description: string;
-  type: 'spot';
+  type: SymbolKind;
   /** The listing a click picks first: exchanges with live data, then the most traded. */
   listings: SymbolListing[];
 }
@@ -39,6 +51,8 @@ export interface ExchangeSummary {
   name: string;
   /** Whether the gateway has live data from it yet. */
   live: boolean;
+  /** What it lists: crypto pairs, or US stocks and funds. */
+  market?: 'crypto' | 'stocks';
 }
 
 /** Body of GET /api/exchanges. */
@@ -53,9 +67,12 @@ export interface CatalogEntry {
   base: string;
   quote: string;
   description: string;
-  /** 24 h traded value in US dollars, for ranking; 0 when unknown. */
+  /** 24 h traded value in US dollars (a stock's last session's), for ranking; 0 when unknown. */
   volumeUsd: number;
   live: boolean;
+  kind: SymbolKind;
+  /** The listing venue, where the exchange code covers several. */
+  exchangeName?: string;
 }
 
 export interface SearchOptions {
@@ -63,6 +80,8 @@ export interface SearchOptions {
   query: string;
   /** Only this exchange's listings. */
   exchange?: string | null;
+  /** Only this tab's symbols. */
+  category?: SearchCategory | null;
   offset?: number;
   limit?: number;
 }
@@ -105,16 +124,21 @@ export function splitExchangePrefix(
   return { exchange: null, text: query };
 }
 
+/** A ticker as typed, without punctuation: "BRK.B" → "BRKB", "JPM/PD" → "JPMPD". */
+const compactTicker = (ticker: string) =>
+  /^[A-Z0-9]*$/.test(ticker) ? ticker : compactQuery(ticker);
+
 function tierOf(entry: CatalogEntry, compact: string, words: readonly string[]): number | null {
   if (compact === '') return EXACT; // nothing typed: everything, most traded first
-  if (entry.ticker === compact) return EXACT;
-  if (entry.ticker.startsWith(compact)) return PREFIX;
+  const ticker = compactTicker(entry.ticker);
+  if (ticker === compact) return EXACT;
+  if (ticker.startsWith(compact)) return PREFIX;
   if (entry.base === compact) return BASE;
   const description = wordsOf(entry.description);
   if (words.every((word) => description.some((part) => part.startsWith(word)))) {
     return DESCRIPTION;
   }
-  if (entry.ticker.includes(compact)) return CONTAINS;
+  if (ticker.includes(compact)) return CONTAINS;
   return null;
 }
 
@@ -128,7 +152,7 @@ function compareListings(a: CatalogEntry, b: CatalogEntry): number {
  * Searches the catalog the way docs/SPEC.md §5.4 ranks it: exact ticker, then ticker prefix,
  * then base asset, then description, then anywhere in the ticker; ties go to the most traded.
  * Listings sharing a ticker become one match, so a pair is one row however many exchanges
- * list it.
+ * list it; a stock never joins a crypto pair of the same name.
  */
 export function searchCatalog(
   entries: readonly CatalogEntry[],
@@ -141,45 +165,53 @@ export function searchCatalog(
   const words = wordsOf(split.text);
 
   const groups = new Map<string, { tier: number; volume: number; entries: CatalogEntry[] }>();
+  const category = options.category ?? null;
   for (const entry of entries) {
     if (exchange && entry.exchange !== exchange) continue;
+    if (category && categoryOf(entry.kind) !== category) continue;
     const tier = tierOf(entry, compact, words);
     if (tier === null) continue;
-    const group = groups.get(entry.ticker);
+    const key = `${entry.kind === 'spot' ? 'crypto' : 'us'}:${entry.ticker}`;
+    const group = groups.get(key);
     if (group) {
       group.tier = Math.min(group.tier, tier);
       group.volume += entry.volumeUsd;
       group.entries.push(entry);
     } else {
-      groups.set(entry.ticker, { tier, volume: entry.volumeUsd, entries: [entry] });
+      groups.set(key, { tier, volume: entry.volumeUsd, entries: [entry] });
     }
   }
 
-  const ranked = [...groups.entries()].sort(
-    ([tickerA, a], [tickerB, b]) =>
+  const tickerOf = (group: { entries: CatalogEntry[] }) => group.entries[0]?.ticker ?? '';
+  const ranked = [...groups.values()].sort(
+    (a, b) =>
       a.tier - b.tier ||
       b.volume - a.volume ||
-      tickerA.length - tickerB.length ||
-      tickerA.localeCompare(tickerB),
+      tickerOf(a).length - tickerOf(b).length ||
+      tickerOf(a).localeCompare(tickerOf(b)),
   );
   const offset = Math.max(0, options.offset ?? 0);
   const limit = Math.max(1, options.limit ?? SEARCH_PAGE_SIZE);
   const page = ranked.slice(offset, offset + limit);
   return {
-    matches: page.map(([ticker, group]) => {
+    matches: page.map((group) => {
       const listings = [...group.entries].sort(compareListings);
       const first = listings[0] as CatalogEntry;
       return {
-        ticker,
+        ticker: first.ticker,
         base: first.base,
         quote: first.quote,
         description: first.description,
-        type: 'spot',
-        listings: listings.map((entry) => ({
-          id: `${entry.exchange}:${entry.ticker}`,
-          exchange: entry.exchange,
-          live: entry.live,
-        })),
+        type: first.kind,
+        listings: listings.map((entry) => {
+          const listing: SymbolListing = {
+            id: `${entry.exchange}:${entry.ticker}`,
+            exchange: entry.exchange,
+            live: entry.live,
+          };
+          if (entry.exchangeName) listing.exchangeName = entry.exchangeName;
+          return listing;
+        }),
       };
     }),
     hasMore: offset + limit < ranked.length,
@@ -224,17 +256,17 @@ const isString = (value: unknown): value is string => typeof value === 'string' 
 
 function parseListing(value: unknown): SymbolListing | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { id, exchange, live } = value as Record<string, unknown>;
-  return isString(id) && isString(exchange) && typeof live === 'boolean'
-    ? { id, exchange, live }
-    : null;
+  const { id, exchange, live, exchangeName } = value as Record<string, unknown>;
+  if (!isString(id) || !isString(exchange) || typeof live !== 'boolean') return null;
+  if (exchangeName !== undefined && !isString(exchangeName)) return null;
+  return exchangeName === undefined ? { id, exchange, live } : { id, exchange, live, exchangeName };
 }
 
 function parseMatch(value: unknown): SymbolMatch | null {
   if (typeof value !== 'object' || value === null) return null;
   const v = value as Record<string, unknown>;
   if (!isString(v.ticker) || !isString(v.base) || !isString(v.quote)) return null;
-  if (typeof v.description !== 'string' || v.type !== 'spot') return null;
+  if (typeof v.description !== 'string' || !isSymbolKind(v.type)) return null;
   if (!Array.isArray(v.listings) || v.listings.length === 0) return null;
   const listings = v.listings.map(parseListing);
   if (listings.some((listing) => listing === null)) return null;
@@ -243,7 +275,7 @@ function parseMatch(value: unknown): SymbolMatch | null {
     base: v.base,
     quote: v.quote,
     description: v.description,
-    type: 'spot',
+    type: v.type,
     listings: listings as SymbolListing[],
   };
 }
@@ -266,9 +298,10 @@ export function parseExchangeList(value: unknown): ExchangeList | null {
   const parsed: ExchangeSummary[] = [];
   for (const item of exchanges) {
     if (typeof item !== 'object' || item === null) return null;
-    const { id, name, live } = item as Record<string, unknown>;
+    const { id, name, live, market } = item as Record<string, unknown>;
     if (!isString(id) || !isString(name) || typeof live !== 'boolean') return null;
-    parsed.push({ id, name, live });
+    if (market !== undefined && market !== 'crypto' && market !== 'stocks') return null;
+    parsed.push(market === undefined ? { id, name, live } : { id, name, live, market });
   }
   return { exchanges: parsed };
 }

@@ -1,9 +1,8 @@
 import {
   type AggTrade,
   type Bar,
+  type BarClock,
   type BarsResponse,
-  barCloseTime,
-  barOpenTime,
   formatResolution,
   maxBasePerBar,
   parseResolution,
@@ -14,11 +13,12 @@ import {
   resolutionLabel,
   type StreamState,
   type SymbolInfo,
+  UTC_CLOCK,
 } from '@tradingnerd/core';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
 import { Feed } from './feed.ts';
 import { fetchHistory, fetchSlices, pageBack } from './history.ts';
-import { HistoryCache } from './historyCache.ts';
+import { HistoryCache, type MarketTime } from './historyCache.ts';
 import type { BarChange } from './liveBar.ts';
 import { QuoteFeed, type QuoteListener } from './quotes.ts';
 import { nativeLiveBars, ResampledBarAggregator } from './resampledBar.ts';
@@ -125,9 +125,10 @@ export class MarketService {
             : getResampledBars(adapter, ticker, plan.target, plan.base, to, count);
         if (!this.history) return load(toSec, countBack);
         const page = `${id}|${formatResolution(plan.target)}|${countBack}`;
+        const time = marketTime(adapter);
         return toSec === null
-          ? this.history.latest(page, plan.target, countBack, (count) => load(null, count))
-          : this.history.older(`${page}|${toSec}`, plan.target, () => load(toSec, countBack));
+          ? this.history.latest(page, plan.target, countBack, (count) => load(null, count), time)
+          : this.history.older(`${page}|${toSec}`, plan.target, () => load(toSec, countBack), time);
       }
       case 'ticks':
         // For tick bars `toSec` is a bar number (see Bar.time).
@@ -245,6 +246,12 @@ export class MarketService {
 
 const sameResolution = (a: Resolution, b: Resolution) => a.unit === b.unit && a.count === b.count;
 
+const clockOf = (adapter: ExchangeAdapter): BarClock => adapter.clock ?? UTC_CLOCK;
+const marketTime = (adapter: ExchangeAdapter): MarketTime => ({
+  clock: clockOf(adapter),
+  delayMs: adapter.delayMs ?? 0,
+});
+
 /** Native if the exchange serves the interval, else resampled from its coarsest fitting one. */
 function intervalPlan(adapter: ExchangeAdapter, text: string): IntervalPlan {
   const target = parseResolution(text);
@@ -256,7 +263,7 @@ function intervalPlan(adapter: ExchangeAdapter, text: string): IntervalPlan {
   }
   if (target.unit === 'tick' && adapter.ticks)
     return { kind: 'ticks', target, source: adapter.ticks };
-  const base = resampleBase(target, adapter.nativeResolutions);
+  const base = resampleBase(target, adapter.nativeResolutions, clockOf(adapter));
   if (!base) {
     throw new MarketError(
       'unsupported_resolution',
@@ -268,7 +275,9 @@ function intervalPlan(adapter: ExchangeAdapter, text: string): IntervalPlan {
 
 /**
  * History for a resampled interval: enough base bars for `countBack` bars plus one, folded.
- * The oldest bar is dropped if the base bars may not reach back to its start.
+ * The oldest bar is dropped if the base bars may not reach back to its start. Around-the-clock
+ * markets fill time slices; markets that close page back by bar count instead, since a slice
+ * of time holds far fewer of their bars.
  */
 async function getResampledBars(
   adapter: ExchangeAdapter,
@@ -278,17 +287,14 @@ async function getResampledBars(
   toSec: number | null,
   countBack: number,
 ): Promise<BarsResponse> {
+  const clock = clockOf(adapter);
   const perBar = maxBasePerBar(base, target);
-  const endMs = toSec === null ? null : periodEnd(target, toSec * 1000);
-  const history = await fetchSlices(
-    adapter,
-    ticker,
-    base,
-    endMs,
-    (countBack + 1) * perBar,
-    RESAMPLE_MAX_REQUESTS,
-  );
-  let bars = resampleBars(history.bars, target);
+  const endMs = toSec === null ? null : periodEnd(clock, target, toSec * 1000);
+  const count = (countBack + 1) * perBar;
+  const history = clock.continuous
+    ? await fetchSlices(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS)
+    : await pageBack(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS);
+  let bars = resampleBars(history.bars, target, clock);
   const firstBase = history.bars[0];
   if (history.hasMore && firstBase && bars[0] && firstBase.time > bars[0].time) {
     bars = bars.slice(1);
@@ -303,9 +309,9 @@ async function getResampledBars(
 }
 
 /** The end of the bar that contains `ms`, or `ms` itself when a bar opens there. */
-function periodEnd(target: Resolution, ms: number): number {
-  const open = barOpenTime(target, ms);
-  return open === ms ? ms : barCloseTime(target, open);
+function periodEnd(clock: BarClock, target: Resolution, ms: number): number {
+  const open = clock.open(target, ms);
+  return open === ms ? ms : clock.close(target, open);
 }
 
 /** How a bar feed builds its live bar from the exchange. */
@@ -344,7 +350,10 @@ function liveStrategy(
   }
   const { target } = plan;
   const base = plan.kind === 'resampled' ? plan.base : null;
-  const live = base ? new ResampledBarAggregator(target, base) : nativeLiveBars(target);
+  const clock = clockOf(adapter);
+  const live = base
+    ? new ResampledBarAggregator(target, base, clock)
+    : nativeLiveBars(target, clock);
   const bars: LiveStrategy<Bar[]> = {
     candles: base ?? target,
     // A resampled interval needs every base bar of its current period.

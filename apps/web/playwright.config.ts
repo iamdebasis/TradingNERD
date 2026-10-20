@@ -18,6 +18,10 @@ const offlineExchanges = Object.fromEntries(
   ]),
 );
 offlineExchanges.OKX_BUSINESS_STREAM_URL = nowhere.stream;
+// US stocks: Alpaca's hosts and Nasdaq's symbol directory, unreachable too.
+offlineExchanges.ALPACA_DATA_URL = nowhere.rest;
+offlineExchanges.ALPACA_TRADING_URL = nowhere.rest;
+offlineExchanges.US_LISTINGS_URL = `${nowhere.rest}/`;
 
 /**
  * Not devices['Desktop Chrome']: its Windows user agent would switch on the Windows wheel

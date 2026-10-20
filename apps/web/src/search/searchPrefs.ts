@@ -11,14 +11,23 @@ export function searchKey(event: {
   return /^[a-z]$/i.test(event.key) ? event.key : null;
 }
 
-/** TradingView's category chips; v1 lists crypto only, so both show the same pairs. */
-export type SearchTab = 'all' | 'crypto';
+/** TradingView's category chips we have symbols for, in its order. */
+export const SEARCH_TABS = ['all', 'stocks', 'funds', 'crypto'] as const;
+export type SearchTab = (typeof SEARCH_TABS)[number];
+
+export const SEARCH_TAB_LABELS: Readonly<Record<SearchTab, string>> = {
+  all: 'All',
+  stocks: 'Stocks',
+  funds: 'Funds',
+  crypto: 'Crypto',
+};
 
 /** Where the chosen chip is remembered, as TradingView remembers it. */
 export const SEARCH_TAB_KEY = 'tn.symbolSearch.tab';
 
 export function loadSearchTab(): SearchTab {
-  return readJson(SEARCH_TAB_KEY) === 'crypto' ? 'crypto' : 'all';
+  const saved = readJson(SEARCH_TAB_KEY);
+  return SEARCH_TABS.includes(saved as SearchTab) ? (saved as SearchTab) : 'all';
 }
 
 export function saveSearchTab(tab: SearchTab): void {

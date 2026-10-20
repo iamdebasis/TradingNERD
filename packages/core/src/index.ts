@@ -1,3 +1,4 @@
+export * from './clock.ts';
 export * from './config.ts';
 export * from './flags.ts';
 export * from './intervals.ts';
@@ -6,6 +7,9 @@ export * from './market.ts';
 export * from './protocol.ts';
 export * from './resample.ts';
 export * from './resolution.ts';
+export * from './schedule.ts';
 export * from './search.ts';
+export * from './stocks.ts';
 export * from './ticks.ts';
+export * from './timezone.ts';
 export * from './watchlist.ts';

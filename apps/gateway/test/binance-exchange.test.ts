@@ -85,6 +85,9 @@ describe('BinanceExchange.resolveSymbol', () => {
         '1W',
         '1M',
       ],
+      timezone: 'Etc/UTC',
+      delayMs: 0,
+      hasBook: true,
     });
   });
 

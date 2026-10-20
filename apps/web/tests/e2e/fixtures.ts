@@ -8,15 +8,21 @@ import {
   type ExchangeSummary,
   type FlagState,
   type LogoStatus,
+  MarketSchedule,
   PROTOCOL_VERSION,
   parseFlagState,
   parseResolution,
   parseWatchlist,
   SEARCH_PAGE_SIZE,
+  type SearchCategory,
+  type StockKeyStatus,
   type SymbolInfo,
+  type SymbolKind,
   searchCatalog,
+  sessionClock,
   type Watchlist,
 } from '@tradingnerd/core';
+import { NYSE_2026 } from '@tradingnerd/core/testing';
 
 export { expect };
 
@@ -50,6 +56,9 @@ export const XRP_INFO: SymbolInfo = {
   tickSize: 0.0001,
   pricePrecision: 4,
   resolutions: ['1', '60', '1D'],
+  timezone: 'Etc/UTC',
+  delayMs: 0,
+  hasBook: true,
 };
 
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
@@ -96,6 +105,7 @@ const listing = (
   description,
   volumeUsd,
   live: true,
+  kind: 'spot',
 });
 
 /**
@@ -242,6 +252,115 @@ export function makeIntervalBars(resolution: string, count = 1_500): Bar[] {
   });
 }
 
+// ---- US stocks (M7): a few real listings, bars on the NYSE's sessions, Alpaca's key ----
+
+/** A weekday in the session for stock tests: Monday 2026-10-19, 11:00:05 New York. */
+export const STOCK_NOW = Date.parse('2026-10-19T15:00:05Z');
+/** The free plan's delay. */
+export const STOCK_DELAY_MS = 15 * 60_000;
+export const NYSE = new MarketSchedule(NYSE_2026);
+export const STOCK_CLOCK = sessionClock(NYSE);
+
+export const MOCK_STOCK_EXCHANGES: ExchangeSummary[] = [
+  { id: 'NASDAQ', name: 'NASDAQ', live: true, market: 'stocks' },
+  { id: 'NYSE', name: 'NYSE', live: true, market: 'stocks' },
+  { id: 'AMEX', name: 'NYSE Arca & NYSE American', live: true, market: 'stocks' },
+  { id: 'CBOE', name: 'Cboe BZX', live: true, market: 'stocks' },
+];
+
+const stock = (
+  exchange: string,
+  ticker: string,
+  description: string,
+  kind: SymbolKind,
+  volumeUsd: number,
+  exchangeName: string,
+  live = true,
+): CatalogEntry => ({
+  exchange,
+  ticker,
+  base: ticker.split(/[./]/)[0] ?? ticker,
+  quote: 'USD',
+  description,
+  volumeUsd,
+  live,
+  kind,
+  exchangeName,
+});
+
+/** US listings as the gateway's directory would give them (19 October 2026). */
+export const MOCK_STOCKS: CatalogEntry[] = [
+  stock('NASDAQ', 'AAPL', 'Apple Inc.', 'stock', 12e9, 'NASDAQ'),
+  stock('AMEX', 'SPY', 'State Street SPDR S&P 500 ETF Trust', 'etf', 30e9, 'NYSE Arca'),
+  stock('AMEX', 'GBTC', 'Grayscale Bitcoin Trust (BTC)', 'etf', 400e6, 'NYSE Arca'),
+  stock('AMEX', 'XXRP', 'Teucrium 2x Long Daily XRP ETF', 'etf', 30e6, 'NYSE Arca'),
+  stock('CBOE', 'FBTC', 'Fidelity Wise Origin Bitcoin Fund', 'etf', 900e6, 'Cboe BZX'),
+  stock('NYSE', 'BRK.B', 'Berkshire Hathaway Inc.', 'stock', 1.5e9, 'NYSE'),
+  stock(
+    'NYSE',
+    'JPM/PD',
+    'J P Morgan Chase & Co Depositary Shares, Series DD',
+    'preferred',
+    5e6,
+    'NYSE',
+    false,
+  ),
+];
+
+/** SymbolInfo for a mock US listing with data, or null. */
+export function stockInfoFor(symbol: string): SymbolInfo | null {
+  const entry = MOCK_STOCKS.find((item) => `${item.exchange}:${item.ticker}` === symbol);
+  if (!entry?.live) return null;
+  return {
+    id: symbol,
+    exchange: entry.exchange,
+    exchangeName: entry.exchangeName ?? entry.exchange,
+    ticker: entry.ticker,
+    base: entry.base,
+    quote: 'USD',
+    description: entry.description,
+    type: entry.kind,
+    tickSize: 0.01,
+    pricePrecision: 2,
+    resolutions: ['1', '5', '15', '30', '1D'],
+    timezone: 'America/New_York',
+    delayMs: STOCK_DELAY_MS,
+    hasBook: false,
+    schedule: NYSE_2026,
+  };
+}
+
+/**
+ * `count` bars of a stock on the NYSE's regular sessions, ending with the bar 15 minutes before
+ * STOCK_NOW: a walk around 230.
+ */
+export function makeStockBars(resolution: string, count = 1_500): Bar[] {
+  const parsed = parseResolution(resolution);
+  if (!parsed || parsed.unit === 'tick' || parsed.unit === 'second') {
+    throw new Error(`No mock stock bars for ${resolution}`);
+  }
+  const times: number[] = [];
+  let open = STOCK_CLOCK.open(parsed, STOCK_NOW - STOCK_DELAY_MS);
+  while (times.length < count && open > Date.UTC(2026, 0, 2)) {
+    times.unshift(open / 1000);
+    open = STOCK_CLOCK.open(parsed, open - 1);
+  }
+  const random = mulberry32(11);
+  let close = 230;
+  return times.map((time) => {
+    const start = close;
+    close = Math.round(start * (1 + (random() - 0.5) * 0.004) * 100) / 100;
+    return {
+      time,
+      open: start,
+      high: Math.round(Math.max(start, close) * (1 + random() * 0.002) * 100) / 100,
+      low: Math.round(Math.min(start, close) * (1 - random() * 0.002) * 100) / 100,
+      close,
+      volume: 100_000,
+    };
+  });
+}
+
 /** The number of the first mock tick bar (tick bars are numbered by trade, see Bar.time). */
 export const FIRST_TICK_BAR = 17_369_000;
 
@@ -293,6 +412,10 @@ export interface MockMarket {
   readonly searchRequests: URLSearchParams[];
   /** Exchanges the mock says have live data (all five, unless a test takes one away). */
   readonly liveExchanges: Set<string>;
+  /** What GET /api/stocks/key answers; by default a free-plan key is set. */
+  stockKey: StockKeyStatus;
+  /** Every key the page sent to PUT /api/stocks/key. */
+  readonly savedStockKeys: { keyId: string; secret: string }[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
   /** Ids of subscriptions the page still holds. */
@@ -322,6 +445,13 @@ class MockGateway implements MockMarket {
     syncError: null,
   };
   readonly savedKeys: string[] = [];
+  stockKey: StockKeyStatus = {
+    configured: true,
+    source: 'file',
+    keyId: '••••6789',
+    sip: 'delayed',
+  };
+  readonly savedStockKeys: { keyId: string; secret: string }[] = [];
   readonly searchRequests: URLSearchParams[] = [];
   readonly liveExchanges = new Set(MOCK_EXCHANGES.map((exchange) => exchange.id));
   readonly watchlistSaves: Watchlist[] = [];
@@ -336,6 +466,7 @@ class MockGateway implements MockMarket {
   private refusedLoads = 0;
   private readonly subscriptions = new Map<string, { channel: string; symbol: string }>();
   private readonly series = new Map<string, Bar[]>();
+  private readonly stockSeries = new Map<string, Bar[]>();
 
   constructor(page: Page) {
     this.page = page;
@@ -345,7 +476,13 @@ class MockGateway implements MockMarket {
     if (pinClock) await this.page.clock.setFixedTime(NOW);
     await this.page.route(/\/api\/symbols\/resolve\?/, (route) => {
       const symbol = new URL(route.request().url()).searchParams.get('symbol') ?? '';
-      const info = infoFor(symbol);
+      if (stockInfoFor(symbol) && !this.stockKey.configured) {
+        return route.fulfill({
+          status: 424,
+          json: { error: 'needs_key', message: 'US stock data needs your Alpaca key' },
+        });
+      }
+      const info = infoFor(symbol) ?? stockInfoFor(symbol);
       return info
         ? route.fulfill({ json: info })
         : route.fulfill({
@@ -359,10 +496,17 @@ class MockGateway implements MockMarket {
       this.searchRequests.push(params);
       return route.fulfill({
         json: searchCatalog(
-          MOCK_CATALOG.map((entry) => ({ ...entry, live: this.liveExchanges.has(entry.exchange) })),
+          [
+            ...MOCK_CATALOG.map((entry) => ({
+              ...entry,
+              live: this.liveExchanges.has(entry.exchange),
+            })),
+            ...MOCK_STOCKS,
+          ],
           {
             query: params.get('query') ?? '',
             exchange: params.get('exchange'),
+            category: params.get('category') as SearchCategory | null,
             offset: Number(params.get('offset') ?? 0),
             limit: Number(params.get('limit') ?? SEARCH_PAGE_SIZE),
           },
@@ -372,10 +516,14 @@ class MockGateway implements MockMarket {
     await this.page.route(/\/api\/exchanges$/, (route) =>
       route.fulfill({
         json: {
-          exchanges: MOCK_EXCHANGES.map((exchange) => ({
-            ...exchange,
-            live: this.liveExchanges.has(exchange.id),
-          })),
+          exchanges: [
+            ...MOCK_EXCHANGES.map((exchange) => ({
+              ...exchange,
+              live: this.liveExchanges.has(exchange.id),
+              market: 'crypto' as const,
+            })),
+            ...MOCK_STOCK_EXCHANGES,
+          ],
         },
       }),
     );
@@ -410,13 +558,51 @@ class MockGateway implements MockMarket {
       this.barRequests.push(params);
       const to = params.get('to');
       const countBack = Number(params.get('countBack') ?? 300);
-      const bars = this.barsFor(params.get('resolution') ?? '1D');
+      const symbol = params.get('symbol') ?? '';
+      const resolution = params.get('resolution') ?? '1D';
+      const bars = stockInfoFor(symbol) ? this.stockBarsFor(resolution) : this.barsFor(resolution);
       const eligible = bars.filter((bar) => to === null || bar.time < Number(to));
       return route.fulfill({
         json: { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack },
       });
     });
+    await this.page.route(/\/api\/stocks\/key$/, (route) => {
+      const request = route.request();
+      if (request.method() === 'PUT') {
+        const body = request.postDataJSON() as { keyId?: unknown; secret?: unknown };
+        const key = { keyId: String(body.keyId ?? ''), secret: String(body.secret ?? '') };
+        this.savedStockKeys.push(key);
+        if (!key.keyId.startsWith('PK') || key.secret.length < 8) {
+          return route.fulfill({
+            status: 424,
+            json: {
+              error: 'needs_key',
+              message: "Alpaca didn't accept the key; check it and enter it again",
+            },
+          });
+        }
+        this.stockKey = {
+          configured: true,
+          source: 'file',
+          keyId: `••••${key.keyId.slice(-4)}`,
+          sip: 'delayed',
+        };
+      } else if (request.method() === 'DELETE') {
+        this.stockKey = { configured: false, source: null, keyId: null, sip: null };
+      }
+      return route.fulfill({ json: this.stockKey });
+    });
     await this.page.routeWebSocket(/\/ws$/, (socket) => this.accept(socket));
+  }
+
+  /** The history this mock serves a stock for an interval. */
+  stockBarsFor(resolution: string): Bar[] {
+    let bars = this.stockSeries.get(resolution);
+    if (!bars) {
+      bars = makeStockBars(resolution);
+      this.stockSeries.set(resolution, bars);
+    }
+    return bars;
   }
 
   /** The history this mock serves for an interval. */
@@ -554,7 +740,19 @@ class MockGateway implements MockMarket {
       };
       if (message.type === 'subscribe') {
         this.subscriptions.set(message.id, { channel: message.channel, symbol: message.symbol });
-        if (message.channel === 'quotes' && !infoFor(message.symbol)) {
+        const isStock = stockInfoFor(message.symbol) !== null;
+        if (isStock && !this.stockKey.configured) {
+          socket.send(
+            JSON.stringify({
+              type: 'error',
+              id: message.id,
+              code: 'needs_key',
+              message: 'US stock data needs your Alpaca key',
+            }),
+          );
+          return;
+        }
+        if (message.channel === 'quotes' && !infoFor(message.symbol) && !isStock) {
           socket.send(
             JSON.stringify({
               type: 'error',
@@ -573,7 +771,7 @@ class MockGateway implements MockMarket {
         }
         const resolution = message.resolution ?? '1D';
         if (message.channel === 'bars') this.barSubscriptions.push([message.id, resolution]);
-        const last = this.barsFor(resolution).at(-1);
+        const last = (isStock ? this.stockBarsFor(resolution) : this.barsFor(resolution)).at(-1);
         if (message.channel === 'bars' && last) {
           socket.send(
             JSON.stringify({ type: 'bar', id: message.id, bar: last, historical: false }),

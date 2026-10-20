@@ -28,6 +28,9 @@ export const FAKE_INFO: SymbolInfo = {
   tickSize: 0.0001,
   pricePrecision: 4,
   resolutions: ['1', '60', '1D'],
+  timezone: 'Etc/UTC',
+  delayMs: 0,
+  hasBook: true,
 };
 
 const DAY = 86_400;

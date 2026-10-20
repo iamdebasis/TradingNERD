@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { marketApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
 import { gestureSettings } from '../gestures/gestureSettings';
+import { useStockKeys } from '../stocks/stockKeys';
 import { darkTheme } from '../theme/tokens';
 import styles from './ChartPane.module.css';
 import { ChartSession, type LegendView } from './ChartSession';
@@ -28,6 +29,8 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
   const legend = useRef<LegendView>(null);
   const session = useRef<ChartSession | null>(null);
   const [chart, setChart] = useState<ChartController | null>(null);
+  // A saved Alpaca key starts the session over, so a stock waiting for it loads.
+  const { version: stockKeyVersion, prompt: promptStockKey } = useStockKeys();
 
   useEffect(() => {
     if (!container.current) return;
@@ -52,6 +55,7 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
     };
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new key restarts the session
   useEffect(() => {
     if (!chart || !legend.current) return;
     const current = new ChartSession({
@@ -61,6 +65,9 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
       legend: legend.current,
       symbol,
       resolution,
+      onError: (code) => {
+        if (code === 'needs_key') promptStockKey();
+      },
     });
     session.current = current;
     void current.start();
@@ -68,7 +75,7 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
       current.dispose();
       if (session.current === current) session.current = null;
     };
-  }, [chart, gateway, symbol, resolution]);
+  }, [chart, gateway, symbol, resolution, stockKeyVersion, promptStockKey]);
 
   return (
     <div className={styles.pane}>

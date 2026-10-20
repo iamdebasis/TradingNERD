@@ -1,4 +1,4 @@
-import { type BarsResponse, barCloseTime, barOpenTime, type Resolution } from '@tradingnerd/core';
+import { type BarClock, type BarsResponse, type Resolution, UTC_CLOCK } from '@tradingnerd/core';
 
 /** A bar this long after its close is final: the exchanges' late final candles have arrived. */
 export const FINAL_AFTER_MS = 15_000;
@@ -16,6 +16,17 @@ interface Page {
   /** When its bars were fetched. */
   fetchedAt: number;
 }
+
+/**
+ * How a page's market keeps time: its bars follow the clock, and a delayed market's "now" is
+ * that far back (15-minute delayed stocks have their live bar where real time was 15 minutes ago).
+ */
+export interface MarketTime {
+  clock: BarClock;
+  delayMs: number;
+}
+
+const REAL_TIME_UTC: MarketTime = { clock: UTC_CLOCK, delayMs: 0 };
 
 /**
  * Recent history pages, so going back to a chart is instant. A final bar never changes, so a
@@ -38,19 +49,20 @@ export class HistoryCache {
     resolution: Resolution,
     count: number,
     load: (n: number) => Promise<BarsResponse>,
+    { clock, delayMs }: MarketTime = REAL_TIME_UTC,
   ): Promise<BarsResponse> {
     return this.once(key, async () => {
       const now = this.now();
       const page = this.get(key, LATEST_TTL_MS, now);
       if (!page) return this.put(key, await load(count), now);
 
-      const liveOpen = barOpenTime(resolution, now);
+      const liveOpen = clock.open(resolution, now - delayMs);
       // Bars opening from here on may have changed after the page was fetched.
-      const unsettled = barOpenTime(resolution, page.fetchedAt - FINAL_AFTER_MS);
+      const unsettled = clock.open(resolution, page.fetchedAt - delayMs - FINAL_AFTER_MS);
       if (unsettled === liveOpen && page.response.bars.at(-1)?.time === liveOpen / 1000) {
         return page.response;
       }
-      const behind = barsFrom(resolution, unsettled, liveOpen, MAX_CATCH_UP);
+      const behind = barsFrom(clock, resolution, unsettled, liveOpen, MAX_CATCH_UP);
       if (behind === null) return this.put(key, await load(count), now);
       const newest = await load(behind + 2);
       const first = newest.bars[0];
@@ -70,6 +82,7 @@ export class HistoryCache {
     key: string,
     resolution: Resolution,
     load: () => Promise<BarsResponse>,
+    { clock, delayMs }: MarketTime = REAL_TIME_UTC,
   ): Promise<BarsResponse> {
     return this.once(key, async () => {
       const now = this.now();
@@ -77,7 +90,8 @@ export class HistoryCache {
       if (page) return page.response;
       const response = await load();
       const last = response.bars.at(-1);
-      if (!last || barCloseTime(resolution, last.time * 1000) <= now - FINAL_AFTER_MS) {
+      const settled = now - delayMs - FINAL_AFTER_MS;
+      if (!last || clock.close(resolution, last.time * 1000) <= settled) {
         this.put(key, response, now);
       }
       return response;
@@ -114,9 +128,15 @@ export class HistoryCache {
 }
 
 /** How many bars open from `from` to `to` (both bar opens, inclusive); null past `limit`. */
-function barsFrom(resolution: Resolution, from: number, to: number, limit: number): number | null {
+function barsFrom(
+  clock: BarClock,
+  resolution: Resolution,
+  from: number,
+  to: number,
+  limit: number,
+): number | null {
   let count = 1;
-  for (let open = from; open < to; open = barCloseTime(resolution, open)) {
+  for (let open = from; open < to; open = clock.next(resolution, open)) {
     if (++count > limit) return null;
   }
   return count;

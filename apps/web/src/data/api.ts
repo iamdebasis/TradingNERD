@@ -10,9 +10,12 @@ import {
   parseExchangeList,
   parseFlagState,
   parseLogoStatus,
+  parseStockKeyStatus,
   parseSymbolInfo,
   parseSymbolSearchResponse,
   parseWatchlist,
+  type SearchCategory,
+  type StockKeyStatus,
   type SymbolInfo,
   type SymbolSearchResponse,
   type Watchlist,
@@ -90,6 +93,8 @@ export interface SearchRequest {
   query: string;
   /** Only this exchange's pairs. */
   exchange: string | null;
+  /** Only this tab's symbols: stocks, funds or crypto. */
+  category?: SearchCategory | null;
   offset: number;
 }
 
@@ -98,6 +103,7 @@ export const searchApi = {
   async search(request: SearchRequest, signal?: AbortSignal): Promise<SymbolSearchResponse> {
     const params = new URLSearchParams({ query: request.query, offset: String(request.offset) });
     if (request.exchange) params.set('exchange', request.exchange);
+    if (request.category) params.set('category', request.category);
     const body = await getJson(`${API_PREFIX}/symbols/search?${params}`, signal);
     const results = parseSymbolSearchResponse(body);
     if (!results) throw new ApiError('internal_error', 'The gateway sent malformed search results');
@@ -175,3 +181,23 @@ export const logosApi = {
 };
 
 export type LogosApi = typeof logosApi;
+
+async function stockKey(init: RequestInit = {}): Promise<StockKeyStatus> {
+  const status = parseStockKeyStatus(await getJson(`${API_PREFIX}/stocks/key`, undefined, init));
+  if (!status) throw new ApiError('internal_error', 'The gateway sent a malformed key status');
+  return status;
+}
+
+/** US stocks' Alpaca key: it lives in the gateway; the browser only ever sees the ID masked. */
+export const stocksApi = {
+  status: () => stockKey(),
+  saveKey: (keyId: string, secret: string) =>
+    stockKey({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ keyId, secret }),
+    }),
+  removeKey: () => stockKey({ method: 'DELETE' }),
+};
+
+export type StocksApi = typeof stocksApi;

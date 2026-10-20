@@ -173,3 +173,27 @@
   font-size: 11px;
   text-align: center;
 }
+
+/*
+ * TradingView's "Data is delayed" (D) sign beside the title. Provisional look until measured
+ * from a screenshot (docs/SPEC.md §11): a small orange tile with a bold D.
+ */
+.delayed {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #ff9800 22%, transparent);
+  color: #ff9800;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: auto;
+}
+
+.delayed[hidden] {
+  display: none;
+}

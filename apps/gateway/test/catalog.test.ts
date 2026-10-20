@@ -68,6 +68,7 @@ describe('catalog entries', () => {
       description: 'Bitcoin / US Dollar',
       volumeUsd: 117_000_000,
       live: false,
+      kind: 'spot',
     });
     const xrpBtc = entries.find((entry) => entry.ticker === 'XRPBTC');
     expect(xrpBtc?.description).toBe('XRP / Bitcoin');
@@ -103,9 +104,9 @@ describe('SymbolCatalog', () => {
     ]);
     expect(matches[0]?.description).toBe('XRP / TetherUS');
     expect(catalog.exchanges()).toEqual([
-      { id: 'BINANCE', name: 'Binance', live: true },
-      { id: 'KRAKEN', name: 'Kraken', live: false },
-      { id: 'COINBASE', name: 'Coinbase', live: false },
+      { id: 'BINANCE', name: 'Binance', live: true, market: 'crypto' },
+      { id: 'KRAKEN', name: 'Kraken', live: false, market: 'crypto' },
+      { id: 'COINBASE', name: 'Coinbase', live: false, market: 'crypto' },
     ]);
     expect(sources.map((source) => source.calls)).toEqual([1, 1, 1]);
     catalog.close();

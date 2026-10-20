@@ -3,6 +3,7 @@ import {
   MAX_QUERY_LENGTH,
   type MatchRange,
   type SymbolId,
+  type SymbolKind,
   type SymbolListing,
   type SymbolMatch,
   tickerMatch,
@@ -33,8 +34,30 @@ import {
   TrashIcon,
 } from './icons';
 import styles from './SymbolSearchDialog.module.css';
-import { loadSearchTab, type SearchTab, saveSearchTab } from './searchPrefs';
-import { useExchanges, useSymbolSearch } from './useSymbolSearch';
+import {
+  loadSearchTab,
+  SEARCH_TAB_LABELS,
+  SEARCH_TABS,
+  type SearchTab,
+  saveSearchTab,
+} from './searchPrefs';
+import { matchKey, useExchanges, useSymbolSearch } from './useSymbolSearch';
+
+/**
+ * The type beside each result, in TradingView's words where known: "spot crypto" from the
+ * reference; the stock and fund labels are provisional until measured (docs/SPEC.md §11).
+ */
+const KIND_LABELS: Readonly<Record<SymbolKind, string>> = {
+  spot: 'spot crypto',
+  stock: 'stock',
+  dr: 'dr',
+  preferred: 'preferred',
+  etf: 'fund etf',
+  warrant: 'warrant',
+  right: 'right',
+  unit: 'unit',
+  note: 'note',
+};
 
 /** `add`: TradingView's "Add symbol" for the watchlist; `search`: the chart's symbol search. */
 export type SearchMode = 'add' | 'search';
@@ -106,7 +129,13 @@ export function SymbolSearchDialog({
   const list = useRef<HTMLDivElement>(null);
   const rowElements = useRef(new Map<number, HTMLDivElement>());
   const exchanges = useExchanges(api);
-  const search = useSymbolSearch(api, text.trim(), source);
+  const search = useSymbolSearch(api, text.trim(), source, tab === 'all' ? null : tab);
+  /** The tab's exchanges, for the source filter: crypto's, or the US stock exchanges. */
+  const tabExchanges = exchanges.filter(
+    (exchange) =>
+      tab === 'all' ||
+      (tab === 'crypto' ? exchange.market !== 'stocks' : exchange.market === 'stocks'),
+  );
 
   const names = useMemo(
     () => new Map(exchanges.map((exchange) => [exchange.id, exchange.name])),
@@ -119,7 +148,7 @@ export function SymbolSearchDialog({
     for (const match of search.matches) {
       const [first, ...others] = match.listings;
       if (!first) continue;
-      visible.push({ key: match.ticker, match, listing: first, child: false });
+      visible.push({ key: matchKey(match), match, listing: first, child: false });
       if (expanded.has(match.ticker)) {
         for (const listing of others)
           visible.push({ key: listing.id, match, listing, child: true });
@@ -210,7 +239,7 @@ export function SymbolSearchDialog({
   ];
   const sourceOptions: FilterOption<string | null>[] = [
     { value: null, label: 'All sources' },
-    ...exchanges.map((exchange) => ({
+    ...tabExchanges.map((exchange) => ({
       value: exchange.id,
       label: exchange.name,
       icon: (
@@ -287,7 +316,7 @@ export function SymbolSearchDialog({
         </div>
 
         <div className={styles.tabs} role="tablist" aria-label="Categories">
-          {(['all', 'crypto'] as const).map((value) => (
+          {SEARCH_TABS.map((value) => (
             <button
               key={value}
               type="button"
@@ -297,10 +326,15 @@ export function SymbolSearchDialog({
               onClick={() => {
                 setTab(value);
                 saveSearchTab(value);
+                // A source from another market's tab would hide everything.
+                const market = exchanges.find((exchange) => exchange.id === source)?.market;
+                if (value !== 'all' && market && (market === 'stocks') !== (value !== 'crypto')) {
+                  setSource(null);
+                }
                 input.current?.focus();
               }}
             >
-              {value === 'all' ? 'All' : 'Crypto'}
+              {SEARCH_TAB_LABELS[value]}
             </button>
           ))}
         </div>
@@ -314,22 +348,26 @@ export function SymbolSearchDialog({
             onOpen={setOpenFilter}
             onChange={(value) => setSource(value)}
           />
-          <Filter<TypeFilter>
-            name="type"
-            options={typeOptions}
-            value={type}
-            open={openFilter === 'type'}
-            onOpen={setOpenFilter}
-            onChange={setType}
-          />
-          <Filter<ExchangeTypeFilter>
-            name="exchangeType"
-            options={exchangeTypeOptions}
-            value={exchangeType}
-            open={openFilter === 'exchangeType'}
-            onOpen={setOpenFilter}
-            onChange={setExchangeType}
-          />
+          {(tab === 'all' || tab === 'crypto') && (
+            <>
+              <Filter<TypeFilter>
+                name="type"
+                options={typeOptions}
+                value={type}
+                open={openFilter === 'type'}
+                onOpen={setOpenFilter}
+                onChange={setType}
+              />
+              <Filter<ExchangeTypeFilter>
+                name="exchangeType"
+                options={exchangeTypeOptions}
+                value={exchangeType}
+                open={openFilter === 'exchangeType'}
+                onOpen={setOpenFilter}
+                onChange={setExchangeType}
+              />
+            </>
+          )}
         </div>
 
         <div
@@ -428,7 +466,8 @@ function ResultRow({
   onLocate,
 }: ResultRowProps) {
   const { match, listing, child } = row;
-  const exchangeName = nameOf(listing.exchange);
+  // A stock's venue ("NYSE Arca"), where its exchange code covers several.
+  const exchangeName = listing.exchangeName ?? nameOf(listing.exchange);
   const grouped = !child && match.listings.length > 1;
   const unavailable = listing.live
     ? undefined
@@ -472,7 +511,7 @@ function ResultRow({
         />
       </span>
       <span className={styles.source}>
-        <span className={styles.type}>spot crypto</span>
+        <span className={styles.type}>{KIND_LABELS[match.type]}</span>
         <span className={styles.exchange}>{exchangeName}</span>
         {grouped ? (
           <span className={styles.stack}>

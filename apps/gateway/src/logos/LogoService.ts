@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { LogoStatus } from '@tradingnerd/core';
 import { MarketError } from '../market/types.ts';
 import { JsonFile } from '../storage/jsonFile.ts';
+import { maskKey, type SecretStore } from '../storage/secrets.ts';
 import {
   COINS_PER_PAGE,
   type CoinGeckoClient,
@@ -10,7 +11,6 @@ import {
   type CoinGeckoKey,
   TICKERS_PER_PAGE,
 } from './coingecko.ts';
-import { maskKey, type SecretStore } from './secrets.ts';
 
 /** Exchanges whose CoinGecko ticker lists map base assets to coins (the live ones). */
 export const COINGECKO_EXCHANGES: Readonly<Record<string, string>> = { BINANCE: 'binance' };

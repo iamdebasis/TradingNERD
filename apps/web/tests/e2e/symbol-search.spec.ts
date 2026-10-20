@@ -37,6 +37,8 @@ const XRP_PAIRS = [
   'BINANCE:XRPBTC',
   'BINANCE:XRPU',
 ];
+/** Under "All", as on TradingView, funds come too: the XRP ETF's ticker holds "XRP". */
+const XRP_ALL = [...XRP_PAIRS, 'AMEX:XXRP'];
 
 test('typing XRP lists every exchange, one row per pair, the matches highlighted', async ({
   page,
@@ -44,7 +46,7 @@ test('typing XRP lists every exchange, one row per pair, the matches highlighted
   await openAddSymbol(page);
   await field(addDialog(page)).fill('XRP');
   // Most traded first: XRPUSDT across five exchanges, then Coinbase and Kraken's XRPUSD, …
-  await expect.poll(() => results(addDialog(page))).toEqual(XRP_PAIRS);
+  await expect.poll(() => results(addDialog(page))).toEqual(XRP_ALL);
 
   const xrp = result(addDialog(page), 'BINANCE:XRPUSDT');
   await expect(xrp).toContainText('XRP / TetherUS');
@@ -63,7 +65,7 @@ test('typing XRP lists every exchange, one row per pair, the matches highlighted
       'BYBIT:XRPUSDT',
       'KRAKEN:XRPUSDT',
       'COINBASE:XRPUSDT',
-      ...XRP_PAIRS.slice(1),
+      ...XRP_ALL.slice(1),
     ]);
   const okx = result(addDialog(page), 'OKX:XRPUSDT');
   await expect(okx).toContainText('OKX');
@@ -108,7 +110,7 @@ test('Enter adds the top match and keeps the dialog open; ↓ picks; Shift+Enter
   ).toBeVisible();
 
   await input.fill('XRP');
-  await expect.poll(() => results(addDialog(page))).toEqual(XRP_PAIRS);
+  await expect.poll(() => results(addDialog(page))).toEqual(XRP_ALL);
   for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowDown');
   await expect(result(addDialog(page), 'BINANCE:XRPTRY')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('ArrowUp');
@@ -226,6 +228,10 @@ test('the most traded pairs show before typing, and scrolling loads more', async
   market,
 }) => {
   await openAddSymbol(page);
+  // Under "All" the most traded of everything leads (a fund, SPY); the pairs are under Crypto.
+  await expect.poll(async () => (await results(addDialog(page)))[0]).toBe('AMEX:SPY');
+  await addDialog(page).getByRole('tab', { name: 'Crypto' }).click();
+  await expect.poll(() => market.searchRequests.at(-1)?.get('category')).toBe('crypto');
   await expect.poll(async () => (await results(addDialog(page))).length).toBe(50);
   expect((await results(addDialog(page)))[0]).toBe('BINANCE:BTCUSDT');
   await addDialog(page)
@@ -240,7 +246,7 @@ test('the most traded pairs show before typing, and scrolling loads more', async
 test('the dialog is laid out as in the reference', async ({ page }) => {
   await openAddSymbol(page);
   await field(addDialog(page)).fill('XRP');
-  await expect.poll(() => results(addDialog(page))).toEqual(XRP_PAIRS);
+  await expect.poll(() => results(addDialog(page))).toEqual(XRP_ALL);
   const dialog = await box(addDialog(page));
   const at = async (locator: Locator) => {
     const b = await box(locator);
@@ -321,6 +327,9 @@ test('title, search field, chips, filters and footer match the reference pixel f
     ['search field, up to the text cursor', 18, 66, 86, 110],
     ['search field, after the text cursor', 92, 66, 822, 110],
     ['"All" chip', 18, 122, 62, 154],
+    // Stocks and Funds follow All as on TradingView (Futures and Forex, which we don't have,
+    // come next there, so the Crypto chip sits further left here).
+    ['"Stocks" and "Funds" chips', 62, 122, 202, 154],
     ['filters', 18, 164, 420, 200],
     ['footer', 0, 640, 840, 680],
   ];

@@ -25,10 +25,10 @@ import { SymbolCatalog } from '../src/catalog/SymbolCatalog.ts';
 import type { GatewayConfig } from '../src/config.ts';
 import { CoinGeckoClient } from '../src/logos/coingecko.ts';
 import { LogoService } from '../src/logos/LogoService.ts';
-import { SecretStore } from '../src/logos/secrets.ts';
 import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
 import { FlagStore } from '../src/storage/FlagStore.ts';
+import { SecretStore } from '../src/storage/secrets.ts';
 import { WatchlistStore } from '../src/storage/WatchlistStore.ts';
 import { FakeCatalogSource, pair } from './helpers/FakeCatalog.ts';
 import { fakeCoinGecko } from './helpers/FakeCoinGecko.ts';
@@ -47,6 +47,8 @@ const config: GatewayConfig = {
   okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
   coinbase: { restUrl: undefined, streamUrl: undefined },
   kraken: { restUrl: undefined, streamUrl: undefined },
+  alpaca: { dataUrl: undefined, tradingUrl: undefined },
+  usListingsUrl: undefined,
   dataDir: '', // each server gets its own temporary directory
 };
 
@@ -254,8 +256,8 @@ describe('gateway symbol search', () => {
     const res = await get('/api/exchanges');
     expect(parseExchangeList(res.json())).toEqual({
       exchanges: [
-        { id: 'FAKE', name: 'Fake Exchange', live: true },
-        { id: 'OTHER', name: 'Other Exchange', live: false },
+        { id: 'FAKE', name: 'Fake Exchange', live: true, market: 'crypto' },
+        { id: 'OTHER', name: 'Other Exchange', live: false, market: 'crypto' },
       ],
     });
   });

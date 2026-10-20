@@ -96,6 +96,7 @@ export function buildEntries(
         description: `${nameOf(base)} / ${nameOf(quote)}`,
         volumeUsd: pair.quoteVolume * (rates.get(quote) ?? 0),
         live: live.has(id),
+        kind: 'spot',
       });
     }
   }

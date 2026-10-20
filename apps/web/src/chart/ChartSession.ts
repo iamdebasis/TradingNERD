@@ -1,5 +1,14 @@
 import type { ChartController, HoverInfo } from '@tradingnerd/chart';
-import { type Bar, parseResolution, type Resolution, type SymbolInfo } from '@tradingnerd/core';
+import {
+  type Bar,
+  type BarClock,
+  MarketSchedule,
+  parseResolution,
+  type Resolution,
+  type SymbolInfo,
+  sessionClock,
+  UTC_CLOCK,
+} from '@tradingnerd/core';
 import { ApiError, type MarketApi } from '../data/api';
 import type { LiveFeed } from '../data/GatewayConnection';
 
@@ -34,6 +43,8 @@ export interface ChartSessionOptions {
   symbol: string;
   /** TradingView notation, e.g. "1D" or "60". */
   resolution: string;
+  /** Told of each failure's code, e.g. `needs_key` when a stock needs the Alpaca key. */
+  onError?: (code: string) => void;
 }
 
 /** Bars fetched when the chart opens, per scroll-back page, and to refill after a reconnect. */
@@ -80,7 +91,7 @@ export class ChartSession {
       this.symbolId = info.id;
       legend.setInstrument(info, resolution);
       // The best bid and ask don't wait for history: the exchange's stream opens meanwhile.
-      this.subscribeBook(info.id);
+      if (info.hasBook) this.subscribeBook(info.id);
 
       const { bars, hasMore } = await api.getBars(
         info.id,
@@ -95,6 +106,9 @@ export class ChartSession {
         pricePrecision: info.pricePrecision,
         tickSize: info.tickSize,
         resolution,
+        timezone: info.timezone,
+        clock: clockOf(info),
+        delayMs: info.delayMs,
       });
       chart.setBars(bars);
       chart.showLatest();
@@ -104,7 +118,9 @@ export class ChartSession {
       // Subscribe only once history is in place; the feed starts with the current bar.
       this.subscribeBars(info.id);
     } catch (error) {
-      if (!this.disposed) legend.setStatus('error', messageOf(error));
+      if (this.disposed) return;
+      legend.setStatus('error', messageOf(error));
+      if (error instanceof ApiError) this.options.onError?.(error.code);
     }
   }
 
@@ -176,7 +192,10 @@ export class ChartSession {
             void this.refill(symbolId);
           }
         },
-        onError: (_code, message) => legend.setStatus('error', message),
+        onError: (code, message) => {
+          legend.setStatus('error', message);
+          this.options.onError?.(code);
+        },
       }),
     );
   }
@@ -215,6 +234,11 @@ export class ChartSession {
     const latest = this.options.chart.latest();
     if (latest) this.options.legend.showBar(latest.bar, latest.previous);
   }
+}
+
+/** Where the symbol's bars begin and end: its sessions, or UTC around the clock. */
+function clockOf(info: SymbolInfo): BarClock {
+  return info.schedule ? sessionClock(new MarketSchedule(info.schedule)) : UTC_CLOCK;
 }
 
 function messageOf(error: unknown): string {

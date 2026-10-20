@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CoinGeckoClient } from '../src/logos/coingecko.ts';
 import { LOGO_REFRESH_MS, LogoService } from '../src/logos/LogoService.ts';
-import { maskKey, SecretStore } from '../src/logos/secrets.ts';
 import { MarketError } from '../src/market/types.ts';
+import { maskKey, SecretStore } from '../src/storage/secrets.ts';
 import { fakeCoinGecko, PNG_BYTES } from './helpers/FakeCoinGecko.ts';
 
 const KEY = 'CG-demo-key-3f9a';

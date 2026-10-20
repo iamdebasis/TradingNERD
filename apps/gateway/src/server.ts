@@ -15,9 +15,11 @@ import { MarketError } from './market/types.ts';
 import { registerFlagRoutes } from './routes/flags.ts';
 import { registerLogoRoutes } from './routes/logos.ts';
 import { registerMarketRoutes } from './routes/market.ts';
+import { registerStockRoutes } from './routes/stocks.ts';
 import { registerSymbolRoutes } from './routes/symbols.ts';
 import { registerWatchlistRoutes } from './routes/watchlist.ts';
 import { isAllowedOrigin, isLoopbackHost } from './security.ts';
+import type { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import type { FlagStore } from './storage/FlagStore.ts';
 import type { WatchlistStore } from './storage/WatchlistStore.ts';
 import { attachSession } from './ws/session.ts';
@@ -28,6 +30,8 @@ export interface GatewayDeps {
   watchlist: WatchlistStore;
   flags: FlagStore;
   logos: LogoService;
+  /** US stocks' Alpaca key routes (absent in tests that don't need them). */
+  stocks?: UsStocksMarket;
 }
 
 export async function buildServer(
@@ -85,6 +89,7 @@ export async function buildServer(
   registerWatchlistRoutes(app, deps.watchlist);
   registerFlagRoutes(app, deps.flags);
   registerLogoRoutes(app, deps.logos);
+  if (deps.stocks) registerStockRoutes(app, deps.stocks);
 
   app.get(WS_PATH, { websocket: true }, (socket) => attachSession(socket, deps.market));
 
