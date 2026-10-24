@@ -3,6 +3,9 @@ import { type DayNumber, dateOf, dayOf, type TimeZone, timeZone, weekdayOf } fro
 /** Which hours count: the regular session, or with pre- and post-market trading. */
 export type SessionHours = 'regular' | 'extended';
 
+export const isSessionHours = (value: unknown): value is SessionHours =>
+  value === 'regular' || value === 'extended';
+
 /** Local minutes after midnight, open and close: [570, 960] is 09:30–16:00. */
 export type Hours = readonly [number, number];
 

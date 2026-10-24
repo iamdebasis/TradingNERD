@@ -1,0 +1,80 @@
+/*
+ * A settings drop-down: a 34 px bordered field (TradingView's Chart settings) and a list in the
+ * menus' idiom (#1F1F1F, 6 px corners, 32 px rows). Sizes provisional until measured from a
+ * screenshot of the current dialog (docs/SPEC.md §11).
+ */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--color-separator);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field:hover,
+.field[data-open] {
+  border-color: var(--color-field-border);
+}
+
+.field:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  display: flex;
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+.field[data-open] .chevron svg {
+  transform: rotate(180deg);
+}
+
+.list {
+  position: fixed;
+  z-index: 260;
+  overflow-y: auto;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 40%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+  outline: none;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option[data-active] {
+  background: var(--color-gutter);
+}
+
+.option[aria-selected="true"] {
+  color: var(--color-bright);
+  font-weight: 600;
+}

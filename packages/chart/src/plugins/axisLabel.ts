@@ -17,6 +17,11 @@ export const AXIS_LABEL = {
   radius: 3,
   /** Height of a one-line label (the crosshair price). */
   rowHeight: 21,
+  /**
+   * A one-line price label (the last price without a countdown, a pre/post-market price):
+   * 17 px, measured from a TradingView screenshot at 2× (docs/SPEC.md §5.7).
+   */
+  priceRowHeight: 17,
   /** Two-line label (last price + countdown): the price row is centered on the price level. */
   firstRowHeight: 16,
   secondRowHeight: 15,
@@ -36,6 +41,8 @@ export interface AxisLabelStyle {
   font: string;
   /** Corner radii: top-left, top-right, bottom-right, bottom-left. */
   radii?: [number, number, number, number];
+  /** Height of a one-line label (AXIS_LABEL.rowHeight when absent). */
+  rowHeight?: number;
 }
 
 /** What price-axis labels need to know about the axis they're drawn on. */
@@ -76,10 +83,14 @@ export function snapToDevicePixel(value: number, scale: number): number {
 }
 
 /** Vertical extent of a label whose first row is centered on `y`. */
-export function axisLabelBox(y: number, rowCount: number): { top: number; heights: number[] } {
+export function axisLabelBox(
+  y: number,
+  rowCount: number,
+  rowHeight: number = AXIS_LABEL.rowHeight,
+): { top: number; heights: number[] } {
   const heights =
-    rowCount > 1 ? [AXIS_LABEL.firstRowHeight, AXIS_LABEL.secondRowHeight] : [AXIS_LABEL.rowHeight];
-  return { top: y - (heights[0] ?? AXIS_LABEL.rowHeight) / 2, heights };
+    rowCount > 1 ? [AXIS_LABEL.firstRowHeight, AXIS_LABEL.secondRowHeight] : [rowHeight];
+  return { top: y - (heights[0] ?? rowHeight) / 2, heights };
 }
 
 /**
@@ -94,7 +105,7 @@ export function drawAxisLabel(
   mask?: TickMask,
 ): void {
   const width = axisLabelWidth(ctx, rows, style.font);
-  const { top, heights } = axisLabelBox(y, rows.length);
+  const { top, heights } = axisLabelBox(y, rows.length, style.rowHeight);
   const height = heights.reduce((sum, h) => sum + h, 0);
 
   if (mask) {

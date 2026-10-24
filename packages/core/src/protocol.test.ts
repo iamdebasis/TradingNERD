@@ -99,6 +99,17 @@ describe('parseClientMessage', () => {
       { type: 'subscribe', id: 's1', channel: 'bars', symbol: 'BINANCE:XRPUSDT', resolution: '1D' },
     ],
     [
+      'bars of the extended session',
+      {
+        type: 'subscribe',
+        id: 's4',
+        channel: 'bars',
+        symbol: 'NASDAQ:AAPL',
+        resolution: '5',
+        session: 'extended',
+      },
+    ],
+    [
       'book subscription',
       { type: 'subscribe', id: 's2', channel: 'book', symbol: 'BINANCE:XRPUSDT' },
     ],
@@ -127,6 +138,17 @@ describe('parseClientMessage', () => {
         channel: 'bars',
         symbol: 'X:Y',
         resolution: 'x'.repeat(17),
+      }),
+    ],
+    [
+      'an unknown session',
+      json({
+        type: 'subscribe',
+        id: 's1',
+        channel: 'bars',
+        symbol: 'X:Y',
+        resolution: '5',
+        session: 'overnight',
       }),
     ],
     ['a subscribe without id', json({ type: 'subscribe', channel: 'book', symbol: 'X:Y' })],

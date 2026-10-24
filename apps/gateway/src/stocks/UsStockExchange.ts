@@ -5,13 +5,16 @@ import {
   formatResolution,
   parseResolution,
   type Resolution,
+  type SessionHours,
   type SymbolInfo,
 } from '@tradingnerd/core';
 import {
+  type BookTop,
   type CandleUpdate,
   type ExchangeAdapter,
   type FeedState,
   MarketError,
+  type Trade,
   type Unsubscribe,
 } from '../market/types.ts';
 import { ALPACA_PAGE_LIMIT, type AlpacaTimeframe } from './alpaca.ts';
@@ -34,13 +37,13 @@ const NATIVE: readonly Resolution[] = Object.keys(TIMEFRAMES).map((text) => {
 /** Before Alpaca's history begins (2016): asking from here gets everything there is. */
 const HISTORY_START = Date.UTC(2015, 0, 1);
 const MINUTE = 60_000;
-const DAY: Resolution = { count: 1, unit: 'day' };
 
 /**
  * One US exchange's listings (NASDAQ, NYSE, AMEX, CBOE, …), with Alpaca's whole-market data:
- * bars in regular hours on the exchange's session clock, delayed as the key's plan is, and
- * live bars from the shared minute poller. Stocks have no order book here (the legend's Sell
- * and Buy) and no tick charts.
+ * bars on the exchange's session clock (intraday ones in regular hours, or with pre- and
+ * post-market when asked), delayed as the key's plan is; live bars from the shared minute
+ * poller, moved between its polls by the stream's trades; and the stream's best bid and ask
+ * for the legend's Sell and Buy. Stocks have no tick charts.
  */
 export class UsStockExchange implements ExchangeAdapter {
   readonly id: string;
@@ -57,6 +60,10 @@ export class UsStockExchange implements ExchangeAdapter {
 
   get clock(): BarClock {
     return this.market.clock;
+  }
+
+  clockFor(hours: SessionHours): BarClock {
+    return this.market.clockFor(hours);
   }
 
   get delayMs(): number {
@@ -83,34 +90,35 @@ export class UsStockExchange implements ExchangeAdapter {
       resolutions: Object.keys(TIMEFRAMES),
       timezone: US_TIMEZONE,
       delayMs: this.delayMs,
-      hasBook: false,
+      hasBook: true,
       schedule: this.market.calendar.schedule().data,
     };
   }
 
   /**
-   * Up to `limit` regular-hours bars opening before `endTimeMs`, newest last. Alpaca's bars
-   * include pre- and post-market ones, which are left out, so pages continue until enough
-   * remain or history begins. A day still trading is left to the live feed.
+   * Up to `limit` bars opening before `endTimeMs`, newest last, intraday ones in `hours`.
+   * Alpaca's bars include pre- and post-market ones, which regular hours leave out, so pages
+   * continue until enough remain or history begins. A bar still forming is left to the live
+   * feed.
    */
   async fetchBars(
     ticker: string,
     resolution: Resolution,
     endTimeMs: number | null,
     limit: number,
+    hours: SessionHours = 'regular',
   ): Promise<Bar[]> {
     const symbol = await this.dataSymbolOf(ticker);
     const timeframe = this.timeframeOf(resolution);
     const latest = this.latestMinute();
     let end = endTimeMs === null ? latest : Math.min(endTimeMs - 1, latest);
-    const liveDay = this.liveDay(resolution);
+    const forming = this.formingBar(resolution, hours);
+    // A regular day keeps 6.5 of the 16 hours Alpaca has bars for.
+    const spread = timeframe === '1Day' ? 1 : hours === 'regular' ? 2.6 : 1.1;
     const newestFirst: Bar[] = [];
     while (newestFirst.length < limit) {
       const wanted = limit - newestFirst.length;
-      const ask = Math.min(
-        ALPACA_PAGE_LIMIT,
-        timeframe === '1Day' ? wanted + 2 : Math.ceil(wanted * 2.6) + 10,
-      );
+      const ask = Math.min(ALPACA_PAGE_LIMIT, Math.ceil(wanted * spread) + 10);
       const page =
         (
           await this.market.client.bars([symbol], {
@@ -122,8 +130,8 @@ export class UsStockExchange implements ExchangeAdapter {
           })
         ).get(symbol) ?? [];
       for (const bar of page) {
-        const kept = this.inSession(bar, resolution);
-        if (kept && kept.time * 1000 !== liveDay) newestFirst.push(kept);
+        const kept = this.inSession(bar, resolution, hours);
+        if (kept && kept.time * 1000 !== forming) newestFirst.push(kept);
       }
       const oldest = page.at(-1);
       if (page.length < ask || !oldest) break; // history begins here
@@ -138,6 +146,7 @@ export class UsStockExchange implements ExchangeAdapter {
     resolution: Resolution,
     startMs: number,
     endMs: number,
+    hours: SessionHours = 'regular',
   ): Promise<Bar[]> {
     const symbol = await this.dataSymbolOf(ticker);
     const end = Math.min(endMs - 1, this.latestMinute());
@@ -151,10 +160,10 @@ export class UsStockExchange implements ExchangeAdapter {
           sort: 'asc',
         })
       ).get(symbol) ?? [];
-    const liveDay = this.liveDay(resolution);
+    const forming = this.formingBar(resolution, hours);
     return page.flatMap((bar) => {
-      const kept = this.inSession(bar, resolution);
-      return kept && kept.time * 1000 !== liveDay ? [kept] : [];
+      const kept = this.inSession(bar, resolution, hours);
+      return kept && kept.time * 1000 !== forming ? [kept] : [];
     });
   }
 
@@ -162,19 +171,25 @@ export class UsStockExchange implements ExchangeAdapter {
     ticker: string,
     resolution: Resolution,
     onUpdate: (update: CandleUpdate) => void,
+    hours: SessionHours = 'regular',
   ): Unsubscribe {
     const listing = this.market.listings.get(this.id, ticker);
     if (!listing?.dataSymbol) return () => {};
-    return this.market.poller.subscribe(listing.dataSymbol, resolution, onUpdate);
+    return this.market.poller.subscribe(listing.dataSymbol, resolution, onUpdate, hours);
   }
 
-  /** Stock prices come as minute bars; there's no trade stream to merge. */
-  subscribeTrades(): Unsubscribe {
-    return () => {};
+  /** Trades from Alpaca's stream (as late as its bars), between the minute bars' polls. */
+  subscribeTrades(ticker: string, onTrade: (trade: Trade) => void): Unsubscribe {
+    const listing = this.market.listings.get(this.id, ticker);
+    if (!listing?.dataSymbol) return () => {};
+    return this.market.stream.subscribeTrades(listing.dataSymbol, onTrade);
   }
 
-  subscribeBook(): Unsubscribe {
-    return () => {};
+  /** The best bid and ask across the market, from Alpaca's stream. */
+  subscribeBook(ticker: string, onBook: (top: BookTop) => void): Unsubscribe {
+    const listing = this.market.listings.get(this.id, ticker);
+    if (!listing?.dataSymbol) return () => {};
+    return this.market.stream.subscribeQuotes(listing.dataSymbol, onBook);
   }
 
   isFeedUp(): boolean {
@@ -228,12 +243,12 @@ export class UsStockExchange implements ExchangeAdapter {
   }
 
   /**
-   * A bar on the session clock: intraday ones only in regular hours, day bars timed at their
+   * A bar on the session clock: intraday ones only in `hours`, day bars timed at their
    * session's open (Alpaca times them at the date's midnight).
    */
-  private inSession(bar: Bar, resolution: Resolution): Bar | null {
+  private inSession(bar: Bar, resolution: Resolution, hours: SessionHours): Bar | null {
     if (resolution.unit !== 'day') {
-      return this.clock.isOpen(bar.time * 1000) ? bar : null;
+      return this.clockFor(hours).isOpen(bar.time * 1000) ? bar : null;
     }
     const date = new Date(bar.time * 1000).toISOString().slice(0, 10);
     const session = this.market.calendar.schedule().session(dayOf(date), 'regular');
@@ -241,13 +256,15 @@ export class UsStockExchange implements ExchangeAdapter {
   }
 
   /**
-   * For day bars, the open (ms) of a session still trading: its bar is the live feed's, built
-   * the same way the feed builds it. Null when there's none (or for intraday bars).
+   * The open (ms) of the bar still forming where the plan's data ends, or null when the last
+   * bar is complete. Alpaca hands such a bar back whole, with minutes the plan doesn't serve
+   * yet (a 5-minute bar asked for at 10:47 holds 10:47–10:49 too), so it's the live feed's:
+   * the feed builds it from the minutes there are, as it does a day still trading.
    */
-  private liveDay(resolution: Resolution): number | null {
-    if (resolution.unit !== 'day') return null;
-    const available = this.market.client.latestAvailable();
-    const session = this.clock.open(DAY, available);
-    return available < this.clock.close(DAY, session) ? session : null;
+  private formingBar(resolution: Resolution, hours: SessionHours): number | null {
+    const clock = this.clockFor(hours);
+    const horizon = Math.floor(this.market.client.latestAvailable() / MINUTE) * MINUTE;
+    const open = clock.open(resolution, horizon - 1);
+    return clock.close(resolution, open) > horizon ? open : null;
   }
 }

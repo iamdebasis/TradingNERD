@@ -43,9 +43,14 @@ describe('loadConfig', () => {
     const config = loadConfig({
       ALPACA_DATA_URL: 'http://127.0.0.1:9',
       ALPACA_TRADING_URL: '',
+      ALPACA_STREAM_URL: 'ws://127.0.0.1:9',
       US_LISTINGS_URL: 'http://127.0.0.1:9/directory/',
     });
-    expect(config.alpaca).toEqual({ dataUrl: 'http://127.0.0.1:9', tradingUrl: undefined });
+    expect(config.alpaca).toEqual({
+      dataUrl: 'http://127.0.0.1:9',
+      tradingUrl: undefined,
+      streamUrl: 'ws://127.0.0.1:9',
+    });
     expect(config.usListingsUrl).toBe('http://127.0.0.1:9/directory/');
   });
 

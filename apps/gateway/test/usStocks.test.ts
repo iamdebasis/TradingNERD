@@ -10,10 +10,39 @@ import { UsStocksMarket } from '../src/stocks/UsStocksMarket.ts';
 import { SecretStore } from '../src/storage/secrets.ts';
 import { NASDAQ_LISTED, OTHER_LISTED } from './fixtures/usDirectory.ts';
 import { createFakeAlpaca } from './helpers/fakeAlpaca.ts';
+import { type MockStreamServer, mockStreamServer } from './helpers/MockStreamServer.ts';
 
 const at = (iso: string) => Date.parse(iso);
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString().replace(':00.000Z', 'Z');
 const KEY = { keyId: 'PKTESTKEYID123456789', secret: 'testsecret0000000000000000000000000000000' };
+
+const streams: MockStreamServer[] = [];
+
+/** Alpaca's stream on the free plan, signing in whoever asks and confirming subscriptions. */
+async function alpacaStream() {
+  const subscribed = new Set<string>();
+  const server = await mockStreamServer(
+    (frame, send) => {
+      const {
+        action,
+        trades = [],
+        quotes = [],
+      } = frame as {
+        action?: string;
+        trades?: string[];
+        quotes?: string[];
+      };
+      if (action === 'auth') send([{ T: 'success', msg: 'authenticated' }]);
+      if (action === 'subscribe') {
+        for (const symbol of [...trades, ...quotes]) subscribed.add(symbol);
+        send([{ T: 'subscription', trades, quotes }]);
+      }
+    },
+    [{ T: 'success', msg: 'connected' }],
+  );
+  streams.push(server);
+  return { server, subscribed };
+}
 
 /** A gateway's US stocks against a fake Alpaca, with the clock at `start`. */
 async function setup(start: string, { key = true, cache = false } = {}) {
@@ -31,11 +60,13 @@ async function setup(start: string, { key = true, cache = false } = {}) {
   const secrets = new SecretStore(dataDir, {});
   if (key) await secrets.saveAlpaca(KEY.keyId, KEY.secret, 'delayed');
   const listings = new UsListings({ dataDir, fetch });
+  const stream = await alpacaStream();
   const stocks = new UsStocksMarket({
     dataDir,
     secrets,
     listings,
     fetch,
+    streamUrl: stream.server.url,
     now: () => Date.now(),
     sleep: async () => {},
   });
@@ -46,7 +77,7 @@ async function setup(start: string, { key = true, cache = false } = {}) {
     cacheHistory: cache,
   });
   await stocks.ready();
-  return { stocks, market, alpaca, listings };
+  return { stocks, market, alpaca, listings, stream };
 }
 
 function recorder() {
@@ -64,9 +95,19 @@ function recorder() {
 /** Lets pending promises settle (the poller's gather timer is real time). */
 const settle = (ms = 400) => new Promise((resolve) => setTimeout(resolve, ms));
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  for (const server of streams.splice(0)) await server.close();
 });
+
+/** Waits (in real time) until `check` holds. */
+async function until(check: () => boolean, ms = 2_000) {
+  const end = performance.now() + ms;
+  while (!check()) {
+    if (performance.now() > end) throw new Error('timed out');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 describe('US stock symbols', () => {
   it('resolve with their exchange, kind, New York hours and the data delay', async () => {
@@ -85,7 +126,7 @@ describe('US stock symbols', () => {
       pricePrecision: 2,
       timezone: 'America/New_York',
       delayMs: 900_000,
-      hasBook: false,
+      hasBook: true,
     });
     expect(info.schedule?.holidays).toContain('2026-11-26');
     expect((await market.resolveSymbol('AMEX:SPY')).exchangeName).toBe('NYSE Arca');
@@ -146,19 +187,160 @@ describe('US stock history', () => {
   it('builds hours from the session open, as TradingView does', async () => {
     const { market, stocks } = await setup('2026-10-19T15:00:05Z', { cache: true });
     const { bars } = await market.getBars('NASDAQ:AAPL', '60', null, 5);
+    // The 10:30 hour is still forming (data reaches 10:45): the live feed brings it.
     expect(bars.map((bar) => iso(bar.time))).toEqual([
+      '2026-10-16T16:30Z',
       '2026-10-16T17:30Z',
       '2026-10-16T18:30Z',
       '2026-10-16T19:30Z',
       '2026-10-19T13:30Z',
-      '2026-10-19T14:30Z',
     ]);
     // Friday's last hour is half an hour: 15:30–16:00 New York.
-    const lastFriday = bars[2];
+    const lastFriday = bars[3];
     const minutes = (await market.getBars('NASDAQ:AAPL', '30', null, 20)).bars.filter(
       (bar) => bar.time === lastFriday?.time,
     );
     expect(lastFriday?.volume).toBe(minutes[0]?.volume);
+    stocks.close();
+  });
+
+  it('leaves a bar still forming to the live feed, which builds it from the minutes there are', async () => {
+    // 11:02 New York: the data reaches 10:47, inside the 10:45 five-minute bar. Alpaca would
+    // hand that bar back whole, with minutes from after 10:47.
+    const { market, stocks } = await setup('2026-10-19T15:02:05Z');
+    const { bars } = await market.getBars('NASDAQ:AAPL', '5', null, 3);
+    expect(bars.map((bar) => iso(bar.time))).toEqual([
+      '2026-10-19T14:30Z',
+      '2026-10-19T14:35Z',
+      '2026-10-19T14:40Z',
+    ]);
+    const live = recorder();
+    const stop = market.subscribeBars('NASDAQ:AAPL', '5', live.listener);
+    await settle();
+    await stocks.poller.pollNow();
+    // Only 10:45 and 10:46 are 15 minutes old.
+    expect(live.bars.at(-1)).toMatchObject({
+      time: at('2026-10-19T14:45:00Z') / 1000,
+      volume: 200,
+    });
+    stop();
+    stocks.close();
+  });
+});
+
+describe('US stock extended hours', () => {
+  it('give intraday bars from the 04:00 pre-market to the 20:00 post-market close', async () => {
+    const { market, stocks } = await setup('2026-10-19T15:02:05Z'); // 11:02 New York
+    const extended = (await market.getBars('NASDAQ:AAPL', '30', null, 30, 'extended')).bars;
+    const times = extended.map((bar) => iso(bar.time));
+    // Monday's pre-market from 04:00 (08:00Z), after Friday's post-market up to 19:30 New York.
+    const monday = times.indexOf('2026-10-19T08:00Z');
+    expect(times[monday - 1]).toBe('2026-10-16T23:30Z');
+    expect(times.at(-1)).toBe('2026-10-19T14:00Z'); // 10:00; the 10:30 bar is still forming
+    // Regular hours leave both out.
+    const regular = (await market.getBars('NASDAQ:AAPL', '30', null, 30)).bars;
+    expect(regular.some((bar) => bar.time === at('2026-10-19T08:00:00Z') / 1000)).toBe(false);
+    stocks.close();
+  });
+
+  it('leave day bars to the regular sessions, as TradingView does', async () => {
+    const { market, stocks } = await setup('2026-10-19T15:02:05Z');
+    const regular = await market.getBars('NASDAQ:AAPL', '1D', null, 3);
+    const extended = await market.getBars('NASDAQ:AAPL', '1D', null, 3, 'extended');
+    expect(extended).toEqual(regular);
+    stocks.close();
+  });
+
+  it('stream pre-market bars live, while regular-hours bars wait for the open', async () => {
+    const { market, stocks } = await setup('2026-10-19T12:30:05Z'); // 08:30 New York
+    const extended = recorder();
+    const regular = recorder();
+    const stopExtended = market.subscribeBars('NASDAQ:AAPL', '5', extended.listener, 'extended');
+    const stopRegular = market.subscribeBars('NASDAQ:AAPL', '5', regular.listener);
+    await settle();
+    await stocks.poller.pollNow();
+    // The data reaches 08:15: the 08:10 bar is the latest, whole.
+    expect(extended.bars.at(-1)).toMatchObject({
+      time: at('2026-10-19T12:10:00Z') / 1000,
+      volume: 500,
+    });
+    // Regular hours still end with Friday's 15:55 bar.
+    expect(iso(regular.bars.at(-1)?.time ?? 0)).toBe('2026-10-16T19:55Z');
+    stopExtended();
+    stopRegular();
+    stocks.close();
+  });
+
+  it("keep the day's official bar while post-market minutes come in", async () => {
+    const { market, stocks, alpaca } = await setup('2026-10-19T20:16:05Z'); // 16:16 New York
+    const daily = recorder();
+    const minutes = recorder();
+    const stopDaily = market.subscribeBars('NASDAQ:AAPL', '1D', daily.listener);
+    const stopMinutes = market.subscribeBars('NASDAQ:AAPL', '1', minutes.listener, 'extended');
+    await settle();
+    await stocks.poller.pollNow();
+    const official =
+      Math.round(
+        ((alpaca.minutes('AAPL', at('2026-10-19T20:00:00Z')).at(-1)?.close ?? 0) + 0.5) * 100,
+      ) / 100;
+    expect(daily.bars.at(-1)?.close).toBe(official);
+    expect(iso(minutes.bars.at(-1)?.time ?? 0)).toBe('2026-10-19T20:00Z'); // 16:00, after hours
+
+    vi.setSystemTime(at('2026-10-19T20:17:05Z'));
+    await stocks.poller.pollNow();
+    expect(iso(minutes.bars.at(-1)?.time ?? 0)).toBe('2026-10-19T20:01Z');
+    expect(daily.bars.at(-1)?.close).toBe(official);
+    stopDaily();
+    stopMinutes();
+    stocks.close();
+  });
+});
+
+describe("live US stock data from Alpaca's stream", () => {
+  it('moves the live bar with each trade between the minute polls', async () => {
+    const { market, stocks, stream } = await setup('2026-10-19T15:02:05Z'); // 11:02 New York
+    const live = recorder();
+    const stop = market.subscribeBars('NASDAQ:AAPL', '5', live.listener);
+    await settle();
+    await stocks.poller.pollNow();
+    await until(() => stream.subscribed.has('AAPL'));
+    const polled = live.bars.at(-1);
+    expect(polled?.time).toBe(at('2026-10-19T14:45:00Z') / 1000);
+
+    // A trade 15 minutes old, after the last polled minute (10:46): a new high and close.
+    const price = (polled?.high ?? 0) + 1;
+    stream.server.push([
+      { T: 't', S: 'AAPL', p: price, s: 50, c: ['@'], z: 'C', t: '2026-10-19T14:47:30.5Z' },
+    ]);
+    await until(() => live.bars.at(-1)?.close === price);
+    expect(live.bars.at(-1)).toMatchObject({
+      time: at('2026-10-19T14:45:00Z') / 1000,
+      high: price,
+      volume: (polled?.volume ?? 0) + 50,
+    });
+    // An odd lot doesn't move it, as it doesn't Alpaca's bars.
+    stream.server.push([
+      { T: 't', S: 'AAPL', p: price + 5, s: 3, c: ['@', 'I'], z: 'C', t: '2026-10-19T14:47:31Z' },
+    ]);
+    await settle(100);
+    expect(live.bars.at(-1)?.close).toBe(price);
+    stop();
+    stocks.close();
+  });
+
+  it("gives the best bid and ask, for the legend's Sell and Buy", async () => {
+    const { market, stocks, stream } = await setup('2026-10-19T15:02:05Z');
+    const tops: { bid: number; ask: number }[] = [];
+    const stop = market.subscribeBook('NASDAQ:AAPL', {
+      onBook: (top) => tops.push(top),
+      onState: () => {},
+      onError: () => {},
+    });
+    await until(() => stream.subscribed.has('AAPL'));
+    stream.server.push([{ T: 'q', S: 'AAPL', bp: 231.4, ap: 231.45, t: '2026-10-19T14:47:30Z' }]);
+    await until(() => tops.length > 0);
+    expect(tops.at(-1)).toEqual({ bid: 231.4, ask: 231.45 });
+    stop();
     stocks.close();
   });
 });

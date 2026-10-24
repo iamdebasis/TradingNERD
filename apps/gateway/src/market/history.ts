@@ -1,4 +1,10 @@
-import { type Bar, barOpenTime, type Resolution, resolutionDurationMs } from '@tradingnerd/core';
+import {
+  type Bar,
+  barOpenTime,
+  type Resolution,
+  resolutionDurationMs,
+  type SessionHours,
+} from '@tradingnerd/core';
 import { mapLimit } from './concurrency.ts';
 import type { ExchangeAdapter } from './types.ts';
 
@@ -15,6 +21,7 @@ const SLICE_CONCURRENCY = 6;
 /**
  * Up to `count` native bars opening before `endMs` (the latest when null), one request after
  * another, each ending where the previous one began. Stops after `maxRequests` requests.
+ * `hours`: the session whose intraday bars to fetch (see ExchangeAdapter.fetchBars).
  */
 export async function pageBack(
   adapter: ExchangeAdapter,
@@ -23,13 +30,14 @@ export async function pageBack(
   endMs: number | null,
   count: number,
   maxRequests = Number.POSITIVE_INFINITY,
+  hours?: SessionHours,
 ): Promise<History> {
   const bars: Bar[] = [];
   let end = endMs;
   for (let requests = 0; bars.length < count; requests++) {
     if (requests >= maxRequests) return { bars, hasMore: true };
     const limit = Math.min(adapter.maxBarsPerRequest, count - bars.length);
-    const page = await adapter.fetchBars(ticker, resolution, end, limit);
+    const page = await adapter.fetchBars(ticker, resolution, end, limit, hours);
     const firstKnown = bars[0]?.time ?? Number.POSITIVE_INFINITY;
     const cutoff = end;
     const fresh = page.filter(
@@ -53,12 +61,13 @@ export async function fetchHistory(
   resolution: Resolution,
   endMs: number | null,
   count: number,
+  hours?: SessionHours,
 ): Promise<History> {
   const pages = Math.ceil(count / adapter.maxBarsPerRequest);
   if (!adapter.gapless || pages < 2 || resolutionDurationMs(resolution) === null) {
-    return pageBack(adapter, ticker, resolution, endMs, count);
+    return pageBack(adapter, ticker, resolution, endMs, count, Number.POSITIVE_INFINITY, hours);
   }
-  const history = await fetchSlices(adapter, ticker, resolution, endMs, count, pages);
+  const history = await fetchSlices(adapter, ticker, resolution, endMs, count, pages, hours);
   if (history.bars.length <= count) return history;
   return { bars: history.bars.slice(-count), hasMore: true };
 }
@@ -76,9 +85,12 @@ export async function fetchSlices(
   endMs: number | null,
   count: number,
   maxRequests: number,
+  hours?: SessionHours,
 ): Promise<History> {
   const barMs = resolutionDurationMs(resolution);
-  if (barMs === null) return pageBack(adapter, ticker, resolution, endMs, count, maxRequests);
+  if (barMs === null) {
+    return pageBack(adapter, ticker, resolution, endMs, count, maxRequests, hours);
+  }
 
   const end = endMs ?? barOpenTime(resolution, Date.now()) + barMs;
   const span = adapter.maxBarsPerRequest * barMs;
@@ -88,7 +100,7 @@ export async function fetchSlices(
     end: end - i * span,
   }));
   const pages = await mapLimit(ranges, SLICE_CONCURRENCY, (range) =>
-    adapter.fetchRange(ticker, resolution, range.start, range.end),
+    adapter.fetchRange(ticker, resolution, range.start, range.end, hours),
   );
   const bars = pages.toReversed().flat();
 
@@ -104,6 +116,7 @@ export async function fetchSlices(
       resolution,
       first ? first.time * 1000 : oldestStart,
       1,
+      hours,
     );
     hasMore = before.length > 0;
   }

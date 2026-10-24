@@ -1,4 +1,11 @@
-import { type Bar, parseResolution, type Resolution } from '@tradingnerd/core';
+import {
+  type Bar,
+  MarketSchedule,
+  parseResolution,
+  type Resolution,
+  sessionClock,
+} from '@tradingnerd/core';
+import { NYSE_2026 } from '@tradingnerd/core/testing';
 import { describe, expect, it } from 'vitest';
 import { LiveBarAggregator } from '../src/market/liveBar.ts';
 
@@ -31,6 +38,16 @@ describe('LiveBarAggregator', () => {
     const agg = new LiveBarAggregator(minute);
     expect(agg.applyTrade({ price: 1.3, quantity: 1, time: at('12:00:01') })).toEqual([]);
     expect(agg.current()).toBeNull();
+  });
+
+  it("leaves a session's last bar alone when trades come after it", () => {
+    // Regular hours in New York: the 15:59 bar is the last; 16:00 is post-market.
+    const agg = new LiveBarAggregator(minute, sessionClock(new MarketSchedule(NYSE_2026)));
+    const last = { ...bar12, time: Date.parse('2026-10-19T19:59:00Z') / 1000 };
+    agg.seed(last);
+    const afterHours = { price: 9, quantity: 5, time: Date.parse('2026-10-19T20:00:01Z') };
+    expect(agg.applyTrade(afterHours)).toEqual([]);
+    expect(agg.current()).toEqual(last);
   });
 
   it('starts from a seed', () => {

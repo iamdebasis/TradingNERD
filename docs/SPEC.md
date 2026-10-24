@@ -109,6 +109,10 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-20 | Live stock bars from **minute bars polled once a minute**; each session's official daily bar after the close | The free plan serves the whole market 15 minutes back over REST; whether its delayed stream is open to free keys isn't documented (to check with your key). |
 | 2026-10-20 | The **Alpaca key** stays in the gateway (`data/secrets.json`), entered in a dialog like the CoinGecko key | Never sent to the browser or logged. |
 | 2026-10-20 | The **overnight session** (Blue Ocean, 20:00–04:00) later | Your call. |
+| 2026-10-20 | A **bar still forming** where the delayed data ends is left to the live feed, as a day still trading is | Your YES. Alpaca hands back a 5, 15 or 30-minute bar whole, with minutes the free plan doesn't serve yet (seen with your key). |
+| 2026-10-20 | **Alpaca's delayed stream** moves live bars trade by trade between the minute polls and gives stocks **Sell and Buy** from its best bid and ask, 15 minutes late; at most 30 symbols, a chart's first | Your YES. Checked with your key: the free plan signs in and subscribes. Trades Alpaca's own bars leave out (odd lots, average-price trades and the rest of its list, §12) are left out. |
+| 2026-10-20 | **Extended hours** (M7b): TradingView's **Chart settings** (its Settings button, top right) → Symbol: Session, the pre/post market hours background, Timezone. Intraday charts only; day and longer bars stay on the regular sessions | Your YES, after TradingView's help center and Charting Library docs (§4.5, §12). |
+| 2026-10-20 | **Market status** as TradingView marks it: the legend's pill (status icon and "D"), the watchlist's dot and superscript "D", and the pre/post-market price line on regular-hours charts | Your YES; measured from your screenshots where they show it, the rest provisional (§11). |
 
 ## 4. Research findings
 
@@ -195,6 +199,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Alpaca** (chosen): free plan, the whole market (SIP) older than 15 minutes, or IEX in real time; history since 2016; 200 requests a minute; one stream connection. $99 a month: the whole market in real time.
 - **Others:** Massive (Polygon) real-time only at $199; Databento $199; Tiingo free or $30 (IEX real-time, 30+ years of days); Schwab free with an account (log in again weekly); Interactive Brokers needs its gateway app running; Twelve Data streams from $229. IEX Cloud closed in 2024.
 - **IEX** trades 08:00–17:00 New York (its 2026 SEC filing): about 4% of US volume.
+- **TradingView's extended hours** (its help center and Charting Library docs, §12): Chart settings → Symbol → Session ("Regular trading hours", "Extended trading hours"), also a session button in the bottom toolbar (Regular / Extended / 24h); intraday intervals only, daily bars standard; AAPL's sessions 04:00–09:30, 09:30–16:00, 16:00–20:00; a "Pre/post market hours background" color for each; the pre/post-market price line (price-scale gear → Lines) shows only while the chart shows regular hours.
+- **TradingView's market status** (its stylesheet's status classes and release notes): open green, pre-market orange (a sunrise icon), post-market blue (a moon icon), closed and holidays gray. Delayed symbols show "D"; Cboe's data a pink icon instead.
+- **Measured from your screenshots** (sRGB): the pre-market dot and the D #FF9800, the closed dot #9C9C9C, both dots 6 px; the legend pill 40 × 18 px, its sunrise #FF9100 on #402B14; the "Pre" tag 27 × 17 px and its price label 17 px, #FB8C00 with white text; a one-row last-price label 17 px (the crosshair's stays 21); the open badge's green from your crypto screenshots. Crypto rows have no dot.
+- **Alpaca's stream** (checked with your key, 2026-10-24): the free plan's `delayed_sip` feed signs in and takes subscriptions to trades and quotes; one connection and 30 symbols on the free plan.
 - **Nasdaq's directory** (19 October 2026): 13,269 listings: NASDAQ 5,623, NYSE 2,891, NYSE Arca 2,747, NYSE American 309, Cboe BZX 1,680, Texas Stock Exchange 19. By kind: 5,788 ETFs (about 175 crypto, 645 leveraged and 323 inverse by name), 5,655 stocks, 509 preferreds, 432 warrants, 310 units, 302 ADRs, 147 notes, 126 rights.
 
 ## 5. Requirements (v1)
@@ -360,11 +368,22 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **What's listed:** every US-listed stock and fund (§4.5), searched under All, Stocks (stocks, ADRs, preferreds, warrants, rights, units, notes) and Funds (ETFs). Each row shows its type and venue ("fund etf · NYSE Arca"). Listings Alpaca has no data for are shown unavailable, as elsewhere.
 - **Ranking:** the last session's traded value (shares × close), refreshed after each session once a key is set; until then, shorter tickers first.
 - **Data:** Alpaca's free plan, 15 minutes delayed, from the user's key. Intervals 1 minute to 12 months: 1, 5, 15 and 30 minutes and days from Alpaca, the rest built from them on the session clock. History from 2016. No seconds or tick charts for stocks.
-- **Sessions (M7a: regular hours):** New York time, 09:30–16:00, the real calendar's holidays and 13:00 closes. Hours run 09:30, 10:30 … 15:30 (the last one half an hour); day bars are timed at the session's open; weeks start Monday, months on the 1st.
-- **Chart:** the time axis in New York time; TradingView's "D" sign beside the title; no Sell/Buy (no order book). The countdown, as on TradingView: none while the market is closed; with 15-minute delayed data, only for intervals over 15 minutes.
-- **Watchlist:** Last, Chg and Chg% against the previous session's official close, 15 minutes late; prices to 2 decimals, 4 below $1.
+- **Sessions:** New York time, 09:30–16:00, the real calendar's holidays and 13:00 closes. Hours run 09:30, 10:30 … 15:30 (the last one half an hour); day bars are timed at the session's open; weeks start Monday, months on the 1st. With extended hours on (§5.8), intraday bars run 04:00–20:00 (after a 13:00 close, to 17:00), the pre-market on an orange band and the post-market on a blue one.
+- **Chart:** the time axis in the exchange's time unless Chart settings says otherwise; the status pill beside the title (§5.8); Sell and Buy from the delayed best bid and ask. Live bars move with each trade, 15 minutes late. The countdown, as on TradingView: none while the market is closed; with 15-minute delayed data, only for intervals over 15 minutes.
+- **Pre/post-market price line:** on a regular-hours intraday or daily chart, the latest pre- or post-market minute's price as a dotted line in orange ("Pre") or blue ("Post"), with its tag at the pane's edge and its price on the axis; none while the regular session trades. Its label steps clear of the last price's.
+- **Watchlist:** Last, Chg and Chg% against the previous session's official close, 15 minutes late, moving with each trade for up to 30 symbols (a chart's first); prices to 2 decimals, 4 below $1. After the ticker: a superscript orange "D" for delayed data, and a dot when the market is out of its session (orange pre-market, blue post-market, gray closed).
 - **The key:** a "US stock data" dialog (from a stock that needs it, or the ⋯ menu) takes the Alpaca key ID and secret, checks them with Alpaca, and shows the plan ("free plan: 15 minutes delayed"); the browser only ever sees the ID masked. Saving reloads the stocks on the chart and in the watchlist.
-- **Status:** M7a built 2026-10-20. Next: M7b extended hours (pre-market 04:00–09:30, after-hours 16:00–20:00, TradingView's session switch in Chart settings from the gear), M7c logos (Massive's free key) and pixel checks against your screenshots (§11).
+- **Status:** M7a committed 2026-10-20 (0c590aa). M7b built 2026-10-24: whole bars, extended hours with Chart settings, market status, the delayed stream with Sell and Buy. Next: M7c logos (Massive's free key) and pixel checks against your screenshots (§11).
+
+### 5.8 Chart settings and market status (M7b)
+
+- **Chart settings:** TradingView's Settings button at the top bar's right end opens "Chart settings" with its Symbol tab's Data modification fields that this chart has:
+  - **Session:** "Regular trading hours" or "Extended trading hours", for symbols with sessions (stocks and funds); none for crypto.
+  - **Pre/post market hours background:** a swatch each (orange and blue at 92% transparency); a swatch opens a color and opacity editor.
+  - **Timezone:** "Exchange" (the default), UTC, or any of TradingView's 98 zones named "(UTC-4) New York", with the moment's offset.
+  - Changes show at once; Cancel, Escape and ✕ put the old ones back; Ok keeps them, in this browser (`tn.chart.settings`). A new session or zone reloads the chart; new colors don't.
+- **The legend's pill:** the market status icon in an 18 px circle (a green dot when open, an orange sunrise in the pre-market, a blue moon in the post-market, gray when closed), joined by an orange "D" half for delayed data. While the data isn't live, the connection's gray or red shows instead. Hovering names the status ("Market open", "Pre-market", "Post-market", "Market closed").
+- **Status timing:** from the exchange's calendar and the real clock; it changes at each session boundary as it passes. Crypto is always open.
 
 ## 6. Architecture
 
@@ -408,6 +427,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - REST for search, history and settings; one WebSocket for live data.
   - Messages are typed in `packages/core`, and any breaking change bumps `PROTOCOL_VERSION`.
 - **Symbol search** (M4): `GET /api/symbols/search?query=&exchange=&offset=&limit=` returns `{matches, hasMore}`. Each match is one ticker with its exchanges' `listings`, each saying whether it's `live`. `GET /api/exchanges` lists the exchanges.
+- **Sessions** (protocol v6): `GET /api/bars?…&session=extended` and `{channel: 'bars', …, session: 'extended'}` ask for intraday bars with pre- and post-market hours; `regular` is the default, and markets without extended hours (and day and longer bars) give their regular bars either way.
 - **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
@@ -551,13 +571,16 @@ data/             Local runtime data (gitignored, created at runtime)
 - **One clock per market** (`packages/core/src/clock.ts`) decides where bars begin and end: crypto's UTC clock (unchanged), and a session clock for markets that close, built from their calendar (`schedule.ts`) in their time zone (`timezone.ts`, on the platform's own time-zone data).
 - **Used everywhere bars are timed:** resampling, history paging (count-based for markets that close, since a slice of time holds few of their bars), the history cache (whose "now" is the data's, 15 minutes back when delayed), live bars, the watchlist's rollover, and the chart's countdown.
 - **The calendar travels with the symbol** (SymbolInfo.schedule), so the gateway and the chart use the same sessions.
-- **The chart** keeps real UTC times; Lightweight Charts gets each bar's New York clock time for display, as its documentation advises.
+- **The chart** keeps real UTC times; Lightweight Charts gets each bar's clock time in the chart's zone (the exchange's, or the one chosen) for display, as its documentation advises.
+- **Two clocks for a market with extended hours:** the regular one, and one whose intraday bars run from the pre-market open to the post-market close; day and longer bars are the regular sessions on both. A trade outside a bar's hours (post-market, for regular bars) moves no bar.
+- **Market status** (`packages/core/src/marketStatus.ts`): open, pre, post or closed at a moment, and when it next changes.
 
 ### 6.13 US stocks from Alpaca (M7)
 
 - **Adapters:** one per exchange code (NASDAQ, NYSE, AMEX, CBOE, IEX, TXSE), sharing the listings, the Alpaca client, the calendar and the minute poller (`apps/gateway/src/stocks/`).
-- **History:** Alpaca's bars of the whole market, split-adjusted, ending at the last whole minute 15 minutes back; pre- and post-market bars left out until M7b, with pages continued so a request still gets its count. A day still trading is left to the live feed.
-- **Live:** one poll a minute fetches the minutes just released for every subscribed symbol in one request; each chart or watchlist bar is its period's minutes folded on the clock. After a session, the official daily bar replaces the minute-built one. Two failed polls in a row show the chart as reconnecting.
+- **History:** Alpaca's bars of the whole market, split-adjusted, ending at the last whole minute 15 minutes back; regular-hours requests leave the pre- and post-market bars out, with pages continued so a request still gets its count. A bar still forming there (a day still trading, or a 5, 15 or 30-minute bar Alpaca would hand back whole) is left to the live feed.
+- **Live:** one poll a minute fetches the minutes just released for every subscribed symbol in one request (from 04:00 while a chart wants extended hours); each chart or watchlist bar is its period's minutes in its hours, folded on the clock. After a session, the official daily bar replaces the minute-built one. Two failed polls in a row show the chart as reconnecting.
+- **Stream** (`AlpacaStream.ts`): one connection to Alpaca's `delayed_sip` feed (`sip` on a real-time plan), signed in with the key; trades move the live bars between polls (the polled minutes stay authoritative), quotes give the best bid and ask. At most 30 symbols, a chart's (those with quotes) first, then by age; the rest stay on minute bars. Trades with conditions Alpaca's bars leave out are dropped. Alpaca's 406 (another app on the key) waits 5 minutes; 402 and 409 stop it until the key changes; 405 keeps the symbols Alpaca took.
 - **Requests:** under Alpaca's 200 a minute; the daily ranking runs gently in the background.
 
 ## 7. UI and visual spec
@@ -670,8 +693,8 @@ Reference viewport is 1634 px wide.
 | M4 | Add symbol / symbol search: pair catalog, ranking, exchange grouping, filters, keyboard | Typing "XRP" lists every exchange; picked row live in < 1 s. **Committed 2026-10-19** |
 | M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles. **Committed 2026-10-19** |
 | M6 | Feel tuning vs TradingView, visual regression, performance profiling (Electron dropped, your call) | Parity checklist all passes. **Built 2026-10-19**, with the gesture settings in the top bar for your side-by-side session (§11); awaiting your review |
-| M7a | US stocks on the chart: listings and search, the market clock, the Alpaca source, the key dialog, charts and watchlist 15 minutes delayed, the "D" sign | SPY, AAPL, GBTC, XXRP and DOG found, added and charted 1 minute to 12 months back to 2016, matching TradingView's candles 15 minutes later. **Built 2026-10-20**; the live check waits for your key |
-| M7b | Extended hours: sessions on intraday charts, TradingView's switch, colors, market status, the watchlist out of hours | AAPL on 5 minutes shows 04:00–20:00 bars and colored sessions like your screenshot |
+| M7a | US stocks on the chart: listings and search, the market clock, the Alpaca source, the key dialog, charts and watchlist 15 minutes delayed, the "D" sign | SPY, AAPL, GBTC, XXRP and DOG found, added and charted 1 minute to 12 months back to 2016, matching TradingView's candles 15 minutes later. **Committed 2026-10-20**; the live check with your key matched TradingView's watchlist 25 of 25 |
+| M7b | Extended hours: Chart settings (session, backgrounds, time zone), market status (legend pill, watchlist dots and D, pre/post-market price line), whole bars, Alpaca's delayed stream with Sell and Buy | AAPL on 5 minutes shows 04:00–20:00 bars and colored sessions like your screenshot. **Built 2026-10-24**; live-checked with your key on a Saturday (history, status, the stream's sign-in) |
 | M7c | Stock logos (Massive's free key), pixel checks against your screenshots, a live check with your key | The checks pass |
 
 ## 9. Testing strategy
@@ -707,7 +730,10 @@ Reference viewport is 1634 px wide.
   - The clock and calendar (`packages/core`): New York's offsets against Intl at every hour of a year and on the switch days; holidays and 13:00 closes; hours from 09:30 with a half-hour last bar; days, weeks and months at their first session; trading days counted without gaps; resampling on sessions.
   - Nasdaq's directory parsed from rows of the real files (19 October 2026): every kind, TradingView's names, test issues left out, an exchange code it doesn't know reported.
   - The gateway against a fake Alpaca on the free plan (`test/helpers/fakeAlpaca.ts`), which refuses anything within 15 minutes: regular-hours paging, day bars at the open with the official close, session-aligned hours, live bars stepping a minute at a time, quotes against the previous session's official close, the feed going down and coming back, the key's check, storage and routes.
-  - In the browser (`tests/e2e/stocks.spec.ts`): the tabs and their sources, a stock's chart in New York time with the "D" sign and no Sell/Buy, TradingView's countdown rules, the key dialog, adding a stock to the watchlist.
+  - In the browser (`tests/e2e/stocks.spec.ts`): the tabs and their sources, a stock's chart in New York time with the "D" sign and delayed Sell/Buy, TradingView's countdown rules, the key dialog, adding a stock to the watchlist.
+  - M7b, gateway: a forming bar left to the live feed (the fake Alpaca hands bars back whole, as the real one does); 04:00–20:00 history and live pre-market bars; day bars the same in either session; the official daily bar kept while post-market minutes come in; a post-market trade moving no regular bar; the session parameter's routes; the stream (`alpacaStream.test.ts`, a mock Alpaca stream): sign-in, the delayed feed, trades and quotes routed, the condition filter, the 30-symbol cap with charts first, unsubscribing, and Alpaca's 402, 405 and 406; trades moving a live bar between polls and quotes giving Sell and Buy.
+  - M7b, core and chart: market status through a trading day, weekends, holidays and an early close; the session field in messages; the pre/post label stepping clear of the last price's.
+  - M7b, in the browser (`tests/e2e/extended-hours.spec.ts`): Chart settings from the Settings button, its fields for stocks and crypto, extended hours with both bands, Cancel, Ok kept across a reload, day charts staying regular, the time zone; pre-market (the sunrise, the "Pre" line, the orange dot and D), the regular session (green, no line, no dot), a weekend (gray), crypto (no D, no dot).
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -740,7 +766,8 @@ Reference viewport is 1634 px wide.
 | Shallow history (Kraken keeps 720 bars) | Its charts end there, and the oldest week or month built from its days can be partial |
 | Small pages and low limits (Coinbase: 350 bars, 10 requests a second) | Windows fetched side by side and shared; a history cache in M6 |
 | Trademarks | Personal/local use only, our own icons, Lightweight Charts attribution kept |
-| Alpaca's free plan, undocumented in places | Checked with your key once you have one: the delayed stream, how preferreds and warrants are named, partial bars, day bars' timestamps |
+| Alpaca's free plan, undocumented in places | Checked with your key: the delayed stream signs in and subscribes; preferreds, warrants, units and rights are named JPM.PRD, AAC.WS, AAC.U, AIIA.RT; 5, 15 and 30-minute bars come back whole (now handled); day bars are stamped at New York midnight |
+| One stream connection per key on the free plan | Another app on the same key gets it first: prices then move a minute at a time, and the stream tries again every 5 minutes |
 | Stock data 15 minutes late | Marked "D" as TradingView does; Alpaca's $99 plan makes it real-time with no change here |
 | Stock history from 2016 | Older days could come from Tiingo later |
 
@@ -797,12 +824,18 @@ Reference viewport is 1634 px wide.
 
 **US stocks (M7):**
 
-30. Provisional until measured from your TradingView screenshots: the type words in search ("stock", "fund etf", "preferred", …) and whether a venue ("NYSE Arca") or code ("AMEX") shows; the "D" sign's look; whether the countdown shows on daily charts outside trading hours (ours: no).
+30. Settled by your SPY screenshot and TradingView's help: "stock", "fund etf" and "dr", and the venue's name ("NYSE Arca"). Still provisional: the other type words ("preferred", "warrant", …); whether the countdown shows on daily charts outside trading hours (ours: no). The D's look is measured in the watchlist; its legend half is provisional (36).
 31. TradingView's names for listings on IEX and the Texas Stock Exchange (ours: IEX:, TXSE:).
 32. How TradingView aligns 2-day and longer day bars for stocks (ours: trading days counted from 1970), and the date a week's bar carries when Monday is a holiday (ours: the first trading day).
 33. Whether TradingView's daily volume for stocks includes pre- and after-market trades.
-34. To check with your key: Alpaca's delayed stream for free keys, its names for preferreds, warrants, units and rights (until then those listings show as unavailable), and its day bars' timestamps.
+34. ~~To check with your key~~ Done 2026-10-20 and 2026-10-24: the delayed stream works for free keys; preferreds, warrants, units and rights load; day bars' timestamps handled.
 35. Under All, Crypto follows Funds here; on TradingView, Futures and Forex come between (we have none).
+36. Provisional, not shown in any screenshot yet: whether a US stock in its regular session gets a green watchlist dot (ours: none, as crypto has none); the post-market blue (#3179F5 dot, #2979FF moon on #14243F, #2962FF line) and the moon's shape; the legend's closed icon (ours: a gray dot); the D half's tint (ours: the pre-market's #402B14).
+37. The pre/post market hours background defaults: orange #FF9800 and blue #2962FF at 92% transparency, estimated from a blurry Chart settings screenshot of an older TradingView.
+38. The Chart settings dialog's sizes and the current theme's colors, its swatches' color editor (TradingView's own color picker isn't documented), and TradingView's bottom-toolbar session button (we have no bottom toolbar yet).
+39. City names in the time zone menu come from the zone ids ("US/Mountain" shows as Mountain); TradingView may name a few differently. TradingView's own default zone isn't documented (ours: Exchange).
+40. How TradingView keeps the pre/post-market label clear of the last price's (ours: right above or below it, on its price's side), and whether autoscale includes that price (ours: no).
+41. Alpaca gave AAPL's Friday 23 October close as 347.725, half a cent; ours shows it to 2 decimals. Worth comparing with TradingView's close for that day.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -835,7 +868,8 @@ Reference viewport is 1634 px wide.
 - TradingView watchlist change calculation: https://www.tradingview.com/support/solutions/43000653369-how-are-change-and-change-calculated-in-the-watchlist/
 - TradingView flags: https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443 · https://tradingview.com/blog/en/flagged-lists-improved-9521 · https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · https://www.tradingview.com/support/solutions/43000645264-how-to-delete-the-red-list/
 - TradingView for stocks: sessions https://www.tradingview.com/charting-library-docs/latest/connecting_data/Trading-Sessions · extended sessions https://www.tradingview.com/charting-library-docs/latest/connecting_data/Extended-Sessions · time zones https://www.tradingview.com/charting-library-docs/latest/connecting_data/Symbology · the "D" sign and countdown https://www.tradingview.com/support/solutions/43000476233-the-countdown-is-not-displayed-on-the-chart/ · free Cboe data https://www.tradingview.com/support/solutions/43000473924 · 24h sessions https://www.tradingview.com/support/solutions/43000790593/ · names https://www.tradingview.com/symbols/NYSE-JPM/PD/ · https://www.tradingview.com/symbols/NYSE-ACHR/W/ · https://tradingview.com/symbols/CBOE-FBTC/options
-- Alpaca: https://docs.alpaca.markets/us/docs/about-market-data-api · https://docs.alpaca.markets/us/reference/stockbars · https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data · free whole-market history https://forum.alpaca.markets/t/cant-read-spy-minutes/14293
+- Alpaca: https://docs.alpaca.markets/us/docs/about-market-data-api · https://docs.alpaca.markets/us/reference/stockbars · https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data · free whole-market history https://forum.alpaca.markets/t/cant-read-spy-minutes/14293 · the stream's errors and limits https://docs.alpaca.markets/docs/streaming-market-data · trades in bars https://alpaca.markets/learn/stock-minute-bars/
+- TradingView extended hours and market status (M7b): the session button and 24h https://www.tradingview.com/support/solutions/43000790593/ · Symbol tab (Session, Timezone "Exchange") https://www.tradingview.com/support/solutions/43000748166-how-to-configure-your-supercharts/ · extended sessions https://www.tradingview.com/charting-library-docs/latest/connecting_data/Extended-Sessions/ · background overrides https://www.tradingview.com/charting-library-docs/latest/customization/overrides/chart-overrides/ · the pre/post-market price line https://www.tradingview.com/support/solutions/43000762938-how-do-i-display-the-price-line-for-the-extended-session/ · https://www.tradingview.com/blog/en/pre-post-market-price-labels-are-now-available-on-charts-20418 · daily bars standard https://www.tradingview.com/blog/en/extended-hours-support-59226/ · the sunrise and moon icons https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · the legend's D https://www.tradingview.com/charting-library-docs/latest/ui_elements/Legend/ · D versus Cboe's icon https://in.tradingview.com/support/solutions/43000698958-alerts-based-on-real-time-and-non-real-time-symbols/ · the time zones https://www.tradingview.com/charting-library-docs/latest/ui_elements/timezones/ · the search's type words https://www.tradingview.com/support/solutions/43000746682-tradingview-symbol-search-tips-for-finding-assets/
 - Nasdaq symbol directory: https://www.nasdaqtrader.com/trader.aspx?id=symboldirdefs · IEX hours: https://www.sec.gov/files/rules/sro/iex/2026/34-105959.pdf · Lightweight Charts time zones: https://tradingview.github.io/lightweight-charts/docs/time-zones
 - TradingView watchlist sections and adding at a point: https://www.tradingview.com/support/solutions/43000615520-how-to-add-a-section-to-the-watchlist/ · https://www.tradingview.com/blog/en/add-symbols-to-the-watchlist-at-a-specific-point-in-the-list-22486 · renaming by double-click (community guide): https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams

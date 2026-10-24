@@ -1,16 +1,19 @@
-import type { HoverInfo } from '@tradingnerd/chart';
-import type { Bar, BarsResponse, SymbolInfo } from '@tradingnerd/core';
+import type { ExtendedPrice, HoverInfo, SessionShading } from '@tradingnerd/chart';
+import type { Bar, BarsResponse, MarketStatus, SessionHours, SymbolInfo } from '@tradingnerd/core';
+import { NYSE_2026 } from '@tradingnerd/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type MarketApi } from '../data/api';
 import type { BarHandlers, BookHandlers, LiveFeed } from '../data/GatewayConnection';
 import {
   ChartSession,
   type ChartSurface,
+  EXTENDED_PRICE_COLORS,
   HISTORY_RETRY_MS,
   INITIAL_BARS,
   type LegendView,
   PAGE_BARS,
 } from './ChartSession';
+import { type ChartSettings, DEFAULT_CHART_SETTINGS } from './chartSettings';
 
 const DAY = 86_400;
 const LAST = Date.UTC(2026, 9, 18) / 1000;
@@ -47,8 +50,19 @@ const history = (count: number) =>
 class FakeChart implements ChartSurface {
   bars: Bar[] = [];
   readonly calls: string[] = [];
-  setInstrument() {
+  /** What the session set, apart from `calls` (whose order the tests check). */
+  instrument: Parameters<ChartSurface['setInstrument']>[0] | null = null;
+  shading: SessionShading | null = null;
+  extended: ExtendedPrice | null = null;
+  setInstrument(instrument: Parameters<ChartSurface['setInstrument']>[0]) {
     this.calls.push('setInstrument');
+    this.instrument = instrument;
+  }
+  setSessionShading(shading: SessionShading | null) {
+    this.shading = shading;
+  }
+  setExtendedPrice(price: ExtendedPrice | null) {
+    this.extended = price;
   }
   setBars(bars: readonly Bar[]) {
     this.calls.push(`setBars ${bars.length}`);
@@ -80,6 +94,10 @@ class FakeChart implements ChartSurface {
 
 class FakeLegend implements LegendView {
   readonly calls: string[] = [];
+  market: MarketStatus | null = null;
+  setMarketStatus(status: MarketStatus) {
+    this.market = status;
+  }
   setInstrument(info: SymbolInfo) {
     this.calls.push(`instrument ${info.description}`);
   }
@@ -98,8 +116,17 @@ class FakeFeed implements LiveFeed {
   bars: BarHandlers | null = null;
   book: BookHandlers | null = null;
   unsubscribed = 0;
-  subscribeBars(_symbol: string, _resolution: string, handlers: BarHandlers) {
-    this.bars = handlers;
+  /** Every bar subscription, in order. */
+  readonly all: { resolution: string; session: SessionHours; handlers: BarHandlers }[] = [];
+  subscribeBars(
+    _symbol: string,
+    resolution: string,
+    handlers: BarHandlers,
+    session: SessionHours = 'regular',
+  ) {
+    this.all.push({ resolution, session, handlers });
+    // The chart's own feed: the pre/post-market price's comes after it.
+    this.bars ??= handlers;
     return () => this.unsubscribed++;
   }
   subscribeBook(_symbol: string, handlers: BookHandlers) {
@@ -363,5 +390,118 @@ describe('ChartSession', () => {
     await session.start();
     session.dispose();
     expect(feed.unsubscribed).toBe(2);
+  });
+});
+
+describe('a stock chart', () => {
+  const STOCK: SymbolInfo = {
+    ...INFO,
+    id: 'NASDAQ:AAPL',
+    exchange: 'NASDAQ',
+    exchangeName: 'NASDAQ',
+    ticker: 'AAPL',
+    base: 'AAPL',
+    quote: 'USD',
+    description: 'Apple Inc.',
+    type: 'stock',
+    tickSize: 0.01,
+    pricePrecision: 2,
+    timezone: 'America/New_York',
+    delayMs: 900_000,
+    hasBook: false,
+    schedule: NYSE_2026,
+  };
+  const at = (iso: string) => Date.parse(iso) / 1000;
+
+  function stockSession(resolution: string, settings: Partial<ChartSettings> = {}) {
+    const chart = new FakeChart();
+    const legend = new FakeLegend();
+    const feed = new FakeFeed();
+    const sessions: (SessionHours | undefined)[] = [];
+    const session = new ChartSession({
+      chart,
+      legend,
+      feed,
+      symbol: 'NASDAQ:AAPL',
+      resolution,
+      settings: { ...DEFAULT_CHART_SETTINGS, ...settings },
+      api: {
+        resolveSymbol: async () => STOCK,
+        getBars: async (_s, _r, _to, _count, _signal, hours) => {
+          sessions.push(hours);
+          return { bars: [makeBar(at('2026-10-19T14:00:00Z'))], hasMore: false };
+        },
+      },
+    });
+    return { session, chart, legend, feed, sessions };
+  }
+
+  it('asks for extended hours on intraday charts when the settings say so, and shades them', async () => {
+    const { session, chart, feed, sessions } = stockSession('5', { session: 'extended' });
+    await session.start();
+    expect(sessions).toEqual(['extended']);
+    expect(feed.all.map((s) => [s.resolution, s.session])).toEqual([['5', 'extended']]);
+    // 08:00 New York is pre-market, 17:00 post-market, 10:00 the regular session.
+    expect(chart.shading?.partOf(at('2026-10-19T12:00:00Z'))).toBe('pre');
+    expect(chart.shading?.partOf(at('2026-10-19T21:00:00Z'))).toBe('post');
+    expect(chart.shading?.partOf(at('2026-10-19T14:00:00Z'))).toBeNull();
+    expect(chart.shading?.pre).toBe('rgba(255, 152, 0, 0.08)');
+    // A different color applies without a reload.
+    session.setBackgrounds({ color: '#00FF00', opacity: 0.5 }, { color: '#0000FF', opacity: 1 });
+    expect(chart.shading?.pre).toBe('rgba(0, 255, 0, 0.5)');
+    expect(chart.shading?.post).toBe('rgba(0, 0, 255, 1)');
+    session.dispose();
+  });
+
+  it('keeps day bars to the regular sessions whatever the setting', async () => {
+    const { session, chart, sessions } = stockSession('1D', { session: 'extended' });
+    await session.start();
+    expect(sessions).toEqual(['regular']);
+    expect(chart.shading).toBeNull();
+    session.dispose();
+  });
+
+  it("shows the latest pre- or post-market price on a regular-hours chart, none in the session's hours", async () => {
+    const { session, chart, feed } = stockSession('5');
+    await session.start();
+    const line = feed.all.find((s) => s.session === 'extended');
+    expect(line?.resolution).toBe('1');
+    line?.handlers.onBar({ ...makeBar(at('2026-10-19T12:15:00Z')), close: 339.72 }, false);
+    expect(chart.extended).toEqual({ price: 339.72, tag: 'Pre', color: EXTENDED_PRICE_COLORS.pre });
+    line?.handlers.onBar({ ...makeBar(at('2026-10-19T14:00:00Z')), close: 342.5 }, false);
+    expect(chart.extended).toBeNull();
+    line?.handlers.onBar({ ...makeBar(at('2026-10-19T20:30:00Z')), close: 343.1 }, false);
+    expect(chart.extended).toMatchObject({ tag: 'Post', color: EXTENDED_PRICE_COLORS.post });
+    session.dispose();
+  });
+
+  it("shows the time zone chosen in the settings, or the exchange's", async () => {
+    const exchange = stockSession('60');
+    await exchange.session.start();
+    expect(exchange.chart.instrument?.timezone).toBe('America/New_York');
+    const chosen = stockSession('60', { timezone: 'Asia/Astana' });
+    await chosen.session.start();
+    // TradingView's Astana, which the platform's time zone data calls Almaty.
+    expect(chosen.chart.instrument?.timezone).toBe('Asia/Almaty');
+    exchange.session.dispose();
+    chosen.session.dispose();
+  });
+
+  it('tells the legend where the market is in its day, and again when that changes', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(Date.parse('2026-10-19T13:29:00Z')); // 09:29 New York
+    const { session, legend } = stockSession('5');
+    await session.start();
+    expect(legend.market).toBe('pre');
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(legend.market).toBe('open');
+    session.dispose();
+  });
+
+  it('marks a crypto market open, with no pre/post-market price', async () => {
+    const { session, legend, feed } = setup();
+    await session.start();
+    expect(legend.market).toBe('open');
+    expect(feed.all).toHaveLength(1);
   });
 });

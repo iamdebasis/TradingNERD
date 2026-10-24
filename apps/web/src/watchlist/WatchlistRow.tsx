@@ -1,5 +1,7 @@
 import type { FlagColor, SymbolId } from '@tradingnerd/core';
 import { type DragEvent, type MouseEvent, type Ref, useEffect, useRef, useState } from 'react';
+import { MARKET_STATUS_NAMES } from '../chart/marketStatusNames';
+import { useMarketStatus } from '../chart/useMarketStatus';
 import { CoinLogo } from '../logos/CoinLogo';
 import { FLAG_NAMES, flagStyle } from './flags';
 import { FlagIcon, RemoveIcon } from './icons';
@@ -103,6 +105,9 @@ export function WatchlistRow(props: WatchlistRowProps) {
 
   const unavailable = missing || lookup?.state === 'unavailable';
   const letter = (lookup?.state === 'ready' ? lookup.info.base : ticker).charAt(0);
+  const info = lookup?.state === 'ready' && !unavailable ? lookup.info : null;
+  const status = useMarketStatus(info?.schedule);
+  const delayMinutes = info ? Math.round(info.delayMs / 60_000) : 0;
 
   return (
     <div className={styles.rowWrap} data-flagging={props.flagging || undefined}>
@@ -131,7 +136,28 @@ export function WatchlistRow(props: WatchlistRowProps) {
             letter={letter}
             className={styles.avatar}
           />
-          <span className={styles.ticker}>{ticker}</span>
+          <span className={styles.tickerLine}>
+            <span className={styles.ticker} data-field="ticker">
+              {ticker}
+            </span>
+            {delayMinutes > 0 && (
+              <span
+                className={styles.delayedMark}
+                data-field="delayed"
+                title={`Data is delayed by ${delayMinutes} minutes`}
+              >
+                D
+              </span>
+            )}
+            {info?.schedule && status !== 'open' && (
+              <span
+                className={styles.marketDot}
+                data-field="market"
+                data-market={status}
+                title={MARKET_STATUS_NAMES[status]}
+              />
+            )}
+          </span>
         </span>
         <span className={styles.number}>
           {!unavailable && (

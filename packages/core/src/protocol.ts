@@ -1,5 +1,5 @@
 import { type Bar, type BarsResponse, isSymbolKind, type SymbolInfo } from './market.ts';
-import { parseMarketSchedule } from './schedule.ts';
+import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedule.ts';
 
 /**
  * Wire protocol between the UI and the local gateway.
@@ -9,8 +9,9 @@ import { parseMarketSchedule } from './schedule.ts';
  * 3: tick bars, whose `time` is a bar number and `start` their first trade's time.
  * 4: the `quotes` channel for watchlist rows.
  * 5: US stocks: symbol kinds, time zones, data delays and trading calendars; `needs_key`.
+ * 6: extended hours: bars of a session (`session` on bar requests and subscriptions).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -62,7 +63,15 @@ export type ServerMessage =
 /** Messages the UI sends over the WebSocket. */
 export type ClientMessage =
   | { type: 'ping'; t: number }
-  | { type: 'subscribe'; id: string; channel: 'bars'; symbol: string; resolution: string }
+  | {
+      type: 'subscribe';
+      id: string;
+      channel: 'bars';
+      symbol: string;
+      resolution: string;
+      /** Intraday bars of the regular session (the default) or with pre- and post-market. */
+      session?: SessionHours;
+    }
   | { type: 'subscribe'; id: string; channel: 'book'; symbol: string }
   | { type: 'subscribe'; id: string; channel: 'quotes'; symbol: string }
   | { type: 'unsubscribe'; id: string };
@@ -215,15 +224,16 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'subscribe': {
       if (!isShortString(msg.id) || !isShortString(msg.symbol)) return null;
       if (msg.channel === 'bars') {
-        return isShortString(msg.resolution, 16)
-          ? {
-              type: 'subscribe',
-              id: msg.id,
-              channel: 'bars',
-              symbol: msg.symbol,
-              resolution: msg.resolution,
-            }
-          : null;
+        if (!isShortString(msg.resolution, 16)) return null;
+        if (msg.session !== undefined && !isSessionHours(msg.session)) return null;
+        return {
+          type: 'subscribe',
+          id: msg.id,
+          channel: 'bars',
+          symbol: msg.symbol,
+          resolution: msg.resolution,
+          ...(msg.session ? { session: msg.session } : {}),
+        };
       }
       if (msg.channel === 'book' || msg.channel === 'quotes') {
         return { type: 'subscribe', id: msg.id, channel: msg.channel, symbol: msg.symbol };

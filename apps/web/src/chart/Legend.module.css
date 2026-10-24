@@ -53,40 +53,99 @@
   font-size: 16px;
 }
 
-.status {
-  position: relative;
+/*
+ * TradingView's status pill, measured from its screenshots at 2× (docs/SPEC.md §5.7): 18 px
+ * tall and fully rounded, the market status icon in an 18 px circle, or in a 20 px half beside
+ * the data's (D: delayed). Open is a 10 px dot on a tint of it; pre-market an orange sunrise on
+ * #402B14. The post-market, closed and "D" colors are provisional (§11).
+ */
+.badges {
+  display: inline-flex;
   flex: none;
-  width: 18px;
   height: 18px;
   margin: 0 8px 0 9px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--color-up) 22%, transparent);
+  overflow: hidden;
+  border-radius: 9px;
+  pointer-events: auto;
 }
 
-.status::after {
+.market {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: color-mix(in srgb, var(--color-up) 22%, transparent);
+  color: var(--color-up);
+}
+
+.badges[data-delayed="true"] .market {
+  width: 20px;
+}
+
+.market::after {
   content: "";
   position: absolute;
-  inset: 4px;
+  top: 4px;
+  left: calc(50% - 5px);
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: var(--color-up);
+  background: currentColor;
 }
 
-.legend[data-status="loading"] .status,
-.legend[data-status="reconnecting"] .status {
+.sunrise,
+.moon {
+  display: none;
+}
+
+.badges[data-market="pre"] .market {
+  background: #402b14;
+  color: #ff9100;
+}
+
+.badges[data-market="post"] .market {
+  background: #14243f;
+  color: #2979ff;
+}
+
+.badges[data-market="pre"] .market::after,
+.badges[data-market="post"] .market::after {
+  display: none;
+}
+
+.badges[data-market="pre"] .sunrise,
+.badges[data-market="post"] .moon {
+  display: block;
+}
+
+.badges[data-market="closed"] .market {
+  background: color-mix(in srgb, #9c9c9c 20%, transparent);
+  color: #9c9c9c;
+}
+
+/* While the data isn't live, the connection's state shows instead: gray, or red on an error. */
+.legend[data-status="loading"] .market,
+.legend[data-status="reconnecting"] .market {
   background: color-mix(in srgb, var(--color-text-secondary) 25%, transparent);
+  color: var(--color-text-secondary);
 }
 
-.legend[data-status="loading"] .status::after,
-.legend[data-status="reconnecting"] .status::after {
-  background: var(--color-text-secondary);
-}
-
-.legend[data-status="error"] .status {
+.legend[data-status="error"] .market {
   background: color-mix(in srgb, var(--color-down) 25%, transparent);
+  color: var(--color-down);
 }
 
-.legend[data-status="error"] .status::after {
-  background: var(--color-down);
+.legend:is([data-status="loading"], [data-status="reconnecting"], [data-status="error"])
+  .market::after {
+  display: block;
+}
+
+.legend:is([data-status="loading"], [data-status="reconnecting"], [data-status="error"])
+  :is(.sunrise, .moon) {
+  display: none;
 }
 
 .values {
@@ -174,24 +233,18 @@
   text-align: center;
 }
 
-/*
- * TradingView's "Data is delayed" (D) sign beside the title. Provisional look until measured
- * from a screenshot (docs/SPEC.md §11): a small orange tile with a bold D.
- */
+/* The pill's data half: TradingView's "Data is delayed" D, in the delayed sign's orange. */
 .delayed {
-  display: inline-flex;
+  display: flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 20px;
   height: 18px;
-  margin-right: 8px;
-  border-radius: 4px;
-  background: color-mix(in srgb, #ff9800 22%, transparent);
+  background: #402b14;
   color: #ff9800;
   font-size: 11px;
   font-weight: 700;
-  pointer-events: auto;
 }
 
 .delayed[hidden] {

@@ -26,9 +26,16 @@ import { installKeyboard } from './interaction/keyboard';
 import { installVerticalDrag } from './interaction/verticalDrag';
 import { TimeViewport } from './interaction/viewport';
 import { installWheel, spacingLimits } from './interaction/wheel';
-import { AXIS_LABEL, axisLabelWidth, PRICE_AXIS_MIN_WIDTH } from './plugins/axisLabel';
+import {
+  AXIS_LABEL,
+  axisLabelBox,
+  axisLabelWidth,
+  PRICE_AXIS_MIN_WIDTH,
+} from './plugins/axisLabel';
 import { CrosshairPrimitive } from './plugins/CrosshairPrimitive';
+import { ExtendedPricePrimitive, type ExtendedPriceState } from './plugins/ExtendedPricePrimitive';
 import { LastPricePrimitive } from './plugins/LastPricePrimitive';
+import { SessionShadePrimitive, type SessionShading } from './plugins/SessionShadePrimitive';
 import type { ChartTheme } from './theme';
 import {
   DEFAULT_GESTURE_TUNING,
@@ -55,6 +62,9 @@ export interface ChartInstrument {
   /** How far behind real time its data runs, ms. */
   delayMs?: number;
 }
+
+/** The pre/post-market price line: the price, its "Pre"/"Post" tag and color. */
+export type ExtendedPrice = Omit<ExtendedPriceState, 'text'>;
 
 export interface HoverInfo {
   bar: Bar;
@@ -86,6 +96,10 @@ export interface ChartDebugState {
   paneHeight: number;
   /** The last-price label as drawn on the price axis. */
   lastPriceLabel: { text: string; countdown: string | null; color: string } | null;
+  /** The pre/post-market price line's label, when one shows. */
+  extendedPriceLabel: { text: string; tag: string; color: string } | null;
+  /** The pre/post market background bands drawn last (pane x, CSS px). */
+  sessionBands: readonly { left: number; right: number; color: string }[];
   priceAxisWidth: number;
 }
 
@@ -98,6 +112,9 @@ const toCandle = (bar: Bar, time: number): CandlestickData<Time> => ({
 });
 
 const UTC_ZONES = new Set(['Etc/UTC', 'UTC']);
+
+const extendedLabel = (state: ExtendedPriceState | null) =>
+  state ? { text: state.text, tag: state.tag, color: state.color } : null;
 
 /** Index of the bar opening at `time` in an ascending array, or -1. */
 function indexOfTime(bars: readonly Bar[], time: number): number {
@@ -124,6 +141,8 @@ export class ChartController {
   private readonly options: ChartControllerOptions;
   private readonly font: string;
   private readonly lastPrice: LastPricePrimitive;
+  private readonly extendedPrice: ExtendedPricePrimitive;
+  private readonly sessionShade: SessionShadePrimitive;
   private readonly crosshair: CrosshairPrimitive;
   private readonly cleanups: (() => void)[] = [];
   private readonly viewport: TimeViewport;
@@ -216,8 +235,15 @@ export class ChartController {
     });
 
     const axis = { tickYs: () => this.tickYs(), background: theme.background };
+    this.sessionShade = new SessionShadePrimitive(() => this.bars);
+    this.extendedPrice = new ExtendedPricePrimitive(this.font, theme.labelText, axis, () =>
+      this.lastPriceBox(),
+    );
     this.lastPrice = new LastPricePrimitive(this.font, theme.labelText, axis);
     this.crosshair = new CrosshairPrimitive(theme.crosshairLabel, theme.labelText, this.font, axis);
+    // Drawn in this order: the last price over a pre/post-market price at the same level.
+    this.series.attachPrimitive(this.sessionShade);
+    this.series.attachPrimitive(this.extendedPrice);
     this.series.attachPrimitive(this.lastPrice);
     this.series.attachPrimitive(this.crosshair);
 
@@ -332,6 +358,19 @@ export class ChartController {
     return this.bars[0]?.time ?? null;
   }
 
+  /**
+   * TradingView's pre/post market hours background, for a chart showing extended hours:
+   * which bars are pre- or post-market and their colors. Null hides it.
+   */
+  setSessionShading(shading: SessionShading | null): void {
+    this.sessionShade.update(shading);
+  }
+
+  /** TradingView's pre/post-market price line, for a chart showing regular hours; null hides it. */
+  setExtendedPrice(price: ExtendedPrice | null): void {
+    this.extendedPrice.update(price ? { ...price, text: this.format(price.price) } : null);
+  }
+
   /** The latest bar and the one before it, for the legend when nothing is hovered. */
   latest(): { bar: Bar; previous: Bar | null } | null {
     const bar = this.bars.at(-1);
@@ -399,6 +438,8 @@ export class ChartController {
       paneWidth: pane.width,
       paneHeight: pane.height,
       lastPriceLabel: this.lastPrice.current(),
+      extendedPriceLabel: extendedLabel(this.extendedPrice.current()),
+      sessionBands: this.sessionShade.drawnBands(),
       priceAxisWidth: this.chart.priceScale('right').width(),
     };
   }
@@ -529,6 +570,15 @@ export class ChartController {
       color: last.close >= last.open ? this.theme.up : this.theme.down,
     });
     this.fitPriceAxis(text, countdown);
+  }
+
+  /** The last price's label on the axis (pane y), as LastPricePrimitive draws it. */
+  private lastPriceBox(): { top: number; bottom: number; price: number } | null {
+    const last = this.lastPrice.current();
+    const y = last ? this.series.priceToCoordinate(last.price) : null;
+    if (!last || y === null) return null;
+    const { top, heights } = axisLabelBox(y, last.countdown ? 2 : 1, AXIS_LABEL.priceRowHeight);
+    return { top, bottom: top + heights.reduce((sum, h) => sum + h, 0), price: last.price };
   }
 
   /** Widens the price axis so our labels fit, like TradingView's axis does. */

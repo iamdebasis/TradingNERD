@@ -3,12 +3,14 @@ import {
   DELAYED_SIP_MS,
   type MarketSchedule,
   type Resolution,
+  type SessionHours,
   type SipAccess,
   type StockKeyStatus,
   sessionClock,
 } from '@tradingnerd/core';
 import { MarketError } from '../market/types.ts';
 import { maskKey, type SecretStore } from '../storage/secrets.ts';
+import { AlpacaStream } from './AlpacaStream.ts';
 import { AlpacaClient, type AlpacaKey } from './alpaca.ts';
 import { US_EXCHANGES } from './listings.ts';
 import { MarketCalendar } from './MarketCalendar.ts';
@@ -30,6 +32,10 @@ export interface UsStocksMarketOptions {
   fetch?: typeof fetch;
   dataUrl?: string | undefined;
   tradingUrls?: readonly string[] | undefined;
+  /** Alpaca's market data stream (its host; tests point it elsewhere). */
+  streamUrl?: string | undefined;
+  /** Symbols streamed at once (the free plan's 30 when absent). */
+  streamSymbols?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   onWarning?: (message: string) => void;
@@ -38,22 +44,27 @@ export interface UsStocksMarketOptions {
 /**
  * US stocks and ETFs from Alpaca (docs/SPEC.md §5.7): what the exchange adapters (NASDAQ,
  * NYSE, AMEX, CBOE, …) share. The user's key and how its plan serves the whole market, the
- * trading calendar, the live minute poller, and the listings' ranking and data availability.
+ * trading calendar, the live minute poller, the trade and quote stream, and the listings'
+ * ranking and data availability.
  */
 export class UsStocksMarket {
   readonly client: AlpacaClient;
   readonly calendar: MarketCalendar;
   readonly poller: MinutePoller;
+  /** Trades between the minute bars, and the best bid and ask (the legend's Sell and Buy). */
+  readonly stream: AlpacaStream;
   readonly listings: UsListings;
   /** Regular-hours bars on the current calendar: one object, so feeds can keep it. */
   readonly clock: BarClock;
+  /** Intraday bars from the pre-market open to the post-market close, likewise. */
+  readonly extendedClock: BarClock;
   private readonly secrets: SecretStore;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly warn: (message: string) => void;
   private sip: SipAccess | null = null;
   private readonly adapters: UsStockExchange[];
-  private clocks = new WeakMap<MarketSchedule, BarClock>();
+  private clocks = new WeakMap<MarketSchedule, Record<SessionHours, BarClock>>();
   private prepared: Promise<void> | null = null;
   private universe: Promise<void> | null = null;
   /** The session close the ranking was last taken after. */
@@ -83,19 +94,20 @@ export class UsStocksMarket {
       now: this.now,
       onWarning: this.warn,
     });
-    const current = () => this.currentClock();
-    this.clock = {
-      continuous: false,
-      open: (resolution, ms) => current().open(resolution, ms),
-      close: (resolution, openMs) => current().close(resolution, openMs),
-      next: (resolution, openMs) => current().next(resolution, openMs),
-      nestsIn: (base, target) => current().nestsIn(base, target),
-      isOpen: (ms) => current().isOpen(ms),
-    };
+    this.clock = this.followingCalendar('regular');
+    this.extendedClock = this.followingCalendar('extended');
     this.poller = new MinutePoller({
       client: this.client,
-      clock: current,
+      clock: (hours) => this.currentClock(hours),
+      schedule: () => this.calendar.schedule(),
       now: this.now,
+      onWarning: this.warn,
+    });
+    this.stream = new AlpacaStream({
+      url: options.streamUrl,
+      key: () => this.key(),
+      sip: () => this.sip,
+      ...(options.streamSymbols ? { maxSymbols: options.streamSymbols } : {}),
       onWarning: this.warn,
     });
     this.adapters = US_EXCHANGES.map((exchange) => new UsStockExchange(this, exchange));
@@ -104,6 +116,11 @@ export class UsStocksMarket {
   /** One adapter per US exchange code. */
   exchanges(): readonly UsStockExchange[] {
     return this.adapters;
+  }
+
+  /** The bars of a session's hours (day and longer bars are the regular sessions either way). */
+  clockFor(hours: SessionHours): BarClock {
+    return hours === 'extended' ? this.extendedClock : this.clock;
   }
 
   /** How far behind real time the data runs: 15 minutes on the free plan. */
@@ -161,6 +178,7 @@ export class UsStocksMarket {
       this.warn(`Couldn't load the US calendar (${String(error)})`);
     });
     this.refreshUniverse();
+    this.stream.restart();
     void this.poller.pollNow();
     return this.status();
   }
@@ -174,6 +192,7 @@ export class UsStocksMarket {
     }
     await this.secrets.removeAlpaca();
     this.sip = null;
+    this.stream.restart();
     return this.status();
   }
 
@@ -182,6 +201,7 @@ export class UsStocksMarket {
     this.closed = true;
     clearInterval(this.universeTimer);
     this.poller.close();
+    this.stream.close();
     this.listings.close();
   }
 
@@ -210,14 +230,27 @@ export class UsStocksMarket {
     return stored ? { keyId: stored.keyId, secret: stored.secret } : null;
   }
 
-  private currentClock(): BarClock {
+  private currentClock(hours: SessionHours): BarClock {
     const schedule = this.calendar.schedule();
-    let clock = this.clocks.get(schedule);
-    if (!clock) {
-      clock = sessionClock(schedule);
-      this.clocks.set(schedule, clock);
+    let clocks = this.clocks.get(schedule);
+    if (!clocks) {
+      clocks = { regular: sessionClock(schedule), extended: sessionClock(schedule, 'extended') };
+      this.clocks.set(schedule, clocks);
     }
-    return clock;
+    return clocks[hours];
+  }
+
+  /** A clock that always follows the current calendar (it may arrive after a feed starts). */
+  private followingCalendar(hours: SessionHours): BarClock {
+    const current = () => this.currentClock(hours);
+    return {
+      continuous: false,
+      open: (resolution, ms) => current().open(resolution, ms),
+      close: (resolution, openMs) => current().close(resolution, openMs),
+      next: (resolution, openMs) => current().next(resolution, openMs),
+      nestsIn: (base, target) => current().nestsIn(base, target),
+      isOpen: (ms) => current().isOpen(ms),
+    };
   }
 
   /** Alpaca's symbol list and the last session's traded values, once per session. */
@@ -233,7 +266,7 @@ export class UsStocksMarket {
   private async updateUniverse(): Promise<void> {
     if (!(await this.key())) return;
     await this.listings.start();
-    const clock = this.currentClock();
+    const clock = this.currentClock('regular');
     const available = this.client.latestAvailable();
     let session = clock.open(DAY, available);
     let close = clock.close(DAY, session);

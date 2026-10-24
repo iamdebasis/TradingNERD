@@ -70,6 +70,9 @@ export class LiveBarAggregator {
 
   applyTrade(trade: Trade): BarChange[] {
     if (!this.bar) return []; // nothing to build on until a snapshot arrives
+    // Outside the bars' hours (a stock's post-market for regular-session bars) a trade belongs
+    // to no bar, so it mustn't move the last one.
+    if (!this.clock.isOpen(trade.time)) return [];
     const openMs = this.clock.open(this.resolution, trade.time);
     const currentMs = this.bar.time * 1000;
     if (openMs < currentMs) return []; // late trade for an earlier bar; its final snapshot fixes it

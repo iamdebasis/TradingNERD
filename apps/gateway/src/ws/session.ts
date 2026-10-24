@@ -64,10 +64,15 @@ export function attachSession(
         let unsubscribe: Unsubscribe;
         switch (message.channel) {
           case 'bars':
-            unsubscribe = market.subscribeBars(message.symbol, message.resolution, {
-              ...handlers,
-              onBar: (bar, historical) => send({ type: 'bar', id, bar, historical }),
-            });
+            unsubscribe = market.subscribeBars(
+              message.symbol,
+              message.resolution,
+              {
+                ...handlers,
+                onBar: (bar, historical) => send({ type: 'bar', id, bar, historical }),
+              },
+              message.session,
+            );
             break;
           case 'book':
             unsubscribe = market.subscribeBook(message.symbol, {

@@ -15,6 +15,7 @@ import {
   parseWatchlist,
   SEARCH_PAGE_SIZE,
   type SearchCategory,
+  type SessionHours,
   type StockKeyStatus,
   type SymbolInfo,
   type SymbolKind,
@@ -260,6 +261,9 @@ export const STOCK_NOW = Date.parse('2026-10-19T15:00:05Z');
 export const STOCK_DELAY_MS = 15 * 60_000;
 export const NYSE = new MarketSchedule(NYSE_2026);
 export const STOCK_CLOCK = sessionClock(NYSE);
+export const STOCK_EXTENDED_CLOCK = sessionClock(NYSE, 'extended');
+/** 08:30:05 New York on Monday 2026-10-19: pre-market. */
+export const PRE_MARKET_NOW = Date.parse('2026-10-19T12:30:05Z');
 
 export const MOCK_STOCK_EXCHANGES: ExchangeSummary[] = [
   { id: 'NASDAQ', name: 'NASDAQ', live: true, market: 'stocks' },
@@ -325,28 +329,35 @@ export function stockInfoFor(symbol: string): SymbolInfo | null {
     resolutions: ['1', '5', '15', '30', '1D'],
     timezone: 'America/New_York',
     delayMs: STOCK_DELAY_MS,
-    hasBook: false,
+    hasBook: true,
     schedule: NYSE_2026,
   };
 }
 
 /**
- * `count` bars of a stock on the NYSE's regular sessions, ending with the bar 15 minutes before
- * STOCK_NOW: a walk around 230.
+ * `count` bars of a stock on the NYSE's sessions (intraday ones with pre- and post-market for
+ * the extended session), ending with the bar 15 minutes before `now`: a walk around 230.
  */
-export function makeStockBars(resolution: string, count = 1_500): Bar[] {
+export function makeStockBars(
+  resolution: string,
+  count = 1_500,
+  session: SessionHours = 'regular',
+  now = STOCK_NOW,
+): Bar[] {
   const parsed = parseResolution(resolution);
   if (!parsed || parsed.unit === 'tick' || parsed.unit === 'second') {
     throw new Error(`No mock stock bars for ${resolution}`);
   }
+  const clock = session === 'extended' ? STOCK_EXTENDED_CLOCK : STOCK_CLOCK;
   const times: number[] = [];
-  let open = STOCK_CLOCK.open(parsed, STOCK_NOW - STOCK_DELAY_MS);
+  let open = clock.open(parsed, now - STOCK_DELAY_MS);
   while (times.length < count && open > Date.UTC(2026, 0, 2)) {
     times.unshift(open / 1000);
-    open = STOCK_CLOCK.open(parsed, open - 1);
+    open = clock.open(parsed, open - 1);
   }
   const random = mulberry32(11);
-  let close = 230;
+  // Extended hours a little higher, so a pre/post-market price differs from the close.
+  let close = session === 'extended' ? 230.5 : 230;
   return times.map((time) => {
     const start = close;
     close = Math.round(start * (1 + (random() - 0.5) * 0.004) * 100) / 100;
@@ -414,6 +425,8 @@ export interface MockMarket {
   readonly liveExchanges: Set<string>;
   /** What GET /api/stocks/key answers; by default a free-plan key is set. */
   stockKey: StockKeyStatus;
+  /** When the stocks' history ends, 15 minutes before it (STOCK_NOW unless a test moves it). */
+  stockNow: number;
   /** Every key the page sent to PUT /api/stocks/key. */
   readonly savedStockKeys: { keyId: string; secret: string }[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
@@ -452,6 +465,7 @@ class MockGateway implements MockMarket {
     sip: 'delayed',
   };
   readonly savedStockKeys: { keyId: string; secret: string }[] = [];
+  stockNow = STOCK_NOW;
   readonly searchRequests: URLSearchParams[] = [];
   readonly liveExchanges = new Set(MOCK_EXCHANGES.map((exchange) => exchange.id));
   readonly watchlistSaves: Watchlist[] = [];
@@ -560,7 +574,10 @@ class MockGateway implements MockMarket {
       const countBack = Number(params.get('countBack') ?? 300);
       const symbol = params.get('symbol') ?? '';
       const resolution = params.get('resolution') ?? '1D';
-      const bars = stockInfoFor(symbol) ? this.stockBarsFor(resolution) : this.barsFor(resolution);
+      const session = params.get('session') === 'extended' ? 'extended' : 'regular';
+      const bars = stockInfoFor(symbol)
+        ? this.stockBarsFor(resolution, session)
+        : this.barsFor(resolution);
       const eligible = bars.filter((bar) => to === null || bar.time < Number(to));
       return route.fulfill({
         json: { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack },
@@ -595,12 +612,13 @@ class MockGateway implements MockMarket {
     await this.page.routeWebSocket(/\/ws$/, (socket) => this.accept(socket));
   }
 
-  /** The history this mock serves a stock for an interval. */
-  stockBarsFor(resolution: string): Bar[] {
-    let bars = this.stockSeries.get(resolution);
+  /** The history this mock serves a stock for an interval and session. */
+  stockBarsFor(resolution: string, session: SessionHours = 'regular'): Bar[] {
+    const key = `${resolution}|${session}|${this.stockNow}`;
+    let bars = this.stockSeries.get(key);
     if (!bars) {
-      bars = makeStockBars(resolution);
-      this.stockSeries.set(resolution, bars);
+      bars = makeStockBars(resolution, 1_500, session, this.stockNow);
+      this.stockSeries.set(key, bars);
     }
     return bars;
   }
@@ -737,6 +755,7 @@ class MockGateway implements MockMarket {
         channel: string;
         symbol: string;
         resolution?: string;
+        session?: SessionHours;
       };
       if (message.type === 'subscribe') {
         this.subscriptions.set(message.id, { channel: message.channel, symbol: message.symbol });
@@ -771,7 +790,9 @@ class MockGateway implements MockMarket {
         }
         const resolution = message.resolution ?? '1D';
         if (message.channel === 'bars') this.barSubscriptions.push([message.id, resolution]);
-        const last = (isStock ? this.stockBarsFor(resolution) : this.barsFor(resolution)).at(-1);
+        const last = (
+          isStock ? this.stockBarsFor(resolution, message.session) : this.barsFor(resolution)
+        ).at(-1);
         if (message.channel === 'bars' && last) {
           socket.send(
             JSON.stringify({ type: 'bar', id: message.id, bar: last, historical: false }),
@@ -840,6 +861,8 @@ export interface ChartState {
   paneWidth: number;
   paneHeight: number;
   lastPriceLabel: { text: string; countdown: string | null; color: string } | null;
+  extendedPriceLabel: { text: string; tag: string; color: string } | null;
+  sessionBands: { left: number; right: number; color: string }[];
   priceAxisWidth: number;
 }
 

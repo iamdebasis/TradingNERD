@@ -1,18 +1,20 @@
 import { formatPrice, formatSignedPercent, formatSignedPrice } from '@tradingnerd/chart';
-import { resolutionLabel } from '@tradingnerd/core';
+import { type MarketStatus, resolutionLabel } from '@tradingnerd/core';
 import { type Ref, useImperativeHandle, useRef, useState } from 'react';
 import { CoinLogo } from '../logos/CoinLogo';
 import type { LegendView } from './ChartSession';
 import styles from './Legend.module.css';
+import { MoonIcon, SunriseIcon } from './marketIcons';
+import { MARKET_STATUS_NAMES } from './marketStatusNames';
 
 const setText = (element: HTMLElement | null, text: string) => {
   if (element && element.textContent !== text) element.textContent = text;
 };
 
 /**
- * The chart's top-left overlay: symbol title, live-data dot, OHLC of the hovered bar with its
- * change, and the Sell / spread / Buy quote. Updated imperatively by ChartSession, so cursor
- * moves and live ticks never re-render React.
+ * The chart's top-left overlay: symbol title, the market status and data pill, OHLC of the
+ * hovered bar with its change, and the Sell / spread / Buy quote. Updated imperatively by
+ * ChartSession, so cursor moves and live ticks never re-render React.
  */
 export function Legend({ ref }: { ref: Ref<LegendView> }) {
   const root = useRef<HTMLDivElement>(null);
@@ -28,6 +30,8 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
   const ask = useRef<HTMLSpanElement>(null);
   const spread = useRef<HTMLSpanElement>(null);
   const message = useRef<HTMLDivElement>(null);
+  const badges = useRef<HTMLSpanElement>(null);
+  const market = useRef<HTMLSpanElement>(null);
   const delayed = useRef<HTMLSpanElement>(null);
   const precision = useRef(2);
 
@@ -50,6 +54,14 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
           const text = `Data is delayed by ${minutes} minutes`;
           delayed.current.title = text;
           delayed.current.setAttribute('aria-label', text);
+        }
+        if (badges.current) badges.current.dataset.delayed = String(info.delayMs > 0);
+      },
+      setMarketStatus(status: MarketStatus) {
+        if (badges.current) badges.current.dataset.market = status;
+        if (market.current) {
+          market.current.title = MARKET_STATUS_NAMES[status];
+          market.current.setAttribute('aria-label', MARKET_STATUS_NAMES[status]);
         }
       },
       showBar(bar, previous) {
@@ -105,9 +117,27 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
           <span className={styles.logo} aria-hidden="true" />
         )}
         <span ref={title} className={styles.title} data-field="title" />
-        <span className={styles.status} data-field="status" />
-        <span ref={delayed} className={styles.delayed} data-field="delayed" role="img" hidden>
-          D
+        {/* TradingView's pill: the market status icon, then the data's (D: delayed). */}
+        <span
+          ref={badges}
+          className={styles.badges}
+          data-field="status"
+          data-market="open"
+          data-delayed="false"
+        >
+          <span
+            ref={market}
+            className={styles.market}
+            role="img"
+            aria-label={MARKET_STATUS_NAMES.open}
+            title={MARKET_STATUS_NAMES.open}
+          >
+            <SunriseIcon className={styles.sunrise} />
+            <MoonIcon className={styles.moon} />
+          </span>
+          <span ref={delayed} className={styles.delayed} data-field="delayed" role="img" hidden>
+            D
+          </span>
         </span>
         <span className={styles.values}>
           <span className={styles.key}>O</span>

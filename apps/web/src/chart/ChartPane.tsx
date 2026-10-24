@@ -1,4 +1,5 @@
 import { ChartController } from '@tradingnerd/chart';
+import type { SymbolInfo } from '@tradingnerd/core';
 import { useEffect, useRef, useState } from 'react';
 import { marketApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
@@ -7,6 +8,7 @@ import { useStockKeys } from '../stocks/stockKeys';
 import { darkTheme } from '../theme/tokens';
 import styles from './ChartPane.module.css';
 import { ChartSession, type LegendView } from './ChartSession';
+import { chartSettings, useChartSettings } from './chartSettings';
 import { toChartTheme } from './chartTheme';
 import { Legend } from './Legend';
 
@@ -23,7 +25,16 @@ declare global {
  * The chart panel. One chart lives as long as the pane; each symbol or interval gets its own
  * session on it, so switching interval swaps the data without rebuilding the chart.
  */
-export function ChartPane({ symbol, resolution }: { symbol: string; resolution: string }) {
+export function ChartPane({
+  symbol,
+  resolution,
+  onInfo,
+}: {
+  symbol: string;
+  resolution: string;
+  /** The chart's symbol, once resolved (Chart settings shows its fields). */
+  onInfo?: (info: SymbolInfo) => void;
+}) {
   const gateway = useGateway();
   const container = useRef<HTMLDivElement>(null);
   const legend = useRef<LegendView>(null);
@@ -31,6 +42,10 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
   const [chart, setChart] = useState<ChartController | null>(null);
   // A saved Alpaca key starts the session over, so a stock waiting for it loads.
   const { version: stockKeyVersion, prompt: promptStockKey } = useStockKeys();
+  // A new session or time zone loads the chart again; new background colors don't.
+  const settings = useChartSettings();
+  const onInfoRef = useRef(onInfo);
+  onInfoRef.current = onInfo;
 
   useEffect(() => {
     if (!container.current) return;
@@ -55,7 +70,7 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
     };
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new key restarts the session
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new key, session or time zone restarts the session
   useEffect(() => {
     if (!chart || !legend.current) return;
     const current = new ChartSession({
@@ -65,6 +80,8 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
       legend: legend.current,
       symbol,
       resolution,
+      settings: chartSettings.get(),
+      onInfo: (info) => onInfoRef.current?.(info),
       onError: (code) => {
         if (code === 'needs_key') promptStockKey();
       },
@@ -75,7 +92,20 @@ export function ChartPane({ symbol, resolution }: { symbol: string; resolution: 
       current.dispose();
       if (session.current === current) session.current = null;
     };
-  }, [chart, gateway, symbol, resolution, stockKeyVersion, promptStockKey]);
+  }, [
+    chart,
+    gateway,
+    symbol,
+    resolution,
+    stockKeyVersion,
+    promptStockKey,
+    settings.session,
+    settings.timezone,
+  ]);
+
+  useEffect(() => {
+    session.current?.setBackgrounds(settings.preMarketBackground, settings.postMarketBackground);
+  }, [settings.preMarketBackground, settings.postMarketBackground]);
 
   return (
     <div className={styles.pane}>

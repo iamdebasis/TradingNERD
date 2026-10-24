@@ -1,4 +1,4 @@
-import { API_PREFIX } from '@tradingnerd/core';
+import { API_PREFIX, isSessionHours, type SessionHours } from '@tradingnerd/core';
 import type { FastifyInstance } from 'fastify';
 import type { MarketService } from '../market/MarketService.ts';
 import { MarketError } from '../market/types.ts';
@@ -17,8 +17,19 @@ export function registerMarketRoutes(app: FastifyInstance, market: MarketService
     const resolution = requiredString(query, 'resolution');
     const to = optionalInteger(query, 'to', 1, Number.MAX_SAFE_INTEGER);
     const countBack = optionalInteger(query, 'countBack', 1, Number.MAX_SAFE_INTEGER);
-    return market.getBars(symbol, resolution, to, countBack ?? DEFAULT_COUNT_BACK);
+    const session = optionalSession(query);
+    return market.getBars(symbol, resolution, to, countBack ?? DEFAULT_COUNT_BACK, session);
   });
+}
+
+/** `session=extended` asks for intraday bars with pre- and post-market (regular by default). */
+function optionalSession(query: Record<string, unknown>): SessionHours {
+  const value = query.session;
+  if (value === undefined) return 'regular';
+  if (!isSessionHours(value)) {
+    throw new MarketError('bad_request', 'Query parameter "session" must be regular or extended');
+  }
+  return value;
 }
 
 function requiredString(query: Record<string, unknown>, name: string): string {

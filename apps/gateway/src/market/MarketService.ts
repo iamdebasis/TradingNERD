@@ -4,6 +4,7 @@ import {
   type BarClock,
   type BarsResponse,
   formatResolution,
+  isIntraday,
   maxBasePerBar,
   parseResolution,
   parseSymbolId,
@@ -11,6 +12,7 @@ import {
   resampleBars,
   resampleBase,
   resolutionLabel,
+  type SessionHours,
   type StreamState,
   type SymbolInfo,
   UTC_CLOCK,
@@ -99,13 +101,15 @@ export class MarketService {
   /**
    * Up to `countBack` bars that open strictly before `toSec` (UTC seconds), or the latest bars
    * when `toSec` is null. Pages through the exchange as needed; recent pages are kept, so going
-   * back to a chart is instant (historyCache.ts).
+   * back to a chart is instant (historyCache.ts). `session`: intraday bars of the regular
+   * session, or with pre- and post-market where the exchange has them.
    */
   async getBars(
     symbolId: string,
     resolutionText: string,
     toSec: number | null,
     countBack: number,
+    session: SessionHours = 'regular',
   ): Promise<BarsResponse> {
     if (!Number.isInteger(countBack) || countBack < 1 || countBack > MAX_COUNT_BACK) {
       throw new MarketError(
@@ -119,13 +123,21 @@ export class MarketService {
     switch (plan.kind) {
       case 'native':
       case 'resampled': {
+        const hours = sessionOf(adapter, plan.target, session);
         const load = (to: number | null, count: number) =>
           plan.kind === 'native'
-            ? fetchHistory(adapter, ticker, plan.target, to === null ? null : to * 1000, count)
-            : getResampledBars(adapter, ticker, plan.target, plan.base, to, count);
+            ? fetchHistory(
+                adapter,
+                ticker,
+                plan.target,
+                to === null ? null : to * 1000,
+                count,
+                hours,
+              )
+            : getResampledBars(adapter, ticker, plan.target, plan.base, to, count, hours);
         if (!this.history) return load(toSec, countBack);
-        const page = `${id}|${formatResolution(plan.target)}|${countBack}`;
-        const time = marketTime(adapter);
+        const page = `${id}|${formatResolution(plan.target)}|${hours}|${countBack}`;
+        const time = marketTime(adapter, hours);
         return toSec === null
           ? this.history.latest(page, plan.target, countBack, (count) => load(null, count), time)
           : this.history.older(`${page}|${toSec}`, plan.target, () => load(toSec, countBack), time);
@@ -136,20 +148,28 @@ export class MarketService {
     }
   }
 
-  subscribeBars(symbolId: string, resolutionText: string, listener: BarListener): Unsubscribe {
+  /** Live bars; `session` as for getBars. */
+  subscribeBars(
+    symbolId: string,
+    resolutionText: string,
+    listener: BarListener,
+    session: SessionHours = 'regular',
+  ): Unsubscribe {
     let feed: BarFeed<unknown>;
     try {
       const { adapter, ticker, id } = this.route(symbolId);
       const plan = intervalPlan(adapter, resolutionText);
-      const key = `${id}|${formatResolution(plan.target)}`;
+      const hours = sessionOf(adapter, plan.target, session);
+      const key = `${id}|${formatResolution(plan.target)}|${hours}`;
       const existing = this.barFeeds.get(key);
       if (existing) {
         feed = existing;
       } else {
-        const strategy = liveStrategy(adapter, ticker, plan) as LiveStrategy<unknown>;
+        const strategy = liveStrategy(adapter, ticker, plan, hours) as LiveStrategy<unknown>;
         feed = new BarFeed(
           adapter,
           ticker,
+          hours,
           strategy,
           this.emitIntervalMs,
           this.retryDelayMs,
@@ -246,9 +266,25 @@ export class MarketService {
 
 const sameResolution = (a: Resolution, b: Resolution) => a.unit === b.unit && a.count === b.count;
 
-const clockOf = (adapter: ExchangeAdapter): BarClock => adapter.clock ?? UTC_CLOCK;
-const marketTime = (adapter: ExchangeAdapter): MarketTime => ({
-  clock: clockOf(adapter),
+/**
+ * The session a request's bars follow: extended hours only for intraday intervals of an
+ * exchange that has them. Day and longer bars always cover the regular sessions, as on
+ * TradingView, so they share the regular feed and history pages.
+ */
+function sessionOf(
+  adapter: ExchangeAdapter,
+  target: Resolution,
+  requested: SessionHours,
+): SessionHours {
+  return requested === 'extended' && adapter.clockFor && isIntraday(target)
+    ? 'extended'
+    : 'regular';
+}
+
+const clockOf = (adapter: ExchangeAdapter, hours: SessionHours = 'regular'): BarClock =>
+  (hours === 'extended' ? adapter.clockFor?.('extended') : undefined) ?? adapter.clock ?? UTC_CLOCK;
+const marketTime = (adapter: ExchangeAdapter, hours: SessionHours): MarketTime => ({
+  clock: clockOf(adapter, hours),
   delayMs: adapter.delayMs ?? 0,
 });
 
@@ -286,14 +322,15 @@ async function getResampledBars(
   base: Resolution,
   toSec: number | null,
   countBack: number,
+  hours: SessionHours,
 ): Promise<BarsResponse> {
-  const clock = clockOf(adapter);
+  const clock = clockOf(adapter, hours);
   const perBar = maxBasePerBar(base, target);
   const endMs = toSec === null ? null : periodEnd(clock, target, toSec * 1000);
   const count = (countBack + 1) * perBar;
   const history = clock.continuous
-    ? await fetchSlices(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS)
-    : await pageBack(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS);
+    ? await fetchSlices(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS, hours)
+    : await pageBack(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS, hours);
   let bars = resampleBars(history.bars, target, clock);
   const firstBase = history.bars[0];
   if (history.hasMore && firstBase && bars[0] && firstBase.time > bars[0].time) {
@@ -333,6 +370,7 @@ function liveStrategy(
   adapter: ExchangeAdapter,
   ticker: string,
   plan: IntervalPlan,
+  hours: SessionHours,
 ): LiveStrategy<Bar[]> | LiveStrategy<AggTrade[]> {
   if (plan.kind === 'ticks') {
     const { source } = plan;
@@ -350,7 +388,7 @@ function liveStrategy(
   }
   const { target } = plan;
   const base = plan.kind === 'resampled' ? plan.base : null;
-  const clock = clockOf(adapter);
+  const clock = clockOf(adapter, hours);
   const live = base
     ? new ResampledBarAggregator(target, base, clock)
     : nativeLiveBars(target, clock);
@@ -359,8 +397,16 @@ function liveStrategy(
     // A resampled interval needs every base bar of its current period.
     fetchSeed: () =>
       base
-        ? pageBack(adapter, ticker, base, null, maxBasePerBar(base, target)).then((h) => h.bars)
-        : adapter.fetchBars(ticker, target, null, 1),
+        ? pageBack(
+            adapter,
+            ticker,
+            base,
+            null,
+            maxBasePerBar(base, target),
+            Number.POSITIVE_INFINITY,
+            hours,
+          ).then((h) => h.bars)
+        : adapter.fetchBars(ticker, target, null, 1, hours),
     seed: (seed) => live.seed(seed),
     applyCandle: (update) => live.applyCandle(update),
     applyTrade: (trade) => live.applyTrade(trade),
@@ -409,6 +455,7 @@ class BarEmitter {
 class BarFeed<Seed> extends Feed<BarListener> {
   private readonly adapter: ExchangeAdapter;
   private readonly ticker: string;
+  private readonly hours: SessionHours;
   private readonly strategy: LiveStrategy<Seed>;
   private readonly retryDelayMs: (attempt: number) => number;
   private readonly emitter: BarEmitter;
@@ -422,6 +469,7 @@ class BarFeed<Seed> extends Feed<BarListener> {
   constructor(
     adapter: ExchangeAdapter,
     ticker: string,
+    hours: SessionHours,
     strategy: LiveStrategy<Seed>,
     emitIntervalMs: number,
     retryDelayMs: (attempt: number) => number,
@@ -430,6 +478,7 @@ class BarFeed<Seed> extends Feed<BarListener> {
     super(onDispose);
     this.adapter = adapter;
     this.ticker = ticker;
+    this.hours = hours;
     this.strategy = strategy;
     this.retryDelayMs = retryDelayMs;
     this.emitter = new BarEmitter(emitIntervalMs, (bar, historical) =>
@@ -458,8 +507,11 @@ class BarFeed<Seed> extends Feed<BarListener> {
     );
     if (candles) {
       this.unsubscribes.push(
-        this.adapter.subscribeCandles(this.ticker, candles, (update) =>
-          this.apply(this.strategy.applyCandle(update)),
+        this.adapter.subscribeCandles(
+          this.ticker,
+          candles,
+          (update) => this.apply(this.strategy.applyCandle(update)),
+          this.hours,
         ),
       );
     }

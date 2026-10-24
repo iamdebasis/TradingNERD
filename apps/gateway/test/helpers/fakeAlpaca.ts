@@ -5,7 +5,8 @@ import { NYSE_2026 } from '@tradingnerd/core/testing';
  * A fake Alpaca on the free plan, for tests: minute bars of each symbol in extended hours
  * (04:00–20:00 New York) on the NYSE's 2026 trading days from `dataFrom`, Alpaca's 5, 15
  * and 30-minute and daily bars built from them, the calendar and the asset list. Like the free
- * plan, it refuses whole-market requests reaching into the last 15 minutes.
+ * plan, it refuses whole-market requests reaching into the last 15 minutes; like Alpaca, it
+ * hands back a bar that opens by a request's end whole, with minutes from after that end.
  */
 
 const MINUTE = 60_000;
@@ -147,8 +148,9 @@ export function createFakeAlpaca(options: FakeAlpacaOptions) {
     const all: [string, Bar][] = [];
     for (const symbol of (params.get('symbols') ?? '').split(',')) {
       if (!symbols.has(symbol)) continue;
-      // Bars whose minutes are all in by `end` (Alpaca aggregates what it has).
-      const bars = aggregate(minutes(symbol, end + 1), timeframe).filter(
+      // Bars opening by `end`, each whole: a bar still forming at `end` comes back with every
+      // minute there is so far, even those after `end`, as Alpaca's do.
+      const bars = aggregate(minutes(symbol, options.now()), timeframe).filter(
         (bar) => bar.time * 1000 >= start && bar.time * 1000 <= end,
       );
       if (sort === 'desc') bars.reverse();

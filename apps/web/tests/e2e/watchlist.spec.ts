@@ -574,7 +574,10 @@ test('a symbol the exchange does not list shows in red, without prices', async (
   };
   await openChart(page);
   await expect(row(page, 'XCHUSDT')).toHaveAttribute('data-unavailable', 'true');
-  await expect(row(page, 'XCHUSDT').locator('span').nth(2)).toHaveCSS('color', 'rgb(247, 82, 95)');
+  await expect(row(page, 'XCHUSDT').locator('[data-field="ticker"]')).toHaveCSS(
+    'color',
+    'rgb(247, 82, 95)',
+  );
   await expect(row(page, 'XCHUSDT')).toHaveText(/^XXCHUSDT$/);
 });
 

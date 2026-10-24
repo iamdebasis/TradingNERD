@@ -3,7 +3,7 @@ import { GesturesPopup } from '../gestures/GesturesPopup';
 import { isChanged, useGestureSettings } from '../gestures/gestureSettings';
 import { AddIntervalDialog } from './AddIntervalDialog';
 import { IntervalMenu } from './IntervalMenu';
-import { CandlesIcon, ChevronDownIcon, GesturesIcon } from './icons';
+import { CandlesIcon, ChevronDownIcon, GesturesIcon, SettingsIcon } from './icons';
 import {
   addCustom,
   menuSections,
@@ -23,13 +23,22 @@ export interface ToolbarProps {
   onIntervalChange(interval: string): void;
   /** The symbol pill was pressed: open symbol search. */
   onSymbolSearch(): void;
+  /** The settings button was pressed: open Chart settings. */
+  onSettings(): void;
 }
 
 /**
  * TradingView's top bar, v1 slice: the symbol pill, the favorite intervals and the interval
- * menu (docs/reference/02-toolbar.png and 03-interval-menu.png), then our own Gestures button.
+ * menu (docs/reference/02-toolbar.png and 03-interval-menu.png), then our own Gestures button,
+ * and at the right TradingView's Settings button, which opens Chart settings.
  */
-export function Toolbar({ symbol, interval, onIntervalChange, onSymbolSearch }: ToolbarProps) {
+export function Toolbar({
+  symbol,
+  interval,
+  onIntervalChange,
+  onSymbolSearch,
+  onSettings,
+}: ToolbarProps) {
   const [prefs, setPrefs] = useIntervalPrefs();
   const [menuOpen, setMenuOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -101,6 +110,15 @@ export function Toolbar({ symbol, interval, onIntervalChange, onSymbolSearch }: 
       {gesturesOpen && (
         <GesturesPopup anchor={gesturesButton} onClose={() => setGesturesOpen(false)} />
       )}
+      <button
+        type="button"
+        className={styles.iconButton}
+        aria-label="Settings"
+        title="Settings"
+        onClick={onSettings}
+      >
+        <SettingsIcon />
+      </button>
       {menuOpen && (
         <IntervalMenu
           anchor={arrow}

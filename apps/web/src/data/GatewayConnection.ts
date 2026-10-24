@@ -3,6 +3,7 @@ import {
   type ClientMessage,
   type ErrorCode,
   parseServerMessage,
+  type SessionHours,
   type StreamState,
 } from '@tradingnerd/core';
 import { reconnectDelay } from './reconnect';
@@ -31,7 +32,13 @@ export interface QuoteHandlers extends StreamHandlers {
 
 /** The live-data half of the gateway, as the chart session needs it. */
 export interface LiveFeed {
-  subscribeBars(symbol: string, resolution: string, handlers: BarHandlers): () => void;
+  /** `session` as for MarketApi.getBars. */
+  subscribeBars(
+    symbol: string,
+    resolution: string,
+    handlers: BarHandlers,
+    session?: SessionHours,
+  ): () => void;
   subscribeBook(symbol: string, handlers: BookHandlers): () => void;
 }
 
@@ -90,11 +97,23 @@ export class GatewayConnection implements LiveFeed, QuoteSource {
     return () => this.statusListeners.delete(listener);
   };
 
-  subscribeBars(symbol: string, resolution: string, handlers: BarHandlers): () => void {
+  subscribeBars(
+    symbol: string,
+    resolution: string,
+    handlers: BarHandlers,
+    session?: SessionHours,
+  ): () => void {
     const id = this.newId();
     return this.add(id, {
       kind: 'bars',
-      request: { type: 'subscribe', id, channel: 'bars', symbol, resolution },
+      request: {
+        type: 'subscribe',
+        id,
+        channel: 'bars',
+        symbol,
+        resolution,
+        ...(session === 'extended' ? { session } : {}),
+      },
       handlers,
     });
   }

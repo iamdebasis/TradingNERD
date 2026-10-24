@@ -15,6 +15,7 @@ import {
   parseSymbolSearchResponse,
   parseWatchlist,
   type SearchCategory,
+  type SessionHours,
   type StockKeyStatus,
   type SymbolInfo,
   type SymbolSearchResponse,
@@ -35,12 +36,14 @@ export class ApiError extends Error {
 /** The REST half of the gateway, as the chart session needs it. */
 export interface MarketApi {
   resolveSymbol(symbol: string, signal?: AbortSignal): Promise<SymbolInfo>;
+  /** `session`: intraday bars with pre- and post-market ('extended'), or regular (default). */
   getBars(
     symbol: string,
     resolution: string,
     to: number | null,
     countBack: number,
     signal?: AbortSignal,
+    session?: SessionHours,
   ): Promise<BarsResponse>;
 }
 
@@ -79,9 +82,10 @@ export const marketApi: MarketApi = {
     return info;
   },
 
-  async getBars(symbol, resolution, to, countBack, signal) {
+  async getBars(symbol, resolution, to, countBack, signal, session) {
     const params = new URLSearchParams({ symbol, resolution, countBack: String(countBack) });
     if (to !== null) params.set('to', String(to));
+    if (session === 'extended') params.set('session', session);
     const body = await getJson(`${API_PREFIX}/bars?${params}`, signal);
     const bars = parseBarsResponse(body);
     if (!bars) throw new ApiError('internal_error', 'The gateway sent malformed bars');

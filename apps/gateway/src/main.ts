@@ -57,6 +57,7 @@ const stocks = new UsStocksMarket({
   listings: usListings,
   dataUrl: config.alpaca.dataUrl,
   tradingUrls: config.alpaca.tradingUrl ? [config.alpaca.tradingUrl] : undefined,
+  streamUrl: config.alpaca.streamUrl,
   onWarning: warn('stocks'),
 });
 

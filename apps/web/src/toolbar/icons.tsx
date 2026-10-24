@@ -119,3 +119,24 @@ export function GesturesIcon() {
     </svg>
   );
 }
+
+/**
+ * "Settings": TradingView's hexagon with a circle in it (its top bar, from a screenshot), 28 px
+ * like its other toolbar icons.
+ */
+export function SettingsIcon() {
+  return (
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 28 28"
+      fill="none"
+      stroke="currentColor"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9.5 5.5h9l4.5 8.5-4.5 8.5h-9L5 14z" />
+      <circle cx="14" cy="14" r="3.5" />
+    </svg>
+  );
+}

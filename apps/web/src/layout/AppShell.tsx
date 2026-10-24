@@ -1,5 +1,7 @@
+import type { SymbolInfo } from '@tradingnerd/core';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChartPane } from '../chart/ChartPane';
+import { ChartSettingsDialog } from '../chart/ChartSettingsDialog';
 import { IntervalPrompt, promptKey } from '../chart/IntervalPrompt';
 import { type ChartRoute, withInterval, withSymbol } from '../chart/route';
 import { useGateway, useGatewayStatus } from '../data/GatewayContext';
@@ -32,6 +34,9 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const [searching, setSearching] = useState<string | null>(null);
   const logos = useLogos();
   const [logoDialog, setLogoDialog] = useState<'first-launch' | 'menu' | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** The chart's symbol as resolved, for Chart settings' fields. */
+  const [chartInfo, setChartInfo] = useState<SymbolInfo | null>(null);
   const firstLaunchShown = useRef(false);
 
   // Coin logos need a CoinGecko key: ask once, at first launch, unless it was skipped before.
@@ -93,7 +98,16 @@ export function AppShell({ route }: { route: ChartRoute }) {
         interval={resolution}
         onIntervalChange={changeInterval}
         onSymbolSearch={() => setSearching('')}
+        onSettings={() => setSettingsOpen(true)}
       />
+      {settingsOpen && (
+        <ChartSettingsDialog
+          hasSessions={
+            chartInfo?.id.toUpperCase() === symbol.toUpperCase() && chartInfo.schedule !== undefined
+          }
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
       {searching !== null && (
         <SymbolSearchDialog
           mode="search"
@@ -108,7 +122,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
         style={{ '--watchlist-width': `${watchlist.width}px` } as CSSProperties}
       >
         <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
-          <ChartPane symbol={symbol} resolution={resolution} />
+          <ChartPane symbol={symbol} resolution={resolution} onInfo={setChartInfo} />
           {prompt !== null && (
             <IntervalPrompt
               initial={prompt}

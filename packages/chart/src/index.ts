@@ -5,6 +5,7 @@ export {
   type ChartInstrument,
   DEFAULT_BAR_SPACING,
   DEFAULT_RIGHT_OFFSET,
+  type ExtendedPrice,
   type HoverInfo,
 } from './ChartController';
 export {
@@ -14,6 +15,7 @@ export {
   formatSignedPercent,
   formatSignedPrice,
 } from './format';
+export type { SessionPart, SessionShading } from './plugins/SessionShadePrimitive';
 export type { ChartTheme } from './theme';
 export {
   DEFAULT_GESTURE_TUNING,

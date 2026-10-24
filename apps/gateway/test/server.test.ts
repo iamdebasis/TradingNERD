@@ -47,7 +47,7 @@ const config: GatewayConfig = {
   okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
   coinbase: { restUrl: undefined, streamUrl: undefined },
   kraken: { restUrl: undefined, streamUrl: undefined },
-  alpaca: { dataUrl: undefined, tradingUrl: undefined },
+  alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
   dataDir: '', // each server gets its own temporary directory
 };
@@ -166,6 +166,13 @@ describe('gateway HTTP', () => {
     expect(res.json().hasMore).toBe(false); // only 10 fake bars exist
   });
 
+  it('gives a market without extended hours its regular bars for either session', async () => {
+    const regular = await get(`/api/bars?symbol=${SYMBOL}&resolution=1D`);
+    const extended = await get(`/api/bars?symbol=${SYMBOL}&resolution=1D&session=extended`);
+    expect(extended.statusCode).toBe(200);
+    expect(extended.json()).toEqual(regular.json());
+  });
+
   it.each([
     ['a missing resolution', `/api/bars?symbol=${SYMBOL}`, 400, 'bad_request'],
     [
@@ -191,6 +198,12 @@ describe('gateway HTTP', () => {
       `/api/bars?symbol=${SYMBOL}&resolution=30S`,
       400,
       'unsupported_resolution',
+    ],
+    [
+      'an unknown session',
+      `/api/bars?symbol=${SYMBOL}&resolution=1D&session=overnight`,
+      400,
+      'bad_request',
     ],
   ])('answers %s with a clear error', async (_label, url, status, code) => {
     const res = await get(url);

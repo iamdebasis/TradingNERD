@@ -27,7 +27,7 @@ const config: GatewayConfig = {
   okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
   coinbase: { restUrl: undefined, streamUrl: undefined },
   kraken: { restUrl: undefined, streamUrl: undefined },
-  alpaca: { dataUrl: undefined, tradingUrl: undefined },
+  alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
   dataDir: '',
 };
@@ -49,7 +49,14 @@ describe('the gateway with US stocks', () => {
     }) as typeof globalThis.fetch;
     const secrets = new SecretStore(dataDir, {});
     const listings = new UsListings({ dataDir, fetch });
-    const stocks = new UsStocksMarket({ dataDir, secrets, listings, fetch, sleep: async () => {} });
+    const stocks = new UsStocksMarket({
+      dataDir,
+      secrets,
+      listings,
+      fetch,
+      streamUrl: 'ws://127.0.0.1:9',
+      sleep: async () => {},
+    });
     const catalog = new SymbolCatalog({ sources: [], extra: listings, live: new Set(), dataDir });
     app = await buildServer(
       { ...config, dataDir },

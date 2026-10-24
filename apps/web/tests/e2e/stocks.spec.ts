@@ -49,15 +49,22 @@ test('Stocks and Funds sit beside All and Crypto, each with its own sources', as
   await expect(addDialog(page).getByRole('button', { name: 'All types' })).toHaveCount(0);
 });
 
-test('a stock charts on New York time, 15 minutes late, with the "D" sign and no Sell/Buy', async ({
+test('a stock charts on New York time, 15 minutes late, with the "D" sign and delayed Sell/Buy', async ({
   page,
+  market,
 }) => {
   await openOnMonday(page, '/?symbol=NASDAQ:AAPL&interval=60');
   await expect(page.getByText('Apple Inc. · 1h · NASDAQ')).toBeVisible();
   const delayed = page.getByRole('img', { name: 'Data is delayed by 15 minutes' });
   await expect(delayed).toBeVisible();
   await expect(delayed).toHaveText('D');
+  // Sell and Buy wait for the stream's best bid and ask (as late as the bars).
   await expect(page.locator('[data-field="sell"]')).toBeHidden();
+  await market.sendBook(231.4, 231.45);
+  await expect(page.locator('[data-field="bid"]')).toHaveText('231.40');
+  await expect(page.locator('[data-field="ask"]')).toHaveText('231.45');
+  await expect(page.locator('[data-field="spread"]')).toHaveText('0.05');
+  await expect(page.locator('[data-field="sell"]')).toBeVisible();
 
   // Hours from the 09:30 open; the latest is 10:30, all that 15-minute-old data reaches.
   const state = await chartState(page);

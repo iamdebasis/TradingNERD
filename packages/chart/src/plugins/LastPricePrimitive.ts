@@ -6,7 +6,7 @@ import type {
   SeriesType,
   Time,
 } from 'lightweight-charts';
-import { type AxisContext, type DrawTarget, drawAxisLabel } from './axisLabel';
+import { AXIS_LABEL, type AxisContext, type DrawTarget, drawAxisLabel } from './axisLabel';
 
 export interface LastPriceState {
   price: number;
@@ -102,7 +102,12 @@ export class LastPricePrimitive implements ISeriesPrimitive<Time> {
         ctx,
         y,
         rows,
-        { background: state.color, color: this.textColor, font: this.font },
+        {
+          background: state.color,
+          color: this.textColor,
+          font: this.font,
+          rowHeight: AXIS_LABEL.priceRowHeight,
+        },
         {
           tickYs: this.axisContext.tickYs(),
           background: this.axisContext.background,

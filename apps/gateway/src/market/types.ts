@@ -1,4 +1,12 @@
-import type { AggTrade, Bar, BarClock, ErrorCode, Resolution, SymbolInfo } from '@tradingnerd/core';
+import type {
+  AggTrade,
+  Bar,
+  BarClock,
+  ErrorCode,
+  Resolution,
+  SessionHours,
+  SymbolInfo,
+} from '@tradingnerd/core';
 
 export type Unsubscribe = () => void;
 
@@ -59,6 +67,11 @@ export interface ExchangeAdapter {
   readonly nativeResolutions: readonly Resolution[];
   /** Where its bars begin and end: its sessions, for markets that close (UTC when absent). */
   readonly clock?: BarClock;
+  /**
+   * For markets with pre- and post-market trading: the clock of intraday bars in those hours
+   * too. Without it, every request gets the regular session's bars.
+   */
+  clockFor?(hours: SessionHours): BarClock;
   /** How far behind real time its data runs, ms (0 when absent). */
   readonly delayMs?: number;
   /** Numbered trades, for tick bars; exchanges without them have no tick intervals. */
@@ -68,13 +81,15 @@ export interface ExchangeAdapter {
   resolveSymbol(ticker: string): Promise<SymbolInfo>;
   /**
    * Up to `limit` bars opening strictly before `endTimeMs` (or the latest bars when null),
-   * ascending by time. Native intervals only.
+   * ascending by time. Native intervals only. `hours`: which session's intraday bars, for
+   * exchanges with `clockFor` (regular when absent).
    */
   fetchBars(
     ticker: string,
     resolution: Resolution,
     endTimeMs: number | null,
     limit: number,
+    hours?: SessionHours,
   ): Promise<Bar[]>;
   /**
    * Bars opening in [startMs, endMs), ascending, at most `maxBarsPerRequest` of them (the
@@ -85,12 +100,14 @@ export interface ExchangeAdapter {
     resolution: Resolution,
     startMs: number,
     endMs: number,
+    hours?: SessionHours,
   ): Promise<Bar[]>;
 
   subscribeCandles(
     ticker: string,
     resolution: Resolution,
     onUpdate: (update: CandleUpdate) => void,
+    hours?: SessionHours,
   ): Unsubscribe;
   subscribeTrades(ticker: string, onTrade: (trade: Trade) => void): Unsubscribe;
   subscribeBook(ticker: string, onBook: (top: BookTop) => void): Unsubscribe;

@@ -324,10 +324,52 @@
   display: block;
 }
 
-/* Hard-clipped, no ellipsis, like TradingView. */
+.tickerLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Hard-clipped, no ellipsis, like TradingView; the marks after it stay in view. */
 .ticker {
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+}
+
+/*
+ * After the ticker, as in TradingView's watchlist (measured from its screenshot at 2×): an
+ * orange superscript D for delayed data, then a 6 px dot for a market out of its regular
+ * session, orange in pre-market, gray when closed, about 5 px apart. A market in its session
+ * has no dot, as crypto's never does; the post-market blue is provisional (docs/SPEC.md §11).
+ */
+.delayedMark {
+  position: relative;
+  top: -4.5px;
+  flex: none;
+  margin-left: 4px;
+  margin-right: -0.5px;
+  color: #ff9800;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 10px;
+}
+
+.marketDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #9c9c9c;
+}
+
+.marketDot[data-market="pre"] {
+  background: #ff9800;
+}
+
+.marketDot[data-market="post"] {
+  background: #3179f5;
 }
 
 .row[data-unavailable] .ticker {
