@@ -166,11 +166,19 @@
   scrollbar-width: thin;
 }
 
-/* Section headers stay pinned while their rows scroll under them, as in the reference. */
-.sectionHeader {
+/*
+ * Section headers stay pinned while their rows scroll under them, as in the reference. Under
+ * the mouse a header turns the rows' gray and shows TradingView's trash (measured from its
+ * screenshot at 1×: a row's bin, in a row's place, in the header's gray without the square).
+ */
+.sectionHead {
   position: sticky;
   z-index: 1;
   top: 0;
+}
+
+.sectionHeader {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 13px;
@@ -185,6 +193,53 @@
   line-height: 13px;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.sectionHead:hover > button.sectionHeader {
+  background: var(--color-gutter);
+}
+
+/*
+ * 22 px and 7 px from the right edge, as a row's remove button, and 4 px down: its 12 × 14 bin
+ * 8 px below the header's top, as measured. The square shows only with the pointer on it
+ * (provisional: TradingView's screenshot has the pointer elsewhere on the header).
+ */
+.sectionRemove {
+  position: absolute;
+  top: 4px;
+  right: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: default;
+  /* Hidden but still in the tab order, so the keyboard reaches it. */
+  opacity: 0;
+}
+
+.sectionRemove:hover {
+  background: var(--color-separator);
+  color: var(--color-text);
+}
+
+.sectionRemove:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+  opacity: 1;
+}
+
+.sectionHead:hover > .sectionRemove {
+  opacity: 1;
+}
+
+.list[data-dragging] .sectionRemove {
+  display: none;
 }
 
 /* A section's name while it's typed: in the header's place and style. */

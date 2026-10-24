@@ -167,7 +167,7 @@ test("Upload list reads TradingView's .txt into a new list, and it downloads bac
   await expect(panel(page).getByRole('status')).toHaveText(
     'Uploaded “MARKET LISTS”: 53 symbols in 4 sections',
   );
-  const headers = panel(page).locator('section > button[aria-expanded]');
+  const headers = panel(page).locator('section button[aria-expanded]');
   await expect(headers).toHaveText([
     'MARKET CAP WISE',
     'CRYPTO ETFS',
@@ -204,7 +204,7 @@ test('symbols above the first section have no header, as on TradingView', async 
   await expect(panel(page).getByRole('status')).toHaveText(
     'Uploaded “quick”: 3 symbols in 1 section; 1 left out (repeats or no exchange)',
   );
-  await expect(panel(page).locator('section > button[aria-expanded]')).toHaveText(['LATER']);
+  await expect(panel(page).locator('section button[aria-expanded]')).toHaveText(['LATER']);
   expect(await tickers(page)).toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT']);
 });
 
@@ -255,6 +255,6 @@ test('Add section from the list menu starts one above the selected row', async (
   await expect(name).toBeFocused();
   await name.fill('FIRST');
   await name.press('Enter');
-  await expect(panel(page).locator('section > button[aria-expanded]').first()).toHaveText('Crypto');
-  await expect(panel(page).locator('section > button[aria-expanded]').nth(1)).toHaveText('FIRST');
+  await expect(panel(page).locator('section button[aria-expanded]').first()).toHaveText('Crypto');
+  await expect(panel(page).locator('section button[aria-expanded]').nth(1)).toHaveText('FIRST');
 });

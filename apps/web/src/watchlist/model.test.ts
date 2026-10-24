@@ -7,6 +7,7 @@ import {
   insertSymbol,
   moveSymbol,
   neighbor,
+  removeSection,
   removeSymbol,
   renameSection,
   toggleSection,
@@ -51,6 +52,90 @@ describe('adding at a row', () => {
     expect(renamed.sections[1]?.title).toBe('Alts');
     expect(renameSection(renamed, 'b', '   ')).toBe(renamed);
     expect(renameSection(renamed, 'nope', 'X')).toBe(renamed);
+  });
+});
+
+describe('deleting a section, as TradingView: its symbols stay', () => {
+  const THREE: Watchlist = {
+    sections: [
+      { id: 'a', title: 'Crypto', collapsed: false, symbols: ['X:A', 'X:B'] },
+      { id: 'b', title: 'More', collapsed: true, symbols: ['X:C', 'X:D'] },
+      { id: 'c', title: 'Last', collapsed: false, symbols: ['X:E'] },
+    ],
+  };
+  const shape = (list: Watchlist) =>
+    list.sections.map((s) => [s.id, s.title, s.collapsed, s.symbols]);
+
+  it('hands its symbols, in order, to the end of the section above', () => {
+    const list = removeSection(THREE, 'c');
+    expect(shape(list)).toEqual([
+      ['a', 'Crypto', false, ['X:A', 'X:B']],
+      ['b', 'More', false, ['X:C', 'X:D', 'X:E']], // opened, so they stay in sight
+    ]);
+    expect(allSymbols(list)).toEqual(allSymbols(THREE));
+  });
+
+  it("from a folded section too: they're all kept", () => {
+    expect(shape(removeSection(THREE, 'b'))).toEqual([
+      ['a', 'Crypto', false, ['X:A', 'X:B', 'X:C', 'X:D']],
+      ['c', 'Last', false, ['X:E']],
+    ]);
+  });
+
+  it("keeps the first section's symbols at the top, with no header", () => {
+    const list = removeSection(toggleSection(THREE, 'a'), 'a');
+    expect(shape(list)).toEqual([
+      ['a', '', false, ['X:A', 'X:B']], // unfolded: nothing could open it again
+      ['b', 'More', true, ['X:C', 'X:D']],
+      ['c', 'Last', false, ['X:E']],
+    ]);
+    // A section without a header has none to delete.
+    expect(removeSection(list, 'a')).toBe(list);
+    // The next first section joins them.
+    expect(shape(removeSection(list, 'b'))).toEqual([
+      ['a', '', false, ['X:A', 'X:B', 'X:C', 'X:D']],
+      ['c', 'Last', false, ['X:E']],
+    ]);
+  });
+
+  it('joins symbols already headerless below the first section, keeping one such group', () => {
+    const above: Watchlist = {
+      sections: [
+        { id: 'new', title: 'New', collapsed: false, symbols: ['X:A'] },
+        { id: 'top', title: '', collapsed: false, symbols: ['X:B', 'X:C'] },
+        { id: 'b', title: 'More', collapsed: false, symbols: ['X:D'] },
+      ],
+    };
+    expect(shape(removeSection(above, 'new'))).toEqual([
+      ['new', '', false, ['X:A', 'X:B', 'X:C']],
+      ['b', 'More', false, ['X:D']],
+    ]);
+  });
+
+  it('takes an empty section away, leaving the others as they were', () => {
+    const empty: Watchlist = {
+      sections: [
+        { id: 'a', title: 'Crypto', collapsed: true, symbols: ['X:A'] },
+        { id: 'e', title: 'Empty', collapsed: false, symbols: [] },
+        { id: 'b', title: 'More', collapsed: false, symbols: ['X:B'] },
+      ],
+    };
+    expect(shape(removeSection(empty, 'e'))).toEqual([
+      ['a', 'Crypto', true, ['X:A']], // nothing joined it, so it stays folded
+      ['b', 'More', false, ['X:B']],
+    ]);
+    const alone: Watchlist = {
+      sections: [{ id: 'e', title: 'Empty', collapsed: false, symbols: [] }],
+    };
+    expect(removeSection(alone, 'e')).toEqual({ sections: [] });
+  });
+
+  it("keeps the only section's symbols with no header, and ignores an unknown id", () => {
+    const one: Watchlist = {
+      sections: [{ id: 'a', title: 'Crypto', collapsed: true, symbols: ['X:A', 'X:B'] }],
+    };
+    expect(shape(removeSection(one, 'a'))).toEqual([['a', '', false, ['X:A', 'X:B']]]);
+    expect(removeSection(LIST, 'nope')).toBe(LIST);
   });
 });
 

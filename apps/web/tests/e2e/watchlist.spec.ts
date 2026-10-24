@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from '@playwright/test';
-import { DEFAULT_WATCHLIST } from '@tradingnerd/core';
+import { DEFAULT_WATCHLIST, type Watchlist } from '@tradingnerd/core';
 import { PNG } from 'pngjs';
 import { chartState, expect, openChart, test } from './fixtures';
 
@@ -30,7 +30,9 @@ async function boxOf(locator: Locator) {
 test("shows the user's coins under CRYPTO, the chart's symbol selected", async ({ page }) => {
   await openChart(page);
   await expect.poll(() => tickers(page)).toEqual(DEFAULT_TICKERS);
-  await expect(panel(page).getByRole('button', { name: 'Crypto' })).toHaveText('Crypto');
+  await expect(panel(page).getByRole('button', { name: 'Crypto', exact: true })).toHaveText(
+    'Crypto',
+  );
   await expect(row(page, 'XRPUSDT')).toHaveAttribute('aria-current', 'true');
   for (const title of ['Symbol', 'Last', 'Chg', 'Chg%']) {
     await expect(panel(page).getByText(title, { exact: true })).toBeVisible();
@@ -546,14 +548,220 @@ test('rows drag to a new place', async ({ page, market }) => {
 
 test('a section folds away and stays folded', async ({ page, market }) => {
   await openChart(page);
-  await panel(page).getByRole('button', { name: 'Crypto' }).click();
+  await panel(page).getByRole('button', { name: 'Crypto', exact: true }).click();
   await expect(row(page, 'LINKUSDT')).toHaveCount(0);
   await expect.poll(() => market.watchlistSaves.at(-1)?.sections[0]?.collapsed).toBe(true);
   await openChart(page);
-  await expect(panel(page).getByRole('button', { name: 'Crypto' })).toHaveAttribute(
+  await expect(panel(page).getByRole('button', { name: 'Crypto', exact: true })).toHaveAttribute(
     'aria-expanded',
     'false',
   );
+});
+
+// ---- deleting a section: TradingView's trash on its header (docs/SPEC.md §5.3) ----
+
+const THREE_SECTIONS = {
+  sections: [
+    {
+      id: 'crypto',
+      title: 'Crypto',
+      collapsed: false,
+      symbols: ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT'],
+    },
+    { id: 'alts', title: 'Alts', collapsed: false, symbols: ['BINANCE:OPUSDT', 'BINANCE:BATUSDT'] },
+    { id: 'games', title: 'Games', collapsed: false, symbols: ['BINANCE:MANAUSDT'] },
+  ],
+};
+const header = (page: Page, title: string) =>
+  panel(page).getByRole('button', { name: title, exact: true });
+const trash = (page: Page, title: string) =>
+  panel(page).getByRole('button', { name: `Delete section ${title}` });
+const headers = (page: Page) => panel(page).locator('section button[aria-expanded]');
+const savedSections = (market: { watchlistSaves: readonly Watchlist[] }) =>
+  market.watchlistSaves.at(-1)?.sections.map((s) => [s.id, s.title, s.collapsed, s.symbols]);
+
+/** The box of the pixels brighter than `floor` (green channel) in a 2× shot, in CSS px. */
+function inkBox(png: PNG, floor: number) {
+  let [left, top, right, bottom] = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, -1, -1];
+  for (let y = 0; y < png.height; y++) {
+    for (let x = 0; x < png.width; x++) {
+      if ((png.data[(y * png.width + x) * 4 + 1] ?? 0) <= floor) continue;
+      [left, top] = [Math.min(left, x), Math.min(top, y)];
+      [right, bottom] = [Math.max(right, x), Math.max(bottom, y)];
+    }
+  }
+  return { x: left / 2, y: top / 2, width: (right - left + 1) / 2, height: (bottom - top + 1) / 2 };
+}
+
+test("a section's header under the mouse turns the rows' gray and shows a row's trash", async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await away(page);
+  const alts = header(page, 'Alts');
+  await expect(alts).toHaveCSS('background-color', 'rgb(15, 15, 15)');
+  await expect(trash(page, 'Alts')).toHaveCSS('opacity', '0');
+
+  await alts.hover();
+  await expect(alts).toHaveCSS('background-color', 'rgb(46, 46, 46)');
+  const bin = trash(page, 'Alts');
+  await expect(bin).toHaveCSS('opacity', '1');
+  await expect(trash(page, 'Crypto')).toHaveCSS('opacity', '0'); // the hovered header's only
+  // TradingView's screenshot at 1×: no square, the header's gray.
+  await expect(bin).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(bin).toHaveCSS('color', 'rgb(140, 140, 140)');
+  // A row's 22 px button, 7 px from the right edge, and 4 px down.
+  const [button, line] = [await boxOf(bin), await boxOf(alts)];
+  expect([button.width, button.height]).toEqual([22, 22]);
+  expect(line.x + line.width - (button.x + button.width)).toBe(7);
+  expect(button.y - line.y).toBe(4);
+  // Its bin, as measured there: 12 × 14, 8 px below the header's top, 12 px from its right.
+  const ink = inkBox(PNG.sync.read(await page.screenshot({ clip: button })), 46 + 30);
+  expect({
+    x: button.x - line.x + ink.x,
+    y: button.y - line.y + ink.y,
+    width: ink.width,
+    height: ink.height,
+  }).toEqual({ x: line.width - 24, y: 8, width: 12, height: 14 });
+
+  // Where a row's trash is, on the same line.
+  await row(page, 'OPUSDT').hover();
+  const rowBin = await boxOf(panel(page).getByRole('button', { name: 'Remove from watchlist' }));
+  expect(rowBin.x).toBe(button.x);
+
+  // With the pointer on it, a row's square (provisional).
+  await alts.hover();
+  await bin.hover();
+  await expect(bin).toHaveCSS('background-color', 'rgb(74, 74, 74)');
+  await expect(bin).toHaveCSS('color', 'rgb(219, 219, 219)');
+  await expect(alts).toHaveCSS('background-color', 'rgb(46, 46, 46)');
+});
+
+test('the trash deletes the section but keeps its symbols, at the end of the one above', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  market.flags = { flags: { 'BINANCE:OPUSDT': 'blue' }, lastColor: 'blue' };
+  await openChart(page);
+  await header(page, 'Alts').hover();
+  await trash(page, 'Alts').click();
+  await expect(headers(page)).toHaveText(['Crypto', 'Games']);
+  await expect
+    .poll(() => tickers(page))
+    .toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT', 'BATUSDT', 'MANAUSDT']);
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      [
+        'crypto',
+        'Crypto',
+        false,
+        ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT', 'BINANCE:OPUSDT', 'BINANCE:BATUSDT'],
+      ],
+      ['games', 'Games', false, ['BINANCE:MANAUSDT']],
+    ]);
+  // Nothing is asked, and the chart's row and the flags are as they were.
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row(page, 'XRPUSDT')).toHaveAttribute('aria-current', 'true');
+  await expect(panel(page).getByRole('button', { name: 'OPUSDT: Blue flag' })).toBeVisible();
+  expect(market.flagSaves).toEqual([]);
+
+  await openChart(page); // reload: the gateway kept it
+  await expect(headers(page)).toHaveText(['Crypto', 'Games']);
+});
+
+test("a folded section above opens to take them; the first section's stay with no header", async ({
+  page,
+  market,
+}) => {
+  market.watchlist = {
+    sections: [
+      {
+        id: 'crypto',
+        title: 'Crypto',
+        collapsed: true,
+        symbols: ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT'],
+      },
+      { id: 'alts', title: 'Alts', collapsed: false, symbols: ['BINANCE:OPUSDT'] },
+      { id: 'empty', title: 'Empty', collapsed: false, symbols: [] },
+    ],
+  };
+  await openChart(page);
+  // An empty section just goes.
+  await header(page, 'Empty').hover();
+  await trash(page, 'Empty').click();
+  await expect(headers(page)).toHaveText(['Crypto', 'Alts']);
+  await expect.poll(() => tickers(page)).toEqual(['OPUSDT']);
+
+  // Alts' symbol joins the folded Crypto, which opens so it stays in sight.
+  await header(page, 'Alts').hover();
+  await trash(page, 'Alts').click();
+  await expect(header(page, 'Crypto')).toHaveAttribute('aria-expanded', 'true');
+  await expect.poll(() => tickers(page)).toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT']);
+
+  // The first section: its symbols stay at the top with no header, as symbols above a
+  // TradingView file's first section do.
+  await header(page, 'Crypto').hover();
+  await trash(page, 'Crypto').click();
+  await expect(headers(page)).toHaveCount(0);
+  await expect.poll(() => tickers(page)).toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT']);
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([['crypto', '', false, ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT', 'BINANCE:OPUSDT']]]);
+
+  // And they download as TradingView writes such symbols: with no "###" before them.
+  await panel(page)
+    .getByRole('button', { name: /: list menu$/ })
+    .click();
+  const listMenu = page.getByRole('menu', { name: 'Watchlist menu' });
+  const download = page.waitForEvent('download');
+  await listMenu.getByRole('menuitemradio', { name: 'Watchlist' }).hover();
+  await listMenu.getByRole('button', { name: 'Download Watchlist' }).click();
+  expect(readFileSync(await (await download).path(), 'utf8')).toBe(
+    'BINANCE:XRPUSDT,BINANCE:LINKUSDT,BINANCE:OPUSDT',
+  );
+});
+
+test("the keyboard reaches a section's trash", async ({ page, market }) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await header(page, 'Games').focus();
+  await page.keyboard.press('Tab');
+  const bin = trash(page, 'Games');
+  await expect(bin).toBeFocused();
+  await expect(bin).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Enter');
+  await expect(headers(page)).toHaveText(['Crypto', 'Alts']);
+  await expect
+    .poll(() => tickers(page))
+    .toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT', 'BATUSDT', 'MANAUSDT']);
+});
+
+test('a row dropped on a header still goes first in its section; the trash keeps out of it', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  // While a row is dragged, no header shows its trash.
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await row(page, 'MANAUSDT').dispatchEvent('dragstart', { dataTransfer });
+  await header(page, 'Alts').hover();
+  await expect(trash(page, 'Alts')).toBeHidden();
+  await row(page, 'MANAUSDT').dispatchEvent('dragend', { dataTransfer });
+  await expect(trash(page, 'Alts')).toBeVisible();
+
+  await row(page, 'MANAUSDT').dragTo(header(page, 'Alts'));
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      ['crypto', 'Crypto', false, ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT']],
+      ['alts', 'Alts', false, ['BINANCE:MANAUSDT', 'BINANCE:OPUSDT', 'BINANCE:BATUSDT']],
+      ['games', 'Games', false, []],
+    ]);
 });
 
 test('a symbol the exchange does not list shows in red, without prices', async ({

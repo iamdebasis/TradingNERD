@@ -34,6 +34,7 @@ import {
   AdvancedViewIcon,
   FlagIcon,
   MoreIcon,
+  RemoveIcon,
   SectionCaret,
 } from './icons';
 import { ConfirmDialog, ListNameDialog, OpenListDialog } from './ListDialogs';
@@ -46,6 +47,7 @@ import {
   insertSymbol,
   moveSymbol,
   neighbor,
+  removeSection,
   removeSymbol,
   renameSection,
   toggleSection,
@@ -99,7 +101,8 @@ type ListDialog =
 /**
  * The right-hand watchlist (docs/reference/01-chart-layout.png): sections of symbols with
  * live Last, Chg and Chg%. Click or ↑/↓ shows a symbol on the chart; Delete or a row's remove
- * button removes it; rows drag to a new place; sections fold. Symbols carry TradingView's flags
+ * button removes it; rows drag to a new place; sections fold, and a section's trash deletes it
+ * but keeps its symbols. Symbols carry TradingView's flags
  * (docs/reference/06-watchlist-flags.png, 07-watchlist-row-menu.png). The list's name opens
  * TradingView's list menu: several lists, uploaded from and downloaded to TradingView's .txt
  * (docs/SPEC.md §5.9). Every change is saved by the gateway: the lists in
@@ -513,44 +516,66 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
           >
             {/* An untitled section (an uploaded list's symbols above its first section) has no
                 header, as on TradingView. */}
-            {section.title === '' && naming !== section.id ? null : naming === section.id ? (
-              <div className={styles.sectionHeader}>
-                <SectionCaret open={!section.collapsed} />
-                <input
-                  className={styles.sectionName}
-                  aria-label="Section name"
-                  defaultValue={section.title}
-                  maxLength={64}
-                  // biome-ignore lint/a11y/noAutofocus: a new section's name is typed at once
-                  autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') finishNaming(section.id, event.currentTarget.value);
-                    else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setNaming(null);
-                    }
-                  }}
-                  onBlur={(event) => finishNaming(section.id, event.currentTarget.value)}
-                />
+            {section.title === '' && naming !== section.id ? null : (
+              <div className={styles.sectionHead}>
+                {naming === section.id ? (
+                  <div className={styles.sectionHeader}>
+                    <SectionCaret open={!section.collapsed} />
+                    <input
+                      className={styles.sectionName}
+                      aria-label="Section name"
+                      defaultValue={section.title}
+                      maxLength={64}
+                      // biome-ignore lint/a11y/noAutofocus: a new section's name is typed at once
+                      autoFocus
+                      onFocus={(event) => event.currentTarget.select()}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          finishNaming(section.id, event.currentTarget.value);
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setNaming(null);
+                        }
+                      }}
+                      onBlur={(event) => finishNaming(section.id, event.currentTarget.value)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className={styles.sectionHeader}
+                      aria-expanded={!section.collapsed}
+                      data-drop={
+                        drop?.sectionId === section.id && drop.symbol === null
+                          ? 'before'
+                          : undefined
+                      }
+                      onClick={() =>
+                        edit((current: WatchlistDoc) => toggleSection(current, section.id))
+                      }
+                      // As in TradingView, a double-click renames it. Its two clicks folded and
+                      // unfolded it, so it stays as it was.
+                      onDoubleClick={() => setNaming(section.id)}
+                      onDragOver={(event) => onHeaderDragOver(event, section.id)}
+                    >
+                      <SectionCaret open={!section.collapsed} />
+                      <span>{section.title}</span>
+                    </button>
+                    {/* TradingView's trash on a header: the section goes, its symbols stay. */}
+                    <button
+                      type="button"
+                      className={styles.sectionRemove}
+                      aria-label={`Delete section ${section.title}`}
+                      onClick={() =>
+                        edit((current: WatchlistDoc) => removeSection(current, section.id))
+                      }
+                    >
+                      <RemoveIcon />
+                    </button>
+                  </>
+                )}
               </div>
-            ) : (
-              <button
-                type="button"
-                className={styles.sectionHeader}
-                aria-expanded={!section.collapsed}
-                data-drop={
-                  drop?.sectionId === section.id && drop.symbol === null ? 'before' : undefined
-                }
-                onClick={() => edit((current: WatchlistDoc) => toggleSection(current, section.id))}
-                // As in TradingView, a double-click renames it. Its two clicks folded and
-                // unfolded it, so it stays as it was.
-                onDoubleClick={() => setNaming(section.id)}
-                onDragOver={(event) => onHeaderDragOver(event, section.id)}
-              >
-                <SectionCaret open={!section.collapsed} />
-                <span>{section.title}</span>
-              </button>
             )}
             {!section.collapsed &&
               section.symbols.map((item) => (

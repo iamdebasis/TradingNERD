@@ -125,6 +125,40 @@ export function renameSection(list: Watchlist, sectionId: string, title: string)
   };
 }
 
+/**
+ * Deletes a section but keeps its symbols, as TradingView's trash on a section's header does:
+ * TradingView's list is one line of symbols with "###" dividers, so they join the end of the
+ * section above (opened, so they stay in sight), or, from the first section, stay at the top
+ * with no header. An empty section just goes. A section without a header has none to delete.
+ */
+export function removeSection(list: Watchlist, sectionId: string): Watchlist {
+  const at = list.sections.findIndex((section) => section.id === sectionId);
+  const target = list.sections[at];
+  if (!target || target.title === '') return list;
+  const sections = [...list.sections];
+  const above = sections[at - 1];
+  if (target.symbols.length === 0) {
+    sections.splice(at, 1);
+  } else if (above) {
+    sections.splice(at - 1, 2, {
+      ...above,
+      collapsed: false,
+      symbols: [...above.symbols, ...target.symbols],
+    });
+  } else {
+    // With any symbols already headerless below it, so the list keeps one such group.
+    const next = sections[1];
+    const join = next !== undefined && next.title === '';
+    sections.splice(0, join ? 2 : 1, {
+      ...target,
+      title: '',
+      collapsed: false,
+      symbols: join ? [...target.symbols, ...next.symbols] : target.symbols,
+    });
+  }
+  return { ...list, sections };
+}
+
 export function toggleSection(list: Watchlist, sectionId: string): Watchlist {
   return {
     ...list,

@@ -1,6 +1,6 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-19** (M0–M3 committed; M4 built and verified, awaiting review).
+Living document. Last updated **2026-10-24** (M0–M8 committed; M8b, deleting sections, built and verified, awaiting review).
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
@@ -116,6 +116,7 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-24 | **Several watchlists** (M8), from TradingView's list menu on the list's name: Make a copy…, Rename, Add section, Clear list, Create new list…, Upload list…, **MY WATCHLISTS** (every list; starred first) and Open list… (⇧W) | Your YES after the research (§4.6). "MY WATCHLISTS" in place of TradingView's "Recently used" was your call; Share list, Copy link and alerts need TradingView's accounts, so they're left out. |
 | 2026-10-24 | **Upload list…** reads TradingView's .txt into a new list named after the file; each list's **⤓** saves it back in the same format | Your YES. TradingView's own export is in its advanced view; the ⤓ beside each list's ★ was your idea. |
 | 2026-10-24 | Symbols we don't chart (Bitstamp, CRYPTOCAP, GLASSNODE, OTC, indices, spreads) stay in an uploaded list, in red | Your YES: nothing uploaded is lost, and a list downloads back exactly as it came. |
+| 2026-10-24 | **Deleting a section** (M8b): under the mouse a section's header shows TradingView's trash, which deletes the section and keeps its symbols. They join the end of the section above (opened if folded), or stay at the top with no header if it was the first. An empty section just goes. Nothing is asked | Your YES after the research (§4.7), and your report that TradingView's trash keeps the symbols (a community guide said they go too). |
 
 ## 4. Research findings
 
@@ -215,6 +216,17 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Your example file:** 53 symbols in 4 sections; 21 chart here (3 Binance pairs, 18 US stocks and ETFs), 32 come from sources we don't have.
 - **Nasdaq's directory** (19 October 2026): 13,269 listings: NASDAQ 5,623, NYSE 2,891, NYSE Arca 2,747, NYSE American 309, Cboe BZX 1,680, Texas Stock Exchange 19. By kind: 5,788 ETFs (about 175 crypto, 645 leveraged and 323 inverse by name), 5,655 stocks, 509 preferreds, 432 warrants, 310 units, 302 ADRs, 147 notes, 126 rights.
 
+### 4.7 Deleting a section (researched 2026-10-24)
+
+- **TradingView's own pages** say only that sections "can be named, moved, and deleted" (its blog, 2020) and that "you can rename, move, or remove these dividers at any time" (its help center). Its Charting Library docs and release notes say no more (sections since 25.002 in 2023, folding since 32.1.0 in August 2026).
+- **A community guide** on TradingView's site (December 2025) says a right-click on a section's name gives "Delete Section", that TradingView "may ask for confirmation", and that "the entire section and all symbols inside it will be deleted". A broker's guide (Blueberry Markets) says "Remove Section" and that a confirmation is required.
+- **Your report** (2026-10-24): the trash on a section's header deletes only the section; its symbols stay. Where they go follows from TradingView's list being one line of symbols with "###" dividers (its file, its Charting Library): taking a divider out joins them to the section above.
+- **Measured from your screenshot** (1×; its BT.2020 profile makes the colors approximate):
+  - The trash shows only under the mouse (`docs/reference/01-chart-layout.png` has none on CRYPTO), and the header's 30 px turn the separators' gray, as a row does.
+  - The bin is a row's (`docs/reference/05-watchlist-hover.png`): 12 × 14, 8 px below the header's top, in the header's gray with no square. It ends 2 px left of the numbers' right edge (a row's, 2.5 px).
+  - TradingView leaves 6 px between the row above and a section's header.
+- **Searched with nothing more found:** the help center in English, German, Japanese, Chinese, Korean and Russian; Reddit; YouTube; guides in Japanese, Chinese and German.
+
 ## 5. Requirements (v1)
 
 ### 5.1 Chart
@@ -276,6 +288,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Interaction:**
   - Click or ↑/↓ switches the chart.
   - Drag to reorder, right-click menu, Delete removes.
+  - A section's trash deletes the section, keeping its symbols.
 - **Unavailable symbols** show red text and a gray letter avatar.
 - **Persistence:** the panel is resizable and everything is remembered.
 - **Done when:** 50 rows tick smoothly and the list survives a restart.
@@ -285,6 +298,11 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Live:** every row's quotes come from the gateway and are painted in one animation frame. With all 50 rows changing in the same frame, a frame costs about 1 ms (budget 2 ms).
   - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace or the row's remove button removes a row (TradingView's row menu has no Remove). Rows drag to a new place, also into another section. Sections fold.
   - **Under the mouse** (M6, measured from `docs/reference/05-watchlist-hover.png`): the row turns `#2E2E2E`, and a 22 px remove button (a bin on `#4A4A4A`) covers its right end, 7 px from the edge. The chart's own row stays blue.
+  - **Deleting a section** (M8b, §4.7):
+    - Under the mouse a section's header turns `#2E2E2E` and shows TradingView's trash: a row's 22 px button and bin, 7 px from the edge and 4 px down, in the header's `#8C8C8C` with no square. With the pointer on the trash, a row's `#4A4A4A` square (provisional).
+    - A click deletes the section and keeps its symbols. They join the end of the section above, which opens if it was folded, or stay at the top with no header if it was the first (as symbols above a TradingView file's first section). An empty section just goes.
+    - Nothing is asked. The chart's row, the flags and the other sections stay as they were, and the list saves as usual.
+    - The trash hides while a row is dragged, and Tab reaches it. Symbols with no header above them have no trash.
   - **Thousands** are grouped with commas in Last, Chg and Chg% ("1,147.903").
   - **Flags** (TradingView's behavior from its blog and help center, §12; measured from `docs/reference/06-watchlist-flags.png`):
     - A 12 × 13 pennant with a V cut into its right side, flush with the panel's left edge, 8 px down the row, in red `#FF5252`, blue `#2A79FF`, green `#81C784`, yellow `#FBC02D`, purple `#BA68C8`, cyan `#00E5FF` or pink `#F48FB1`. The column titles carry the same flag in gray `#4A4A4A`.
@@ -718,9 +736,10 @@ Reference viewport is 1634 px wide.
 | M5 | Bybit, OKX, Coinbase, Kraken live adapters; reconnect + gap-fill; health dot | 30 s offline recovers with no missing candles. **Committed 2026-10-19** |
 | M6 | Feel tuning vs TradingView, visual regression, performance profiling (Electron dropped, your call) | Parity checklist all passes. **Built 2026-10-19**, with the gesture settings in the top bar for your side-by-side session (§11); awaiting your review |
 | M7a | US stocks on the chart: listings and search, the market clock, the Alpaca source, the key dialog, charts and watchlist 15 minutes delayed, the "D" sign | SPY, AAPL, GBTC, XXRP and DOG found, added and charted 1 minute to 12 months back to 2016, matching TradingView's candles 15 minutes later. **Committed 2026-10-20**; the live check with your key matched TradingView's watchlist 25 of 25 |
-| M7b | Extended hours: Chart settings (session, backgrounds, time zone), market status (legend pill, watchlist dots and D, pre/post-market price line), whole bars, Alpaca's delayed stream with Sell and Buy | AAPL on 5 minutes shows 04:00–20:00 bars and colored sessions like your screenshot. **Built 2026-10-24**; live-checked with your key on a Saturday (history, status, the stream's sign-in) |
+| M7b | Extended hours: Chart settings (session, backgrounds, time zone), market status (legend pill, watchlist dots and D, pre/post-market price line), whole bars, Alpaca's delayed stream with Sell and Buy | AAPL on 5 minutes shows 04:00–20:00 bars and colored sessions like your screenshot. **Committed 2026-10-24**; live-checked with your key on a Saturday (history, status, the stream's sign-in) |
 | M7c | Stock logos (Massive's free key), pixel checks against your screenshots, a live check with your key | The checks pass |
-| M8 | Several watchlists: TradingView's list menu, MY WATCHLISTS with ★ and ⤓, Open list (⇧W), Upload list… and downloads in TradingView's .txt | Your TradingView file uploads into a list and downloads back the same. **Built 2026-10-24** |
+| M8 | Several watchlists: TradingView's list menu, MY WATCHLISTS with ★ and ⤓, Open list (⇧W), Upload list… and downloads in TradingView's .txt | Your TradingView file uploads into a list and downloads back the same. **Committed 2026-10-24** |
+| M8b | Deleting a section: TradingView's trash on a section's header; its symbols stay | The trash matches your screenshot, and a deleted section's symbols land at the end of the section above. **Built 2026-10-24** |
 
 ## 9. Testing strategy
 
@@ -760,6 +779,9 @@ Reference viewport is 1634 px wide.
   - M7b, core and chart: market status through a trading day, weekends, holidays and an early close; the session field in messages; the pre/post label stepping clear of the last price's.
   - M7b, in the browser (`tests/e2e/extended-hours.spec.ts`): Chart settings from the Settings button, its fields for stocks and crypto, extended hours with both bands, Cancel, Ok kept across a reload, day charts staying regular, the time zone; pre-market (the sunrise, the "Pre" line, the orange dot and D), the regular session (green, no line, no dot), a weekend (gray), crypto (no D, no dot).
 - **Several watchlists** (M8): the file (`packages/core/src/watchlistFile.test.ts`): your TradingView file read and written back exactly, one item a line, a byte-order mark, symbols above the first section, repeats and ones without an exchange left out, the 1,000 limit, titles cut without splitting 🇺🇸, file names; the lists' names and order; the store (`apps/gateway/test/watchlists.test.ts`): the old list moved in as "Watchlist" with its file left as it was, creating, copying, uploading, renaming, starring, opening, saving two lists at once, deleting, the limits; the routes (`server.test.ts`); in the browser (`tests/e2e/watchlists.spec.ts`): the menu, creating, copying, renaming, clearing, starring and downloading, uploading your file and downloading it back the same, symbols above the first section, Open list (⇧W) with search and delete, the last list, Add section.
+- **Deleting a section** (M8b):
+  - The model (`apps/web/src/watchlist/model.test.ts`): symbols to the end of the section above, in order; a folded section above opening; deleting a folded section; the first section's symbols left with no header, joining any already there; an empty section; the only section; an unknown section, and one with no header.
+  - In the browser (`tests/e2e/watchlist.spec.ts`): the trash only under the mouse and only on that header, in the header's gray; its place against your screenshot (the bin 12 × 14, 8 px down, where a row's is); a row's square under the pointer. Deleting keeps the symbols and saves, asks nothing, and leaves the chart's row and the flags alone, across a reload. An empty section; a folded section above; the first section, downloading with no "###". The keyboard. A row dropped on a header, with the trash hidden during the drag.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -863,6 +885,8 @@ Reference viewport is 1634 px wide.
 40. How TradingView keeps the pre/post-market label clear of the last price's (ours: right above or below it, on its price's side), and whether autoscale includes that price (ours: no).
 41. Alpaca gave AAPL's Friday 23 October close as 347.725, half a cent; ours shows it to 2 decimals. Worth comparing with TradingView's close for that day.
 42. Watchlists, provisional: what TradingView names an uploaded list (ours: the file's name); a copy's name (ours: " (1)", as your "Watchlist (1)" suggests); the order of MY WATCHLISTS (ours: starred, then by name; TradingView's "Recently used" is by use); the dialogs' look (Create new list, Make a copy, Clear list, Open list, deleting); the menu icons' exact paths (the broom's and the new list's differ a little); whether Rename types in place; where the list menu's Add section goes; how a spread shows in a row (ours: what follows the first colon).
+43. Deleting a section, provisional: whether TradingView asks first (ours: no, since nothing is lost); whether a folded section above opens to take the symbols (ours: yes); the trash's look with the pointer on it (ours: a row's square); its name (ours: "Delete section NAME", for screen readers); whether a section's right-click menu has a delete item (ours has no section menu yet). A screenshot of TradingView's section right-click menu would settle the last one.
+44. Measured against your section screenshot (§4.7), from before M8b: TradingView leaves 6 px between the row above and a section's header (ours: none), and its trash bins, a row's and a header's, sit about 1 px further right than ours.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -900,6 +924,7 @@ Reference viewport is 1634 px wide.
 - Nasdaq symbol directory: https://www.nasdaqtrader.com/trader.aspx?id=symboldirdefs · IEX hours: https://www.sec.gov/files/rules/sro/iex/2026/34-105959.pdf · Lightweight Charts time zones: https://tradingview.github.io/lightweight-charts/docs/time-zones
 - TradingView's lists (M8): import and export https://www.tradingview.com/support/solutions/43000487233-how-to-import-or-export-a-watchlist/ · the advanced view's Export list https://www.tradingview.com/support/solutions/43000771546-watchlist-advanced-view-mode/ · the list menu https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · Open list and deleting https://www.tradingview.com/support/solutions/43000645262-how-to-delete-a-list/ · 1,000 symbols https://www.tradingview.com/support/solutions/43000611193-how-many-symbols-can-i-add-to-the-watchlist/ · ### sections https://www.tradingview.com/charting-library-docs/latest/trading_terminal/Watch-List/
 - TradingView watchlist sections and adding at a point: https://www.tradingview.com/support/solutions/43000615520-how-to-add-a-section-to-the-watchlist/ · https://www.tradingview.com/blog/en/add-symbols-to-the-watchlist-at-a-specific-point-in-the-list-22486 · renaming by double-click (community guide): https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW
+- Deleting a section (M8b): "named, moved, and deleted" https://www.tradingview.com/blog/en/new-watchlist-features-21389 · "remove these dividers at any time" https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · sections and folding in the Charting Library https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · community guides that say the symbols go too, which your report corrected: https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW · https://blueberrymarkets.com/market-analysis/how-to-manage-the-tradingview-watchlist/
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual
