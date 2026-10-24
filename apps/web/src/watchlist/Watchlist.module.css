@@ -291,10 +291,10 @@
   position: relative;
 }
 
-/* Measured from docs/reference/05-watchlist-hover.png: the separators' gray. The chart's
-   symbol keeps its selection color. A row stays so while its flag colors are open. */
-.rowWrap:hover > .row:not([aria-current="true"]),
-.rowWrap[data-flagging] > .row:not([aria-current="true"]) {
+/* Measured from docs/reference/05-watchlist-hover.png: the separators' gray. A selected row
+   keeps its selection color. A row stays so while its flag colors are open. */
+.rowWrap:hover > .row:not([data-selected]),
+.rowWrap[data-flagging] > .row:not([data-selected]) {
   background: var(--color-gutter);
 }
 
@@ -382,8 +382,9 @@
   display: none;
 }
 
-/* The chart's symbol. */
-.row[aria-current="true"] {
+/* The selected rows: the chart's symbol, and any selected with it (Shift, ⌘), in TradingView's
+   blue for a selected item. */
+.row[data-selected] {
   background: var(--color-selection);
 }
 

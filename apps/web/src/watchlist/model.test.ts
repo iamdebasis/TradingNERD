@@ -9,10 +9,13 @@ import {
   moveSection,
   moveSectionHeader,
   moveSymbol,
+  moveSymbols,
   neighbor,
   nextItem,
+  rangeOf,
   removeSection,
   removeSymbol,
+  removeSymbols,
   renameSection,
   toggleSection,
   visibleItems,
@@ -322,6 +325,50 @@ describe('the rows shown, and where a drop draws its line', () => {
     });
     expect(dropLine(list, { symbol: 'X:B1' })).toBeNull(); // hidden in a folded section
     expect(dropLine({ sections: [] }, null)).toBeNull();
+  });
+});
+
+describe('several symbols at once, as a selection', () => {
+  it('removes them wherever they are, and leaves the list alone for ones it lacks', () => {
+    expect(shape(removeSymbols(ABC, ['X:A2', 'X:B1', 'X:C1']))).toEqual([
+      ['a', 'A', false, ['X:A1']],
+      ['b', 'B', false, ['X:B2']],
+      ['c', 'C', false, []],
+    ]);
+    expect(removeSymbols(ABC, ['X:NOPE'])).toBe(ABC);
+    expect(removeSymbols(ABC, [])).toBe(ABC);
+  });
+
+  it('moves them together, in their list order, counting the place without them', () => {
+    // Picked out of order, from two sections, into a third at its start.
+    expect(shape(moveSymbols(ABC, ['X:B2', 'X:A1'], 'c', 0))).toEqual([
+      ['a', 'A', false, ['X:A2']],
+      ['b', 'B', false, ['X:B1']],
+      ['c', 'C', false, ['X:A1', 'X:B2', 'X:C1']],
+    ]);
+    // Within a section: A1 and A2 after B1 (index 1 among B's rows without them).
+    expect(shape(moveSymbols(ABC, ['X:A1', 'X:A2'], 'b', 1))[1]).toEqual([
+      'b',
+      'B',
+      false,
+      ['X:B1', 'X:A1', 'X:A2', 'X:B2'],
+    ]);
+  });
+
+  it("changes nothing dropped where they were, or into a section that isn't there", () => {
+    expect(moveSymbols(ABC, ['X:B1', 'X:B2'], 'b', 0)).toBe(ABC);
+    expect(moveSymbol(ABC, 'X:A2', 'a', 1)).toBe(ABC);
+    expect(moveSymbols(ABC, ['X:A1'], 'nope', 0)).toBe(ABC);
+    expect(moveSymbols(ABC, ['X:NOPE'], 'a', 0)).toBe(ABC);
+  });
+
+  it('ranges over the rows shown, either way and across sections, never into a folded one', () => {
+    expect(rangeOf(ABC, 'X:A2', 'X:B2')).toEqual(['X:A2', 'X:B1', 'X:B2']);
+    expect(rangeOf(ABC, 'X:C1', 'X:B2')).toEqual(['X:B2', 'X:C1']);
+    expect(rangeOf(ABC, 'X:A1', 'X:A1')).toEqual(['X:A1']);
+    expect(rangeOf(toggleSection(ABC, 'b'), 'X:A2', 'X:C1')).toEqual(['X:A2', 'X:C1']);
+    expect(rangeOf(ABC, 'X:NOPE', 'X:B1')).toEqual(['X:B1']);
+    expect(rangeOf(ABC, 'X:A1', 'X:NOPE')).toEqual([]);
   });
 });
 

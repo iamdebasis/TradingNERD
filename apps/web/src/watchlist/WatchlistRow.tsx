@@ -10,9 +10,18 @@ import type { QuoteBoard } from './QuoteBoard';
 import type { SymbolDirectory, SymbolLookup } from './SymbolDirectory';
 import styles from './Watchlist.module.css';
 
+/** How a row was clicked: ⌘ (Ctrl elsewhere) adds or takes it from the selection, Shift selects to it. */
+export interface ClickKeys {
+  toggle: boolean;
+  range: boolean;
+}
+
 export interface WatchlistRowProps {
   symbol: SymbolId;
+  /** The active row: the chart's symbol as a rule, and the one the keyboard moves from. */
   selected: boolean;
+  /** One of the rows selected together. */
+  inSelection: boolean;
   directory: SymbolDirectory;
   board: QuoteBoard;
   /** Where a dragged row would land: before or after this one. */
@@ -25,7 +34,7 @@ export interface WatchlistRowProps {
   /** The pointer rests on its flag (the button), or has left it (null). */
   onFlagHover(symbol: SymbolId, flagButton: HTMLElement | null): void;
   buttonRef?: Ref<HTMLButtonElement>;
-  onChoose(symbol: SymbolId): void;
+  onChoose(symbol: SymbolId, keys: ClickKeys): void;
   onRemove(symbol: SymbolId): void;
   onMenu(event: MouseEvent, symbol: SymbolId): void;
   onDragStart(event: DragEvent, symbol: SymbolId): void;
@@ -119,10 +128,16 @@ export function WatchlistRow(props: WatchlistRowProps) {
         aria-current={props.selected ? 'true' : undefined}
         tabIndex={props.selected ? 0 : -1}
         data-symbol={symbol}
+        data-selected={props.inSelection || undefined}
         data-unavailable={unavailable || undefined}
         data-drop={props.dropEdge ?? undefined}
         draggable
-        onClick={() => props.onChoose(symbol)}
+        onClick={(event) =>
+          props.onChoose(symbol, {
+            toggle: event.metaKey || event.ctrlKey,
+            range: event.shiftKey,
+          })
+        }
         onContextMenu={(event) => props.onMenu(event, symbol)}
         onDragStart={(event) => props.onDragStart(event, symbol)}
         onDragOver={(event) => props.onDragOver(event, symbol)}

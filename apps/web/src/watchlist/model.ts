@@ -8,39 +8,63 @@ import {
 
 /** Edits to a watchlist, as pure functions: each returns a new list, or the same one if nothing changed. */
 
-export function removeSymbol(list: Watchlist, symbol: SymbolId): Watchlist {
-  if (!list.sections.some((section) => section.symbols.includes(symbol))) return list;
+/** Removes the symbols given, wherever they are, as Delete on a selection does. */
+export function removeSymbols(list: Watchlist, symbols: Iterable<SymbolId>): Watchlist {
+  const gone = new Set(symbols);
+  if (!list.sections.some((section) => section.symbols.some((symbol) => gone.has(symbol)))) {
+    return list;
+  }
   return {
     ...list,
     sections: list.sections.map((section) => ({
       ...section,
-      symbols: section.symbols.filter((item) => item !== symbol),
+      symbols: section.symbols.filter((symbol) => !gone.has(symbol)),
     })),
   };
 }
 
+export function removeSymbol(list: Watchlist, symbol: SymbolId): Watchlist {
+  return removeSymbols(list, [symbol]);
+}
+
+const sameSymbols = (a: readonly SymbolId[], b: readonly SymbolId[] | undefined) =>
+  b !== undefined && a.length === b.length && a.every((symbol, i) => symbol === b[i]);
+
 /**
- * Moves `symbol` into section `sectionId` at `index` (counted in the list without it), as a
- * drag and drop does.
+ * Moves `symbols` into section `sectionId` at `index` (counted in the section without them), as
+ * a drag and drop does: several move together, in their order in the list. Dropped where they
+ * were, nothing changes.
  */
+export function moveSymbols(
+  list: Watchlist,
+  symbols: Iterable<SymbolId>,
+  sectionId: string,
+  index: number,
+): Watchlist {
+  const wanted = new Set(symbols);
+  const moving = allSymbols(list).filter((symbol) => wanted.has(symbol));
+  if (moving.length === 0 || !list.sections.some((section) => section.id === sectionId)) {
+    return list;
+  }
+  const sections = removeSymbols(list, moving).sections.map((section) => {
+    if (section.id !== sectionId) return section;
+    const next = [...section.symbols];
+    next.splice(Math.max(0, Math.min(index, next.length)), 0, ...moving);
+    return { ...section, symbols: next };
+  });
+  return sections.every((section, i) => sameSymbols(section.symbols, list.sections[i]?.symbols))
+    ? list
+    : { ...list, sections };
+}
+
+/** Moves one symbol, as moveSymbols. */
 export function moveSymbol(
   list: Watchlist,
   symbol: SymbolId,
   sectionId: string,
   index: number,
 ): Watchlist {
-  const target = list.sections.find((section) => section.id === sectionId);
-  if (!target || !list.sections.some((section) => section.symbols.includes(symbol))) return list;
-  const without = removeSymbol(list, symbol);
-  return {
-    ...without,
-    sections: without.sections.map((section) => {
-      if (section.id !== sectionId) return section;
-      const symbols = [...section.symbols];
-      symbols.splice(Math.max(0, Math.min(index, symbols.length)), 0, symbol);
-      return { ...section, symbols };
-    }),
-  };
+  return moveSymbols(list, [symbol], sectionId, index);
 }
 
 /**
@@ -330,4 +354,16 @@ export function neighbor(list: Watchlist, symbol: SymbolId | null, step: number)
   const index = symbol === null ? -1 : visible.indexOf(symbol);
   if (index < 0) return step > 0 ? (visible[0] ?? null) : (visible.at(-1) ?? null);
   return visible[Math.max(0, Math.min(visible.length - 1, index + step))] ?? null;
+}
+
+/**
+ * The visible symbols from `from` to `to`, both included, top to bottom: a Shift range, across
+ * sections. Just `to` when `from` isn't shown.
+ */
+export function rangeOf(list: Watchlist, from: SymbolId, to: SymbolId): SymbolId[] {
+  const visible = visibleSymbols(list);
+  const [a, b] = [visible.indexOf(from), visible.indexOf(to)];
+  if (b < 0) return [];
+  if (a < 0) return [to];
+  return visible.slice(Math.min(a, b), Math.max(a, b) + 1);
 }

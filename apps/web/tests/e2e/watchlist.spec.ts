@@ -1022,6 +1022,244 @@ test("TradingView's 6 px above a section's header that follows rows", async ({ p
   expect(alts.height).toBe(30);
 });
 
+// ---- selecting several symbols, as TradingView's Shift and ⌘ (Ctrl) do (docs/SPEC.md §5.3) ----
+
+const selectedTickers = (page: Page) =>
+  panel(page)
+    .locator('button[data-symbol][data-selected]')
+    .evaluateAll((rows) => rows.map((element) => element.getAttribute('aria-label')));
+const chartSymbol = (page: Page) => new URL(page.url()).searchParams.get('symbol');
+
+test('⌘-click adds or takes a row, Shift-click selects across sections; the chart stays', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await row(page, 'LINKUSDT').click();
+  await expect.poll(() => chartSymbol(page)).toBe('BINANCE:LINKUSDT');
+  await row(page, 'OPUSDT').click({ modifiers: ['ControlOrMeta'] });
+  await expect.poll(() => selectedTickers(page)).toEqual(['LINKUSDT', 'OPUSDT']);
+  // From the row last clicked, OPUSDT, past the Games header to MANAUSDT; then back up.
+  await row(page, 'MANAUSDT').click({ modifiers: ['Shift'] });
+  await expect.poll(() => selectedTickers(page)).toEqual(['OPUSDT', 'BATUSDT', 'MANAUSDT']);
+  await row(page, 'XRPUSDT').click({ modifiers: ['Shift'] });
+  await expect.poll(() => selectedTickers(page)).toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT']);
+  await row(page, 'LINKUSDT').click({ modifiers: ['ControlOrMeta'] });
+  await expect.poll(() => selectedTickers(page)).toEqual(['XRPUSDT', 'OPUSDT']);
+  expect(chartSymbol(page)).toBe('BINANCE:LINKUSDT');
+  // TradingView's blue for a selected row; others as they were.
+  await away(page);
+  await expect(row(page, 'XRPUSDT')).toHaveCSS('background-color', 'rgb(19, 46, 97)');
+  await expect(row(page, 'LINKUSDT')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
+  // A plain click: that row alone, on the chart.
+  await row(page, 'BATUSDT').click();
+  await expect.poll(() => selectedTickers(page)).toEqual(['BATUSDT']);
+  await expect.poll(() => chartSymbol(page)).toBe('BINANCE:BATUSDT');
+});
+
+test('Shift+↓/↑ grow and shrink the selection, ⌘A selects every row shown, Escape undoes it', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await row(page, 'XRPUSDT').click();
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowDown'); // past the Alts header
+  await expect.poll(() => selectedTickers(page)).toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT']);
+  await expect(row(page, 'OPUSDT')).toBeFocused();
+  await page.keyboard.press('Shift+ArrowUp');
+  await expect.poll(() => selectedTickers(page)).toEqual(['XRPUSDT', 'LINKUSDT']);
+  expect(chartSymbol(page)).toBe('BINANCE:XRPUSDT');
+
+  // ⌘A (Ctrl+A): every row shown, none of a folded section.
+  await header(page, 'Games').click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await expect
+    .poll(() => selectedTickers(page))
+    .toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT', 'BATUSDT']);
+  await header(page, 'Games').click();
+  await expect(row(page, 'MANAUSDT')).not.toHaveAttribute('data-selected');
+
+  // Escape: back to the chart's symbol alone.
+  await row(page, 'BATUSDT').focus();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => selectedTickers(page)).toEqual(['XRPUSDT']);
+  await expect(row(page, 'XRPUSDT')).toBeFocused();
+});
+
+test('Space and Shift+Space switch the chart to the next and previous symbol', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await row(page, 'XRPUSDT').click();
+  await page.keyboard.press('Space');
+  await expect.poll(() => chartSymbol(page)).toBe('BINANCE:LINKUSDT');
+  await expect(row(page, 'LINKUSDT')).toBeFocused();
+  await page.keyboard.press('Space'); // past the Alts header
+  await expect.poll(() => chartSymbol(page)).toBe('BINANCE:OPUSDT');
+  await page.keyboard.press('Shift+Space');
+  await expect.poll(() => chartSymbol(page)).toBe('BINANCE:LINKUSDT');
+  await expect.poll(() => selectedTickers(page)).toEqual(['LINKUSDT']);
+  // On a section's header, Space still folds it.
+  await header(page, 'Alts').focus();
+  await page.keyboard.press('Space');
+  await expect(header(page, 'Alts')).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Delete removes every selected row; the row after them is selected; flags stay', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  market.flags = { flags: { 'BINANCE:OPUSDT': 'blue' }, lastColor: 'red' };
+  await openChart(page);
+  await row(page, 'LINKUSDT').click();
+  await row(page, 'BATUSDT').click({ modifiers: ['Shift'] });
+  await page.keyboard.press('Delete');
+  await expect.poll(() => tickers(page)).toEqual(['XRPUSDT', 'MANAUSDT']);
+  await expect(row(page, 'MANAUSDT')).toBeFocused();
+  await expect.poll(() => selectedTickers(page)).toEqual(['MANAUSDT']);
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      ['crypto', 'Crypto', false, ['BINANCE:XRPUSDT']],
+      ['alts', 'Alts', false, []],
+      ['games', 'Games', false, ['BINANCE:MANAUSDT']],
+    ]);
+  expect(market.flagSaves).toEqual([]); // OPUSDT keeps its flag for when it's back
+});
+
+test("a selected row's trash removes them all; another row's, only itself", async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await row(page, 'XRPUSDT').click();
+  await row(page, 'OPUSDT').click({ modifiers: ['ControlOrMeta'] });
+  await row(page, 'OPUSDT').hover();
+  await panel(page).getByRole('button', { name: 'Remove from watchlist' }).click();
+  await expect.poll(() => tickers(page)).toEqual(['LINKUSDT', 'BATUSDT', 'MANAUSDT']);
+  await row(page, 'MANAUSDT').hover();
+  await panel(page).getByRole('button', { name: 'Remove from watchlist' }).click();
+  await expect.poll(() => tickers(page)).toEqual(['LINKUSDT', 'BATUSDT']);
+});
+
+test('⌥↵ flags every selected row, and unflags them when all are flagged', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  market.flags = { flags: { 'BINANCE:OPUSDT': 'blue' }, lastColor: 'green' };
+  await openChart(page);
+  await row(page, 'LINKUSDT').click();
+  await row(page, 'BATUSDT').click({ modifiers: ['Shift'] });
+  await page.keyboard.press('Alt+Enter');
+  await expect
+    .poll(() => market.flagSaves.at(-1))
+    .toEqual({
+      flags: {
+        'BINANCE:LINKUSDT': 'green',
+        'BINANCE:OPUSDT': 'blue', // flagged already: its color stays
+        'BINANCE:BATUSDT': 'green',
+      },
+      lastColor: 'green',
+    });
+  await page.keyboard.press('Alt+Enter');
+  await expect.poll(() => market.flagSaves.at(-1)).toEqual({ flags: {}, lastColor: 'green' });
+});
+
+test('the row menu on several selected rows flags them all; a color is for all of them', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  market.flags = { flags: {}, lastColor: 'red' };
+  await openChart(page);
+  await row(page, 'LINKUSDT').click();
+  await row(page, 'OPUSDT').click({ modifiers: ['ControlOrMeta'] });
+  await row(page, 'OPUSDT').click({ button: 'right' });
+  await expect(rowMenu(page).getByRole('menuitem').first()).toHaveText(/^Flag\/Unflag 2 symbols/);
+  await rowMenu(page).getByRole('button', { name: 'Purple' }).click();
+  await expect
+    .poll(() => market.flagSaves.at(-1))
+    .toEqual({
+      flags: { 'BINANCE:LINKUSDT': 'purple', 'BINANCE:OPUSDT': 'purple' },
+      lastColor: 'purple',
+    });
+  // The color they share is ringed: picking it takes both flags off.
+  await row(page, 'LINKUSDT').click({ button: 'right' });
+  await rowMenu(page).getByRole('button', { name: 'Purple (remove the flag)' }).click();
+  await expect.poll(() => market.flagSaves.at(-1)?.flags).toEqual({});
+  // On a row not selected, the menu is for that row, and it's the one selected.
+  await row(page, 'MANAUSDT').click({ button: 'right' });
+  await expect(rowMenu(page).getByRole('menuitem').first()).toHaveText(/^Flag\/Unflag MANAUSDT/);
+  await expect.poll(() => selectedTickers(page)).toEqual(['MANAUSDT']);
+});
+
+test('dragging one of several selected rows moves them all, together and in order', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await row(page, 'BATUSDT').click();
+  await row(page, 'LINKUSDT').click({ modifiers: ['ControlOrMeta'] });
+  await row(page, 'BATUSDT').dragTo(row(page, 'MANAUSDT'), { targetPosition: { x: 60, y: 4 } });
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      ['crypto', 'Crypto', false, ['BINANCE:XRPUSDT']],
+      ['alts', 'Alts', false, ['BINANCE:OPUSDT']],
+      ['games', 'Games', false, ['BINANCE:LINKUSDT', 'BINANCE:BATUSDT', 'BINANCE:MANAUSDT']],
+    ]);
+  await expect
+    .poll(() => tickers(page))
+    .toEqual(['XRPUSDT', 'OPUSDT', 'LINKUSDT', 'BATUSDT', 'MANAUSDT']);
+  await expect.poll(() => selectedTickers(page)).toEqual(['LINKUSDT', 'BATUSDT']);
+
+  // A row not selected moves alone.
+  await row(page, 'OPUSDT').dragTo(row(page, 'XRPUSDT'), { targetPosition: { x: 60, y: 4 } });
+  await expect
+    .poll(() => savedSections(market)?.slice(0, 2))
+    .toEqual([
+      ['crypto', 'Crypto', false, ['BINANCE:OPUSDT', 'BINANCE:XRPUSDT']],
+      ['alts', 'Alts', false, []],
+    ]);
+});
+
+test('folding a section takes its rows out of the selection', async ({ page, market }) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await row(page, 'LINKUSDT').click();
+  await row(page, 'BATUSDT').click({ modifiers: ['Shift'] });
+  await expect.poll(() => selectedTickers(page)).toEqual(['LINKUSDT', 'OPUSDT', 'BATUSDT']);
+  await header(page, 'Alts').click();
+  await header(page, 'Alts').click();
+  await expect.poll(() => selectedTickers(page)).toEqual(['LINKUSDT']);
+});
+
+test("typing a section's name, Backspace edits the name and never removes a row", async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await row(page, 'MANAUSDT').click({ button: 'right' });
+  await rowMenu(page).getByRole('menuitem', { name: 'Add section' }).click();
+  await expect(panel(page).getByRole('textbox', { name: 'Section name' })).toBeFocused();
+  await page.keyboard.type('Metaversx');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('e');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => market.watchlistSaves.at(-1)?.sections[1]?.title).toBe('Metaverse');
+  await expect.poll(async () => (await tickers(page)).length).toBe(DEFAULT_TICKERS.length);
+});
+
 test('a symbol the exchange does not list shows in red, without prices', async ({
   page,
   market,

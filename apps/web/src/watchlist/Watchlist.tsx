@@ -27,7 +27,15 @@ import { useStockKeys } from '../stocks/stockKeys';
 import { ChevronDownIcon } from '../toolbar/icons';
 import { FlagDots } from './FlagDots';
 import { FlagPalette } from './FlagPalette';
-import { flagOf, pickFlag, toggleFlag, unflagAll } from './flagEdits';
+import {
+  flagOf,
+  pickFlag,
+  pickFlags,
+  sharedFlag,
+  toggleFlag,
+  toggleFlags,
+  unflagAll,
+} from './flagEdits';
 import {
   AddIcon,
   AddSectionIcon,
@@ -50,14 +58,16 @@ import {
   type ListItem,
   moveSection,
   moveSectionHeader,
-  moveSymbol,
+  moveSymbols,
   neighbor,
   nextItem,
+  rangeOf,
   removeSection,
-  removeSymbol,
+  removeSymbols,
   renameSection,
   sameItem,
   toggleSection,
+  visibleSymbols,
 } from './model';
 import { PopupMenu, type PopupMenuEntry, type PopupMenuItem } from './PopupMenu';
 import { QuoteBoard } from './QuoteBoard';
@@ -67,7 +77,7 @@ import { useFlags } from './useFlags';
 import { useWatchlist } from './useWatchlist';
 import { useWatchlists } from './useWatchlists';
 import styles from './Watchlist.module.css';
-import { WatchlistRow } from './WatchlistRow';
+import { type ClickKeys, WatchlistRow } from './WatchlistRow';
 
 export interface WatchlistProps {
   /** The chart's symbol, highlighted in the list. */
@@ -81,8 +91,11 @@ export interface WatchlistProps {
   moreNote?: string;
 }
 
-/** What's being dragged: a row, or a section's header (open, it moves alone; folded, whole). */
-type Dragged = { symbol: SymbolId } | { section: string; folded: boolean };
+/**
+ * What's being dragged: rows (one, or the selection), or a section's header (open, it moves
+ * alone; folded, whole).
+ */
+type Dragged = { symbols: SymbolId[] } | { section: string; folded: boolean };
 
 /** Where a drop lands, and the row or header its line is drawn on. */
 type DropTarget = { line: { item: ListItem; edge: 'before' | 'after' } } & (
@@ -137,6 +150,13 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new key starts over
   const board = useMemo(() => new QuoteBoard(quotes), [quotes, stockKeyVersion]);
   const [selected, setSelected] = useState<SymbolId | null>(symbol);
+  /**
+   * The rows selected together, as TradingView's Shift and ⌘ (Ctrl) select them. A plain click,
+   * the arrows and the chart's own symbol leave just the active row (`selected`).
+   */
+  const [selection, setSelection] = useState<ReadonlySet<SymbolId>>(() => new Set([symbol]));
+  /** Where a Shift range starts: the row last clicked alone or with ⌘. */
+  const anchor = useRef<SymbolId | null>(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; symbol: SymbolId | null } | null>(null);
   const [dragging, setDragging] = useState<Dragged | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
@@ -162,13 +182,32 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+
+  /** Just this row selected (or none), as a plain click leaves it. */
+  const selectOnly = useCallback((target: SymbolId | null) => {
+    setSelected(target);
+    setSelection(new Set(target ? [target] : []));
+    anchor.current = target;
+  }, []);
 
   useEffect(() => () => board.dispose(), [board]);
   useEffect(() => {
     if (list) board.setSymbols(list.sections.flatMap((section) => section.symbols));
   }, [board, list]);
   // The chart's symbol is the selected row.
-  useEffect(() => setSelected(symbol), [symbol]);
+  useEffect(() => selectOnly(symbol), [symbol, selectOnly]);
+  // Rows selected together that go out of sight (removed, folded away, another list) leave it.
+  useEffect(() => {
+    if (!list) return;
+    const shown = new Set(visibleSymbols(list));
+    setSelection((current) =>
+      current.size <= 1 || [...current].every((item) => shown.has(item))
+        ? current
+        : new Set([...current].filter((item) => shown.has(item))),
+    );
+  }, [list]);
   useEffect(() => () => clearTimeout(bubbleTimer.current), []);
   useEffect(() => () => clearTimeout(noticeTimer.current), []);
 
@@ -198,16 +237,18 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
     [notify],
   );
 
-  // ⌥↵ (Alt+Enter), as in TradingView: flags or unflags the selected symbol.
+  // ⌥↵ (Alt+Enter), as in TradingView: flags or unflags the selected symbols.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Enter' || !event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.defaultPrevented || isEditable(event.target)) return;
       if (document.querySelector('[role="dialog"]')) return;
-      const target = selectedRef.current;
-      if (!target) return;
+      const several = selectionRef.current;
+      const active = selectedRef.current;
+      const targets = several.size > 1 ? [...several] : active ? [active] : [];
+      if (targets.length === 0) return;
       event.preventDefault();
-      editFlags((current) => toggleFlag(current, target));
+      editFlags((current) => toggleFlags(current, targets));
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -215,39 +256,116 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
 
   const choose = useCallback(
     (next: SymbolId, focus = true) => {
-      setSelected(next);
+      selectOnly(next);
       onChoose(next);
       const row = rows.current.get(next);
       if (focus) row?.focus();
       row?.scrollIntoView({ block: 'nearest' });
     },
-    [onChoose],
+    [onChoose, selectOnly],
   );
 
-  /** Removes a row; if it was the selected one, its neighbor is selected (and focused). */
-  const remove = useCallback(
-    (target: SymbolId, focus = true) => {
-      if (!list) return;
-      if (target === selected) {
-        const after = neighbor(list, target, 1);
-        const next = after === target ? neighbor(list, target, -1) : after;
-        setSelected(next === target ? null : next);
-        if (focus && next && next !== target) rows.current.get(next)?.focus();
+  /** The row made active by ⌘ or Shift, which leave the chart as it is. */
+  const activate = (target: SymbolId) => {
+    setSelected(target);
+    const row = rows.current.get(target);
+    row?.focus();
+    row?.scrollIntoView({ block: 'nearest' });
+  };
+
+  /**
+   * A row clicked. Alone, it shows on the chart and is the only one selected; with ⌘ (Ctrl
+   * elsewhere) it joins or leaves the selection; with Shift, every row shown from the last one
+   * clicked to it is selected, across sections. Neither moves the chart.
+   */
+  const onRowClick = (target: SymbolId, keys: ClickKeys) => {
+    if (!list) return;
+    if (keys.range) {
+      setSelection(new Set(rangeOf(list, anchor.current ?? selected ?? target, target)));
+    } else if (keys.toggle) {
+      const next = new Set(selection);
+      if (!next.delete(target)) next.add(target);
+      setSelection(next);
+      anchor.current = target;
+    } else {
+      choose(target);
+      return;
+    }
+    activate(target);
+  };
+
+  /**
+   * Removes rows: the selection's, or one. If the active row goes, the row shown after them (else
+   * before) is the active and selected one, focused when asked.
+   */
+  const removeRows = useCallback(
+    (targets: readonly SymbolId[], focus = true) => {
+      if (!list || targets.length === 0) return;
+      const gone = new Set(targets);
+      if (selected !== null && gone.has(selected)) {
+        const shown = visibleSymbols(list);
+        const last = Math.max(...targets.map((item) => shown.indexOf(item)));
+        const next =
+          shown.slice(last + 1).find((item) => !gone.has(item)) ??
+          shown
+            .slice(0, Math.max(last, 0))
+            .reverse()
+            .find((item) => !gone.has(item)) ??
+          null;
+        selectOnly(next);
+        if (focus && next) rows.current.get(next)?.focus();
+      } else {
+        setSelection((current) => new Set([...current].filter((item) => !gone.has(item))));
       }
-      edit((current) => removeSymbol(current, target));
+      edit((current) => removeSymbols(current, targets));
     },
-    [edit, list, selected],
+    [edit, list, selected, selectOnly],
   );
+  /** A row's remove button: the whole selection when the row is one of several, else the row. */
+  const removeRow = (target: SymbolId) =>
+    removeRows(selection.size > 1 && selection.has(target) ? [...selection] : [target], false);
 
+  /**
+   * The list's keys, as TradingView's: ↓ or Space and ↑ or Shift+Space switch the chart to the
+   * next or previous symbol; Shift+↓/↑ select the next or previous one too; ⌘A (Ctrl+A) selects
+   * every row shown; Escape goes back to just the chart's symbol; Delete or Backspace removes the
+   * selected rows. Not while a section's name is typed, and ⌘↑/↓ stay the chart's zoom.
+   */
   const onKeyDown = (event: KeyboardEvent) => {
-    if (!list || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (!list || event.altKey || isEditable(event.target)) return;
+    if (event.ctrlKey || event.metaKey) {
+      if (event.key.toLowerCase() === 'a' && !event.shiftKey) {
+        event.preventDefault();
+        setSelection(new Set(visibleSymbols(list)));
+      }
+      return;
+    }
+    // Space is a row's own key; on a section's header it folds it.
+    const onRow = event.target instanceof HTMLElement && event.target.dataset.symbol !== undefined;
+    const space = event.key === ' ' && onRow;
+    const step =
+      event.key === 'ArrowDown' || (space && !event.shiftKey)
+        ? 1
+        : event.key === 'ArrowUp' || (space && event.shiftKey)
+          ? -1
+          : 0;
+    if (step !== 0 && event.shiftKey && !space) {
       event.preventDefault();
-      const next = neighbor(list, selected, event.key === 'ArrowDown' ? 1 : -1);
+      const next = neighbor(list, selected, step);
+      if (!next) return;
+      setSelection(new Set(rangeOf(list, anchor.current ?? selected ?? next, next)));
+      activate(next);
+    } else if (step !== 0) {
+      event.preventDefault();
+      const next = neighbor(list, selected, step);
       if (next && next !== selected) choose(next);
-    } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected) {
+    } else if (event.key === 'Escape' && selection.size > 1) {
       event.preventDefault();
-      remove(selected);
+      selectOnly(symbol);
+      rows.current.get(symbol)?.focus();
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      removeRows(selection.size > 0 ? [...selection] : selected ? [selected] : []);
     }
   };
 
@@ -290,8 +408,14 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
     event.dataTransfer.setData('text/plain', text);
     setDragging(dragged);
   };
-  const onDragStart = (event: DragEvent, dragged: SymbolId) =>
-    startDrag(event, { symbol: dragged }, dragged);
+  /** A row of several selected carries them all, in their list order; another row, itself. */
+  const onDragStart = (event: DragEvent, dragged: SymbolId) => {
+    const symbols =
+      list && selection.size > 1 && selection.has(dragged)
+        ? allSymbols(list).filter((item) => selection.has(item))
+        : [dragged];
+    startDrag(event, { symbols }, symbols.join(','));
+  };
   const onHeaderDragStart = (event: DragEvent, section: WatchlistSection) =>
     startDrag(event, { section: section.id, folded: section.collapsed }, section.title);
   /** The half of the row or header under the pointer. */
@@ -329,17 +453,19 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
       setDrop(headerDrop(event, { symbol: over }));
       return;
     }
+    // Over a dragged row: nowhere new.
+    if (dragging.symbols.includes(over)) {
+      setDrop(null);
+      return;
+    }
     const edge = halfOf(event);
     const section = list.sections.find((item) => item.symbols.includes(over));
     if (!section) return;
-    const others = section.symbols.filter((item) => item !== dragging.symbol);
-    const at = others.indexOf(over);
-    const index =
-      over === dragging.symbol ? section.symbols.indexOf(over) : at + (edge === 'after' ? 1 : 0);
+    const others = section.symbols.filter((item) => !dragging.symbols.includes(item));
     setDrop({
       kind: 'symbol',
       sectionId: section.id,
-      index,
+      index: others.indexOf(over) + (edge === 'after' ? 1 : 0),
       line: { item: { symbol: over }, edge },
     });
   };
@@ -372,8 +498,8 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     if (dragging && drop) {
-      if ('symbol' in dragging && drop.kind === 'symbol') {
-        edit((current) => moveSymbol(current, dragging.symbol, drop.sectionId, drop.index));
+      if ('symbols' in dragging && drop.kind === 'symbol') {
+        edit((current) => moveSymbols(current, dragging.symbols, drop.sectionId, drop.index));
       } else if ('section' in dragging && drop.kind === 'header') {
         edit((current) => moveSectionHeader(current, dragging.section, drop.before));
       } else if ('section' in dragging && drop.kind === 'section') {
@@ -391,48 +517,56 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
   const lineOn = (item: ListItem) =>
     drop && sameItem(drop.line.item, item) ? drop.line.edge : undefined;
 
+  /** On a row of several selected, the menu is for them all; on another row, for it alone. */
   const openRowMenu = (event: MouseEvent, target: SymbolId) => {
     event.preventDefault();
     closeColors();
-    setSelected(target);
+    if (selection.size > 1 && selection.has(target)) setSelected(target);
+    else selectOnly(target);
     setMenu({ x: event.clientX, y: event.clientY, symbol: target });
   };
 
   /**
    * TradingView's row menu (docs/reference/07-watchlist-row-menu.png), without its items for
-   * other lists, compare and notes.
+   * other lists, compare and notes. For several selected rows, its flag and colors are for all
+   * of them, as TradingView's "Flag All Selected".
    */
-  const rowMenu = (target: SymbolId): PopupMenuEntry[] => [
-    {
-      label: `Flag/Unflag ${target.slice(target.indexOf(':') + 1)}`,
-      shortcut: FLAG_SHORTCUT,
-      onSelect: () => editFlags((current) => toggleFlag(current, target)),
-    },
-    {
-      key: 'flag-colors',
-      custom: (
-        <FlagDots
-          current={flagOf(flags, target)}
-          gap={12}
-          onPick={(color) => {
-            editFlags((current) => pickFlag(current, target, color));
-            setMenu(null);
-          }}
-        />
-      ),
-    },
-    { label: 'Unflag all symbols', onSelect: () => editFlags(unflagAll) },
-    'separator',
-    { label: 'Add section', icon: <AddSectionIcon />, onSelect: () => startSection(target) },
-    {
-      label: 'Add symbol',
-      icon: <AddSymbolIcon />,
-      onSelect: () => {
-        setAddAfter(target);
-        setAdding(true);
+  const rowMenu = (target: SymbolId): PopupMenuEntry[] => {
+    const targets = selection.size > 1 && selection.has(target) ? [...selection] : [target];
+    const name =
+      targets.length > 1 ? `${targets.length} symbols` : target.slice(target.indexOf(':') + 1);
+    return [
+      {
+        label: `Flag/Unflag ${name}`,
+        shortcut: FLAG_SHORTCUT,
+        onSelect: () => editFlags((current) => toggleFlags(current, targets)),
       },
-    },
-  ];
+      {
+        key: 'flag-colors',
+        custom: (
+          <FlagDots
+            current={sharedFlag(flags, targets)}
+            gap={12}
+            onPick={(color) => {
+              editFlags((current) => pickFlags(current, targets, color));
+              setMenu(null);
+            }}
+          />
+        ),
+      },
+      { label: 'Unflag all symbols', onSelect: () => editFlags(unflagAll) },
+      'separator',
+      { label: 'Add section', icon: <AddSectionIcon />, onSelect: () => startSection(target) },
+      {
+        label: 'Add symbol',
+        icon: <AddSymbolIcon />,
+        onSelect: () => {
+          setAddAfter(target);
+          setAdding(true);
+        },
+      },
+    ];
+  };
 
   const menuItems: PopupMenuEntry[] = menu?.symbol != null ? rowMenu(menu.symbol) : [...moreItems];
 
@@ -682,10 +816,11 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
                   key={item}
                   symbol={item}
                   selected={item === selected}
+                  inSelection={selection.has(item)}
                   directory={directory}
                   board={board}
                   dropEdge={
-                    dragging && 'symbol' in dragging && dragging.symbol === item
+                    dragging && 'symbols' in dragging && dragging.symbols.includes(item)
                       ? null
                       : (lineOn({ symbol: item }) ?? null)
                   }
@@ -697,8 +832,8 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
                     if (element) rows.current.set(item, element);
                     else rows.current.delete(item);
                   }}
-                  onChoose={(next) => choose(next)}
-                  onRemove={(target) => remove(target, false)}
+                  onChoose={onRowClick}
+                  onRemove={removeRow}
                   onMenu={openRowMenu}
                   onDragStart={onDragStart}
                   onDragOver={onRowDragOver}
@@ -832,7 +967,7 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
               edit((current) => addSymbol(current, next, selected));
             }
           }}
-          onRemove={(target) => remove(target, false)}
+          onRemove={(target) => removeRows([target], false)}
           onLocate={(target) => {
             setAdding(false);
             setAddAfter(null);
