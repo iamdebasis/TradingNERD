@@ -5,6 +5,7 @@ import {
   type SymbolId,
   uniqueListName,
   type Watchlist as WatchlistDoc,
+  type WatchlistSection,
   watchlistFileName,
   watchlistFromFile,
 } from '@tradingnerd/core';
@@ -44,12 +45,18 @@ import {
   addSymbol,
   addTopSection,
   allSymbols,
+  dropLine,
   insertSymbol,
+  type ListItem,
+  moveSection,
+  moveSectionHeader,
   moveSymbol,
   neighbor,
+  nextItem,
   removeSection,
   removeSymbol,
   renameSection,
+  sameItem,
   toggleSection,
 } from './model';
 import { PopupMenu, type PopupMenuEntry, type PopupMenuItem } from './PopupMenu';
@@ -74,14 +81,22 @@ export interface WatchlistProps {
   moreNote?: string;
 }
 
-interface DropTarget {
-  sectionId: string;
-  /** Index in the section, counted without the dragged symbol. */
-  index: number;
-  /** The row the indicator is drawn on, and on which edge. */
-  symbol: SymbolId | null;
-  edge: 'before' | 'after';
-}
+/** What's being dragged: a row, or a section's header (open, it moves alone; folded, whole). */
+type Dragged = { symbol: SymbolId } | { section: string; folded: boolean };
+
+/** Where a drop lands, and the row or header its line is drawn on. */
+type DropTarget = { line: { item: ListItem; edge: 'before' | 'after' } } & (
+  | {
+      kind: 'symbol';
+      sectionId: string;
+      /** Index in the section, counted without the dragged symbol. */
+      index: number;
+    }
+  /** An open section's header: above this row or header; null is the end. */
+  | { kind: 'header'; before: ListItem | null }
+  /** A folded section: above this section; null is the end. */
+  | { kind: 'section'; before: string | null }
+);
 
 /** The pointer rests this long on a row's flag before its colors show. */
 export const FLAG_HOVER_MS = 300;
@@ -101,8 +116,9 @@ type ListDialog =
 /**
  * The right-hand watchlist (docs/reference/01-chart-layout.png): sections of symbols with
  * live Last, Chg and Chg%. Click or ↑/↓ shows a symbol on the chart; Delete or a row's remove
- * button removes it; rows drag to a new place; sections fold, and a section's trash deletes it
- * but keeps its symbols. Symbols carry TradingView's flags
+ * button removes it; rows drag to a new place; sections fold, a section's header drags (an open
+ * one alone, a folded one with its symbols), and its trash deletes it but keeps its symbols.
+ * Symbols carry TradingView's flags
  * (docs/reference/06-watchlist-flags.png, 07-watchlist-row-menu.png). The list's name opens
  * TradingView's list menu: several lists, uploaded from and downloaded to TradingView's .txt
  * (docs/SPEC.md §5.9). Every change is saved by the gateway: the lists in
@@ -122,8 +138,10 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
   const board = useMemo(() => new QuoteBoard(quotes), [quotes, stockKeyVersion]);
   const [selected, setSelected] = useState<SymbolId | null>(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; symbol: SymbolId | null } | null>(null);
-  const [dragging, setDragging] = useState<SymbolId | null>(null);
+  const [dragging, setDragging] = useState<Dragged | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
+  /** Each section's element, for the edge nearer the pointer when a folded one is dragged. */
+  const sectionBoxes = useRef(new Map<string, HTMLElement>());
   const [adding, setAdding] = useState(false);
   /** Where "Add symbol" from a row's menu puts the next symbol: after this one. */
   const [addAfter, setAddAfter] = useState<SymbolId | null>(null);
@@ -266,34 +284,101 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
     setNaming(null);
   };
 
-  // ---- drag and drop ----
-  const onDragStart = (event: DragEvent, dragged: SymbolId) => {
+  // ---- drag and drop: rows, and section headers as TradingView moves them ----
+  const startDrag = (event: DragEvent, dragged: Dragged, text: string) => {
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', dragged);
+    event.dataTransfer.setData('text/plain', text);
     setDragging(dragged);
+  };
+  const onDragStart = (event: DragEvent, dragged: SymbolId) =>
+    startDrag(event, { symbol: dragged }, dragged);
+  const onHeaderDragStart = (event: DragEvent, section: WatchlistSection) =>
+    startDrag(event, { section: section.id, folded: section.collapsed }, section.title);
+  /** The half of the row or header under the pointer. */
+  const halfOf = (event: DragEvent) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return event.clientY < box.top + box.height / 2 ? 'before' : 'after';
+  };
+  /**
+   * Where a dragged header lands over `over`, a row or a header. An open section's lands above
+   * or under it, anywhere; a folded one only between sections, at the nearer edge of the one
+   * under the pointer (as in TradingView's screenshot), never above the symbols with no header.
+   */
+  const headerDrop = (event: DragEvent, over: ListItem): DropTarget | null => {
+    if (!list || !dragging || !('section' in dragging)) return null;
+    if (!dragging.folded) {
+      const before = halfOf(event) === 'before' ? over : nextItem(list, over);
+      const line = dropLine(list, before);
+      return line && { kind: 'header', before, line };
+    }
+    const at = list.sections.findIndex((section) =>
+      'section' in over ? section.id === over.section : section.symbols.includes(over.symbol),
+    );
+    const host = list.sections[at];
+    const box = host && sectionBoxes.current.get(host.id)?.getBoundingClientRect();
+    if (!host || !box) return null;
+    const upper = host.title !== '' && event.clientY < box.top + box.height / 2;
+    const before = upper ? host.id : (list.sections[at + 1]?.id ?? null);
+    const line = dropLine(list, before === null ? null : { section: before });
+    return line && { kind: 'section', before, line };
   };
   const onRowDragOver = (event: DragEvent, over: SymbolId) => {
     if (!dragging || !list) return;
     event.preventDefault();
-    const box = event.currentTarget.getBoundingClientRect();
-    const edge = event.clientY < box.top + box.height / 2 ? 'before' : 'after';
+    if ('section' in dragging) {
+      setDrop(headerDrop(event, { symbol: over }));
+      return;
+    }
+    const edge = halfOf(event);
     const section = list.sections.find((item) => item.symbols.includes(over));
     if (!section) return;
-    const others = section.symbols.filter((item) => item !== dragging);
+    const others = section.symbols.filter((item) => item !== dragging.symbol);
     const at = others.indexOf(over);
     const index =
-      over === dragging ? section.symbols.indexOf(dragging) : at + (edge === 'after' ? 1 : 0);
-    setDrop({ sectionId: section.id, index, symbol: over, edge });
+      over === dragging.symbol ? section.symbols.indexOf(over) : at + (edge === 'after' ? 1 : 0);
+    setDrop({
+      kind: 'symbol',
+      sectionId: section.id,
+      index,
+      line: { item: { symbol: over }, edge },
+    });
   };
   const onHeaderDragOver = (event: DragEvent, sectionId: string) => {
     if (!dragging) return;
     event.preventDefault();
-    setDrop({ sectionId, index: 0, symbol: null, edge: 'before' });
+    if ('section' in dragging) {
+      setDrop(headerDrop(event, { section: sectionId }));
+      return;
+    }
+    // A row dropped on a header goes first in its section.
+    const line = { item: { section: sectionId }, edge: 'after' } as const;
+    setDrop({ kind: 'symbol', sectionId, index: 0, line });
+  };
+  /** Over the list itself: between sections nothing changes; under the last row, the end. */
+  const onListDragOver = (event: DragEvent) => {
+    if (!dragging || !list) return;
+    event.preventDefault();
+    if (event.target !== event.currentTarget || !('section' in dragging)) return;
+    const last = list.sections.at(-1);
+    const box = last && sectionBoxes.current.get(last.id)?.getBoundingClientRect();
+    const line = dropLine(list, null);
+    if (!box || event.clientY < box.bottom || !line) return;
+    setDrop(
+      dragging.folded
+        ? { kind: 'section', before: null, line }
+        : { kind: 'header', before: null, line },
+    );
   };
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     if (dragging && drop) {
-      edit((current) => moveSymbol(current, dragging, drop.sectionId, drop.index));
+      if ('symbol' in dragging && drop.kind === 'symbol') {
+        edit((current) => moveSymbol(current, dragging.symbol, drop.sectionId, drop.index));
+      } else if ('section' in dragging && drop.kind === 'header') {
+        edit((current) => moveSectionHeader(current, dragging.section, drop.before));
+      } else if ('section' in dragging && drop.kind === 'section') {
+        edit((current) => moveSection(current, dragging.section, drop.before));
+      }
     }
     setDragging(null);
     setDrop(null);
@@ -302,6 +387,9 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
     setDragging(null);
     setDrop(null);
   };
+  /** The edge of a row or header the drop's line is drawn on, if it's this one. */
+  const lineOn = (item: ListItem) =>
+    drop && sameItem(drop.line.item, item) ? drop.line.edge : undefined;
 
   const openRowMenu = (event: MouseEvent, target: SymbolId) => {
     event.preventDefault();
@@ -505,12 +593,16 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
         data-dragging={dragging ? '' : undefined}
         onKeyDown={onKeyDown}
         onScroll={closeColors}
-        onDragOver={(event) => dragging && event.preventDefault()}
+        onDragOver={onListDragOver}
         onDrop={onDrop}
       >
         {list?.sections.map((section) => (
           <section
             key={section.id}
+            ref={(element) => {
+              if (element) sectionBoxes.current.set(section.id, element);
+              else sectionBoxes.current.delete(section.id);
+            }}
             aria-label={section.title || 'Symbols'}
             className={styles.section}
           >
@@ -546,9 +638,11 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
                       type="button"
                       className={styles.sectionHeader}
                       aria-expanded={!section.collapsed}
-                      data-drop={
-                        drop?.sectionId === section.id && drop.symbol === null
-                          ? 'before'
+                      draggable
+                      data-drop={lineOn({ section: section.id })}
+                      data-dragged={
+                        dragging && 'section' in dragging && dragging.section === section.id
+                          ? ''
                           : undefined
                       }
                       onClick={() =>
@@ -557,22 +651,27 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
                       // As in TradingView, a double-click renames it. Its two clicks folded and
                       // unfolded it, so it stays as it was.
                       onDoubleClick={() => setNaming(section.id)}
+                      onDragStart={(event) => onHeaderDragStart(event, section)}
                       onDragOver={(event) => onHeaderDragOver(event, section.id)}
+                      onDragEnd={onDragEnd}
                     >
                       <SectionCaret open={!section.collapsed} />
                       <span>{section.title}</span>
                     </button>
-                    {/* TradingView's trash on a header: the section goes, its symbols stay. */}
-                    <button
-                      type="button"
-                      className={styles.sectionRemove}
-                      aria-label={`Delete section ${section.title}`}
-                      onClick={() =>
-                        edit((current: WatchlistDoc) => removeSection(current, section.id))
-                      }
-                    >
-                      <RemoveIcon />
-                    </button>
+                    {/* TradingView's trash on a header: the section goes, its symbols stay. A
+                        folded section has none. */}
+                    {!section.collapsed && (
+                      <button
+                        type="button"
+                        className={styles.sectionRemove}
+                        aria-label={`Delete section ${section.title}`}
+                        onClick={() =>
+                          edit((current: WatchlistDoc) => removeSection(current, section.id))
+                        }
+                      >
+                        <RemoveIcon />
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -585,7 +684,11 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
                   selected={item === selected}
                   directory={directory}
                   board={board}
-                  dropEdge={drop?.symbol === item && item !== dragging ? drop.edge : null}
+                  dropEdge={
+                    dragging && 'symbol' in dragging && dragging.symbol === item
+                      ? null
+                      : (lineOn({ symbol: item }) ?? null)
+                  }
                   flag={flagOf(flags, item)}
                   flagging={bubble?.symbol === item}
                   onFlagClick={(target) => editFlags((current) => toggleFlag(current, target))}

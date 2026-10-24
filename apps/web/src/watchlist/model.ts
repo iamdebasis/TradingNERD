@@ -1,4 +1,10 @@
-import { MAX_WATCHLIST_SYMBOLS, type SymbolId, type Watchlist } from '@tradingnerd/core';
+import {
+  MAX_WATCHLIST_SECTIONS,
+  MAX_WATCHLIST_SYMBOLS,
+  type SymbolId,
+  type Watchlist,
+  type WatchlistSection,
+} from '@tradingnerd/core';
 
 /** Edits to a watchlist, as pure functions: each returns a new list, or the same one if nothing changed. */
 
@@ -129,12 +135,13 @@ export function renameSection(list: Watchlist, sectionId: string, title: string)
  * Deletes a section but keeps its symbols, as TradingView's trash on a section's header does:
  * TradingView's list is one line of symbols with "###" dividers, so they join the end of the
  * section above (opened, so they stay in sight), or, from the first section, stay at the top
- * with no header. An empty section just goes. A section without a header has none to delete.
+ * with no header. An empty section just goes. A section without a header has none to delete,
+ * and a folded one can't be deleted, as on TradingView.
  */
 export function removeSection(list: Watchlist, sectionId: string): Watchlist {
   const at = list.sections.findIndex((section) => section.id === sectionId);
   const target = list.sections[at];
-  if (!target || target.title === '') return list;
+  if (!target || target.title === '' || target.collapsed) return list;
   const sections = [...list.sections];
   const above = sections[at - 1];
   if (target.symbols.length === 0) {
@@ -157,6 +164,144 @@ export function removeSection(list: Watchlist, sectionId: string): Watchlist {
     });
   }
   return { ...list, sections };
+}
+
+/** A row the list shows: a symbol's, or a section's header. */
+export type ListItem = { symbol: SymbolId } | { section: string };
+
+export const sameItem = (a: ListItem, b: ListItem) =>
+  'symbol' in a
+    ? 'symbol' in b && a.symbol === b.symbol
+    : 'section' in b && a.section === b.section;
+
+/** The rows a person sees, top to bottom: the headers, and the symbols of open sections. */
+export function visibleItems(list: Watchlist): ListItem[] {
+  return list.sections.flatMap((section) => [
+    ...(section.title === '' ? [] : [{ section: section.id }]),
+    ...(section.collapsed ? [] : section.symbols.map((symbol) => ({ symbol }))),
+  ]);
+}
+
+/** The row shown after `item`; null at the end. */
+export function nextItem(list: Watchlist, item: ListItem): ListItem | null {
+  const items = visibleItems(list);
+  const at = items.findIndex((other) => sameItem(other, item));
+  return at < 0 ? null : (items[at + 1] ?? null);
+}
+
+/**
+ * Where the line for a drop above `slot` (null: at the end) is drawn, as TradingView draws it:
+ * on the line under the row above, or over `slot` when nothing is above it.
+ */
+export function dropLine(
+  list: Watchlist,
+  slot: ListItem | null,
+): { item: ListItem; edge: 'before' | 'after' } | null {
+  const items = visibleItems(list);
+  const at = slot === null ? items.length : items.findIndex((item) => sameItem(item, slot));
+  if (at < 0) return null;
+  const above = items[at - 1];
+  if (above) return { item: above, edge: 'after' };
+  const first = items[at];
+  return first ? { item: first, edge: 'before' } : null;
+}
+
+/** TradingView's list: one line of symbols, each section's header a divider in it. */
+type Line = ({ header: WatchlistSection } | { symbol: SymbolId })[];
+
+function toLine(list: Watchlist): Line {
+  return list.sections.flatMap((section) => [
+    ...(section.title === '' ? [] : [{ header: section }]),
+    ...section.symbols.map((symbol) => ({ symbol })),
+  ]);
+}
+
+/** Sections again from the line: symbols above the first header make a group with no header. */
+function fromLine(line: Line, topId: string): WatchlistSection[] {
+  const sections: WatchlistSection[] = [];
+  for (const item of line) {
+    if ('header' in item) {
+      sections.push({ ...item.header, symbols: [] });
+      continue;
+    }
+    if (sections.length === 0) {
+      sections.push({ id: topId, title: '', collapsed: false, symbols: [] });
+    }
+    sections.at(-1)?.symbols.push(item.symbol);
+  }
+  return sections;
+}
+
+/** The id of the symbols with no header: theirs if they're there, else a new one. */
+function topId(list: Watchlist): string {
+  const first = list.sections[0];
+  if (first?.title === '') return first.id;
+  const ids = new Set(list.sections.map((section) => section.id));
+  let id = 'top';
+  for (let n = 2; ids.has(id); n++) id = `top-${n}`;
+  return id;
+}
+
+/**
+ * Moves an open section's header alone, as TradingView does: the rows stay where they are, the
+ * symbols below the header's new place (up to the next header) become its own, and the ones it
+ * leaves join the section above (opened, so they stay in sight) or stay at the top with no
+ * header. It lands above `before` (a symbol of an open section, or a header), or at the end for
+ * null. A folded section moves whole, with moveSection.
+ */
+export function moveSectionHeader(
+  list: Watchlist,
+  sectionId: string,
+  before: ListItem | null,
+): Watchlist {
+  const target = list.sections.find((section) => section.id === sectionId);
+  if (!target || target.title === '' || target.collapsed) return list;
+  if (before && 'symbol' in before) {
+    const host = list.sections.find((section) => section.symbols.includes(before.symbol));
+    if (!host || host.collapsed) return list;
+  }
+  const line = toLine(list);
+  const from = line.findIndex((item) => 'header' in item && item.header === target);
+  const [header] = line.splice(from, 1);
+  const to =
+    before === null
+      ? line.length
+      : line.findIndex((item) =>
+          'symbol' in before
+            ? 'symbol' in item && item.symbol === before.symbol
+            : 'header' in item && item.header.id === before.section,
+        );
+  // Above itself, or above its own first row: where it is.
+  if (!header || to < 0 || to === from) return list;
+  line.splice(to, 0, header);
+  const sections = fromLine(line, topId(list));
+  if (sections.length > MAX_WATCHLIST_SECTIONS) return list;
+  const left = new Set(target.symbols);
+  return {
+    ...list,
+    sections: sections.map((section) =>
+      section.collapsed && section.symbols.some((symbol) => left.has(symbol))
+        ? { ...section, collapsed: false }
+        : section,
+    ),
+  };
+}
+
+/**
+ * Moves a whole section, its symbols with it, as TradingView moves a folded one: above the
+ * section `before`, or to the end for null. Never above the symbols with no header, which would
+ * take them in.
+ */
+export function moveSection(list: Watchlist, sectionId: string, before: string | null): Watchlist {
+  const target = list.sections.find((section) => section.id === sectionId);
+  if (!target || target.title === '' || before === sectionId) return list;
+  const rest = list.sections.filter((section) => section !== target);
+  const at = before === null ? rest.length : rest.findIndex((section) => section.id === before);
+  if (at < 0 || rest[at]?.title === '') return list;
+  const sections = [...rest.slice(0, at), target, ...rest.slice(at)];
+  return sections.every((section, i) => section === list.sections[i])
+    ? list
+    : { ...list, sections };
 }
 
 export function toggleSection(list: Watchlist, sectionId: string): Watchlist {

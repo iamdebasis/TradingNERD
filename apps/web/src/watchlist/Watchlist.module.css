@@ -166,14 +166,21 @@
   scrollbar-width: thin;
 }
 
+/* TradingView leaves 6 px above a section's header that follows rows (measured from both of
+   its screenshots with sections); the first stays 5 px under the column titles. */
+.section + .section {
+  margin-top: 6px;
+}
+
 /*
- * Section headers stay pinned while their rows scroll under them, as in the reference. Under
- * the mouse a header turns the rows' gray and shows TradingView's trash (measured from its
- * screenshot at 1×: a row's bin, in a row's place, in the header's gray without the square).
+ * Section headers stay pinned while their rows scroll under them, as in the reference, above
+ * the rows and their drop line. Under the mouse a header turns the rows' gray and shows
+ * TradingView's trash (measured from its screenshot at 1×: a row's bin, in a row's place, in
+ * the header's gray without the square).
  */
 .sectionHead {
   position: sticky;
-  z-index: 1;
+  z-index: 2;
   top: 0;
 }
 
@@ -199,15 +206,20 @@
   background: var(--color-gutter);
 }
 
+/* The header being dragged: the chart row's blue, as in TradingView's screenshot. */
+.sectionHead > button.sectionHeader[data-dragged] {
+  background: var(--color-selection);
+}
+
 /*
- * 22 px and 7 px from the right edge, as a row's remove button, and 4 px down: its 12 × 14 bin
+ * 22 px and 6 px from the right edge, as a row's remove button, and 4 px down: its 12 × 14 bin
  * 8 px below the header's top, as measured. The square shows only with the pointer on it
  * (provisional: TradingView's screenshot has the pointer elsewhere on the header).
  */
 .sectionRemove {
   position: absolute;
   top: 4px;
-  right: 7px;
+  right: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -286,11 +298,14 @@
   background: var(--color-gutter);
 }
 
-/* 22 px, 4 px corners, 7 px from the row's right edge, centered on the row above its line. */
+/*
+ * 22 px, 4 px corners, centered on the row above its line, 6 px from its right edge: the bin
+ * ends 2.5 px short of the numbers' right edge, as in TradingView's screenshots (2 and 2.5 px).
+ */
 .remove {
   position: absolute;
   top: 3.5px;
-  right: 7px;
+  right: 6px;
   display: none;
   align-items: center;
   justify-content: center;
@@ -377,28 +392,55 @@
   outline-offset: -1px;
 }
 
-/* Where a dragged row will land. */
+/*
+ * Where a dragged row or section will land, as TradingView draws it (measured from its
+ * screenshot of a section being dragged): a 2 px line of the accent, centered on the line under
+ * the row above, from a 10 px ring at its left end, flush with the panel's edge.
+ */
+.row[data-drop]::before,
 .row[data-drop]::after,
+.sectionHeader[data-drop]::before,
 .sectionHeader[data-drop]::after {
   content: "";
   position: absolute;
-  right: 0;
+  z-index: 1;
+}
+
+.row[data-drop]::before,
+.sectionHeader[data-drop]::before {
   left: 0;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-accent);
+  border-radius: 50%;
+}
+
+.row[data-drop]::after,
+.sectionHeader[data-drop]::after {
+  right: 0;
+  left: 10px;
   height: 2px;
   background: var(--color-accent);
 }
 
+.row[data-drop="before"]::before,
+.sectionHeader[data-drop="before"]::before {
+  top: -5px;
+}
+
 .row[data-drop="before"]::after,
-.sectionHeader[data-drop]::after {
-  bottom: -1px;
-}
-
-.row[data-drop="before"]::after {
+.sectionHeader[data-drop="before"]::after {
   top: -1px;
-  bottom: auto;
 }
 
-.row[data-drop="after"]::after {
+.row[data-drop="after"]::before,
+.sectionHeader[data-drop="after"]::before {
+  bottom: -5px;
+}
+
+.row[data-drop="after"]::after,
+.sectionHeader[data-drop="after"]::after {
   bottom: -1px;
 }
 

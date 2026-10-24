@@ -138,10 +138,11 @@ test("a row under the mouse turns the separators' gray and offers a remove butto
   const remove = panel(page).getByRole('button', { name: 'Remove from watchlist' });
   await expect(remove).toHaveCount(1); // the hovered row's only
   await expect(remove).toHaveCSS('background-color', 'rgb(74, 74, 74)');
-  // docs/reference/05-watchlist-hover.png: 22 px, 7 px from the row's right edge, centered.
+  // docs/reference/05-watchlist-hover.png: 22 px, centered, 6 px from the row's right edge: its
+  // bin ends 2.5 px short of the numbers' right edge, as there.
   const [button, line] = [await boxOf(remove), await boxOf(link)];
   expect([button.width, button.height]).toEqual([22, 22]);
-  expect(line.x + line.width - (button.x + button.width)).toBe(7);
+  expect(line.x + line.width - (button.x + button.width)).toBe(6);
   expect(button.y - line.y).toBe(3.5);
 
   // The chart's own row keeps its selection color under the mouse.
@@ -612,19 +613,19 @@ test("a section's header under the mouse turns the rows' gray and shows a row's 
   // TradingView's screenshot at 1×: no square, the header's gray.
   await expect(bin).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   await expect(bin).toHaveCSS('color', 'rgb(140, 140, 140)');
-  // A row's 22 px button, 7 px from the right edge, and 4 px down.
+  // A row's 22 px button, 6 px from the right edge, and 4 px down.
   const [button, line] = [await boxOf(bin), await boxOf(alts)];
   expect([button.width, button.height]).toEqual([22, 22]);
-  expect(line.x + line.width - (button.x + button.width)).toBe(7);
+  expect(line.x + line.width - (button.x + button.width)).toBe(6);
   expect(button.y - line.y).toBe(4);
-  // Its bin, as measured there: 12 × 14, 8 px below the header's top, 12 px from its right.
+  // Its bin, as measured there: 12 × 14, 8 px below the header's top, 11 px from its right.
   const ink = inkBox(PNG.sync.read(await page.screenshot({ clip: button })), 46 + 30);
   expect({
     x: button.x - line.x + ink.x,
     y: button.y - line.y + ink.y,
     width: ink.width,
     height: ink.height,
-  }).toEqual({ x: line.width - 24, y: 8, width: 12, height: 14 });
+  }).toEqual({ x: line.width - 23, y: 8, width: 12, height: 14 });
 
   // Where a row's trash is, on the same line.
   await row(page, 'OPUSDT').hover();
@@ -762,6 +763,263 @@ test('a row dropped on a header still goes first in its section; the trash keeps
       ['alts', 'Alts', false, ['BINANCE:MANAUSDT', 'BINANCE:OPUSDT', 'BINANCE:BATUSDT']],
       ['games', 'Games', false, []],
     ]);
+});
+
+// ---- moving a section: dragging its header, as on TradingView (docs/SPEC.md §5.3) ----
+
+/** A drag of `source` over `target`, `y` px into it, as the page's own drag events. */
+async function dragOver(page: Page, source: Locator, target: Locator, y: number) {
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await source.dispatchEvent('dragstart', { dataTransfer });
+  const box = await boxOf(target);
+  await target.dispatchEvent('dragover', {
+    dataTransfer,
+    clientX: box.x + 60,
+    clientY: box.y + y,
+  });
+  return dataTransfer;
+}
+const SPACED = {
+  sections: [
+    {
+      id: 'crypto',
+      title: 'Crypto',
+      collapsed: false,
+      symbols: ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT'],
+    },
+    { id: 'alts', title: 'Alts', collapsed: true, symbols: ['BINANCE:OPUSDT', 'BINANCE:BATUSDT'] },
+    {
+      id: 'games',
+      title: 'Games',
+      collapsed: false,
+      symbols: ['BINANCE:MANAUSDT', 'BINANCE:IOTAUSDT'],
+    },
+  ],
+};
+
+test("an open section's header drags alone: the rows stay put and change sections", async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  const order = ['XRPUSDT', 'LINKUSDT', 'OPUSDT', 'BATUSDT', 'MANAUSDT'];
+  // Up, above LINKUSDT: Alts takes it, and every row stays where it was.
+  await header(page, 'Alts').dragTo(row(page, 'LINKUSDT'), { targetPosition: { x: 60, y: 6 } });
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      ['crypto', 'Crypto', false, ['BINANCE:XRPUSDT']],
+      ['alts', 'Alts', false, ['BINANCE:LINKUSDT', 'BINANCE:OPUSDT', 'BINANCE:BATUSDT']],
+      ['games', 'Games', false, ['BINANCE:MANAUSDT']],
+    ]);
+  await expect(headers(page)).toHaveText(['Crypto', 'Alts', 'Games']);
+  await expect.poll(() => tickers(page)).toEqual(order);
+
+  // Down, past its rows to above MANAUSDT: the rows it leaves join Crypto, above them.
+  await header(page, 'Alts').dragTo(row(page, 'MANAUSDT'), { targetPosition: { x: 60, y: 6 } });
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      [
+        'crypto',
+        'Crypto',
+        false,
+        ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT', 'BINANCE:OPUSDT', 'BINANCE:BATUSDT'],
+      ],
+      ['games', 'Games', false, []],
+      ['alts', 'Alts', false, ['BINANCE:MANAUSDT']],
+    ]);
+  await expect(headers(page)).toHaveText(['Crypto', 'Games', 'Alts']);
+  await expect.poll(() => tickers(page)).toEqual(order);
+
+  // Dropped where it is, above its own first row: nothing changes.
+  const saves = market.watchlistSaves.length;
+  await header(page, 'Alts').dragTo(row(page, 'MANAUSDT'), { targetPosition: { x: 60, y: 6 } });
+  await page.waitForTimeout(300);
+  expect(market.watchlistSaves).toHaveLength(saves);
+  await openChart(page); // reload: the gateway kept it
+  await expect(headers(page)).toHaveText(['Crypto', 'Games', 'Alts']);
+});
+
+test('under the last row a header lands at the end; the first one leaves its rows headerless', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  const crypto = header(page, 'Crypto');
+  const mana = await boxOf(row(page, 'MANAUSDT'));
+  const list = panel(page).locator('section').first().locator('..');
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await crypto.dispatchEvent('dragstart', { dataTransfer });
+  await list.dispatchEvent('dragover', {
+    dataTransfer,
+    clientX: mana.x + 60,
+    clientY: mana.y + mana.height + 40,
+  });
+  await expect(row(page, 'MANAUSDT')).toHaveAttribute('data-drop', 'after');
+  await list.dispatchEvent('drop', { dataTransfer });
+  await crypto.dispatchEvent('dragend', { dataTransfer });
+  await expect(headers(page)).toHaveText(['Alts', 'Games', 'Crypto']);
+  await expect
+    .poll(() => tickers(page))
+    .toEqual(['XRPUSDT', 'LINKUSDT', 'OPUSDT', 'BATUSDT', 'MANAUSDT']);
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      ['top', '', false, ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT']],
+      ['alts', 'Alts', false, ['BINANCE:OPUSDT', 'BINANCE:BATUSDT']],
+      ['games', 'Games', false, ['BINANCE:MANAUSDT']],
+      ['crypto', 'Crypto', false, []],
+    ]);
+});
+
+test('a folded section drags whole, lands only between sections, and stays folded', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = SPACED;
+  await openChart(page);
+  const alts = header(page, 'Alts');
+  // Over the upper half of Crypto, the line goes above it; over the lower half, under it. Never
+  // between its rows.
+  const dataTransfer = await dragOver(page, alts, row(page, 'XRPUSDT'), 5);
+  await expect(header(page, 'Crypto')).toHaveAttribute('data-drop', 'before');
+  const link = await boxOf(row(page, 'LINKUSDT'));
+  await row(page, 'LINKUSDT').dispatchEvent('dragover', {
+    dataTransfer,
+    clientX: link.x + 60,
+    clientY: link.y + 5,
+  });
+  await expect(row(page, 'LINKUSDT')).toHaveAttribute('data-drop', 'after');
+  await expect(panel(page).locator('[data-drop]')).toHaveCount(1);
+  // Over Games' last row, its lower half: the end, under IOTAUSDT.
+  const iota = await boxOf(row(page, 'IOTAUSDT'));
+  await row(page, 'IOTAUSDT').dispatchEvent('dragover', {
+    dataTransfer,
+    clientX: iota.x + 60,
+    clientY: iota.y + 15,
+  });
+  await expect(row(page, 'IOTAUSDT')).toHaveAttribute('data-drop', 'after');
+  await row(page, 'IOTAUSDT').dispatchEvent('drop', { dataTransfer });
+  await alts.dispatchEvent('dragend', { dataTransfer });
+  await expect
+    .poll(() => savedSections(market))
+    .toEqual([
+      ['crypto', 'Crypto', false, ['BINANCE:XRPUSDT', 'BINANCE:LINKUSDT']],
+      ['games', 'Games', false, ['BINANCE:MANAUSDT', 'BINANCE:IOTAUSDT']],
+      ['alts', 'Alts', true, ['BINANCE:OPUSDT', 'BINANCE:BATUSDT']],
+    ]);
+  await expect(headers(page)).toHaveText(['Crypto', 'Games', 'Alts']);
+  await expect(alts).toHaveAttribute('aria-expanded', 'false');
+
+  // Unfolded, its rows are there.
+  await alts.click();
+  await expect
+    .poll(() => tickers(page))
+    .toEqual(['XRPUSDT', 'LINKUSDT', 'MANAUSDT', 'IOTAUSDT', 'OPUSDT', 'BATUSDT']);
+
+  // Folded again, with the browser's own drag, above Crypto.
+  await alts.click();
+  await alts.dragTo(row(page, 'XRPUSDT'), { targetPosition: { x: 60, y: 4 } });
+  await expect(headers(page)).toHaveText(['Alts', 'Crypto', 'Games']);
+  await expect
+    .poll(() => savedSections(market)?.[0])
+    .toEqual(['alts', 'Alts', true, ['BINANCE:OPUSDT', 'BINANCE:BATUSDT']]);
+});
+
+test("TradingView's drop line: 2 px of blue from a 10 px ring, the dragged header blue", async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  const alts = header(page, 'Alts');
+  // Alts' header over LINKUSDT's upper half: it lands above LINKUSDT, so the line is drawn on
+  // the line under XRPUSDT.
+  const dataTransfer = await dragOver(page, alts, row(page, 'LINKUSDT'), 5);
+  const xrp = row(page, 'XRPUSDT');
+  await expect(xrp).toHaveAttribute('data-drop', 'after');
+  await expect(alts).toHaveCSS('background-color', 'rgb(19, 46, 97)');
+  const styles = await xrp.evaluate((element) => {
+    const [ring, line] = [
+      getComputedStyle(element, '::before'),
+      getComputedStyle(element, '::after'),
+    ];
+    return {
+      ring: [ring.left, ring.width, ring.height, ring.borderTopWidth, ring.borderTopColor],
+      line: [line.left, line.right, line.height, line.backgroundColor],
+    };
+  });
+  expect(styles).toEqual({
+    ring: ['0px', '10px', '10px', '2px', 'rgb(41, 98, 255)'],
+    line: ['10px', '0px', '2px', 'rgb(41, 98, 255)'],
+  });
+  // As drawn, at 2×: the line 2 px thick; the ring hollow and centered on it.
+  const box = await boxOf(xrp);
+  const shot = PNG.sync.read(
+    await page.screenshot({
+      clip: { x: box.x, y: box.y + box.height - 10, width: 80, height: 20 },
+    }),
+  );
+  const blue = (x: number, y: number) => {
+    const i = (y * shot.width + x) * 4;
+    return (shot.data[i + 2] ?? 0) > 200 && (shot.data[i] ?? 0) < 100;
+  };
+  const ys = [...Array(shot.height).keys()];
+  const line = ys.filter((y) => blue(120, y));
+  expect(line).toHaveLength(4);
+  const ring = ys.filter((y) => blue(10, y)); // the ring's top and bottom, over its middle
+  const middle = (values: number[]) => ((values[0] ?? 0) + (values.at(-1) ?? 0)) / 2;
+  expect(Math.abs(middle(ring) - middle(line))).toBeLessThanOrEqual(0.5);
+  expect(ring.length).toBeLessThan(12); // hollow: only its top and bottom
+  expect(blue(0, Math.round(middle(line)))).toBe(true); // flush with the panel's edge
+  await alts.dispatchEvent('dragend', { dataTransfer });
+  await expect(alts).toHaveCSS('background-color', 'rgb(15, 15, 15)');
+});
+
+test("a row's drag draws the same line and ring", async ({ page, market }) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  const dataTransfer = await dragOver(page, row(page, 'BATUSDT'), row(page, 'LINKUSDT'), 5);
+  const link = row(page, 'LINKUSDT');
+  await expect(link).toHaveAttribute('data-drop', 'before');
+  const ring = await link.evaluate((element) => {
+    const style = getComputedStyle(element, '::before');
+    return [style.left, style.width, style.height, style.borderTopWidth];
+  });
+  expect(ring).toEqual(['0px', '10px', '10px', '2px']);
+  await row(page, 'BATUSDT').dispatchEvent('dragend', { dataTransfer });
+});
+
+test('a folded section shows no trash: only an open one can be deleted', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  const alts = header(page, 'Alts');
+  await alts.click();
+  await expect(alts).toHaveAttribute('aria-expanded', 'false');
+  await alts.hover();
+  await expect(trash(page, 'Alts')).toHaveCount(0);
+  await alts.click();
+  await alts.hover();
+  await expect(trash(page, 'Alts')).toHaveCSS('opacity', '1');
+});
+
+test("TradingView's 6 px above a section's header that follows rows", async ({ page, market }) => {
+  market.watchlist = SPACED;
+  await openChart(page);
+  const [link, alts, games] = [
+    await boxOf(row(page, 'LINKUSDT')),
+    await boxOf(header(page, 'Alts')),
+    await boxOf(header(page, 'Games')),
+  ];
+  expect(alts.y - (link.y + link.height)).toBe(6);
+  expect(games.y - (alts.y + alts.height)).toBe(6); // under a folded header too
+  expect(alts.height).toBe(30);
 });
 
 test('a symbol the exchange does not list shows in red, without prices', async ({

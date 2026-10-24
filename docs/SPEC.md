@@ -1,6 +1,6 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-24** (M0–M8 committed; M8b, deleting sections, built and verified, awaiting review).
+Living document. Last updated **2026-10-24** (M0–M8b committed; M8c, moving sections, built and verified, awaiting review).
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
@@ -117,6 +117,9 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-24 | **Upload list…** reads TradingView's .txt into a new list named after the file; each list's **⤓** saves it back in the same format | Your YES. TradingView's own export is in its advanced view; the ⤓ beside each list's ★ was your idea. |
 | 2026-10-24 | Symbols we don't chart (Bitstamp, CRYPTOCAP, GLASSNODE, OTC, indices, spreads) stay in an uploaded list, in red | Your YES: nothing uploaded is lost, and a list downloads back exactly as it came. |
 | 2026-10-24 | **Deleting a section** (M8b): under the mouse a section's header shows TradingView's trash, which deletes the section and keeps its symbols. They join the end of the section above (opened if folded), or stay at the top with no header if it was the first. An empty section just goes. Nothing is asked | Your YES after the research (§4.7), and your report that TradingView's trash keeps the symbols (a community guide said they go too). |
+| 2026-10-24 | **Moving sections** (M8c): a section's header drags. An open one moves alone: the rows stay put, the symbols below its new place (up to the next header) become its own, and the ones it leaves join the section above (opened if folded) or stay at the top with no header. A folded one moves whole, only between sections (above any section, or at the end), and stays folded. A folded section has no trash | Your description and screenshot; TradingView only documents that sections can be moved (§4.8). Your YES. |
+| 2026-10-24 | TradingView's drop line on every drag (2 px of the accent from a 10 px ring), the dragged header blue, 6 px above a section's header, and both trash buttons 6 px from the edge | Measured from your screenshots (§4.7, §4.8); your YES to my recommendations. |
+| 2026-10-24 | M8b's provisional questions dropped: whether TradingView asks before deleting, whether a folded section above opens, the trash under the pointer, a right-click delete | Your call ("no need"). |
 
 ## 4. Research findings
 
@@ -227,6 +230,23 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - TradingView leaves 6 px between the row above and a section's header.
 - **Searched with nothing more found:** the help center in English, German, Japanese, Chinese, Korean and Russian; Reddit; YouTube; guides in Japanese, Chinese and German.
 
+### 4.8 Moving sections (researched 2026-10-24)
+
+- **TradingView's own pages:**
+  - Sections are dividers you can "rename, move, or remove" (its help center). They "can be named, moved, and deleted", and sorting happens within them (its blog, 2020). A list is one line of symbols with "###" dividers (its Charting Library).
+  - Folding: a click on a header hides its symbols, kept across reloads (its release notes, 32.1.0, August 2026).
+  - Shift and Ctrl/⌘ select several symbols, and Delete removes them all (its blog, April 2018).
+  - Nothing says how moving works.
+- **Your description** (2026-10-24): an open section's header moves alone, without its symbols; a folded one carries them; a folded one lands only between sections (above one, or at the end), never inside one; a folded section can't be deleted.
+- **Third-party sources agree:** a clone project's issue (opentrader #21) describes the same rules for its "reference app", which it doesn't name. A Japanese guide (tetori.jp, updated 1 October 2026) moves sections "the same way as symbols" and drags several Ctrl-selected symbols together. A guide about folded sections moving with their symbols (WallStreet.io) describes another app.
+- **Measured from your screenshot of a section being dragged** (Display P3, 1.322×):
+  - The dragged header turns the chart row's blue over its 30 px.
+  - The drop line is 2 px of the accent, on the line under the last row above the landing place, from a 10 px hollow ring at its left end, flush with the panel's edge.
+  - Over CURRENCY's second row, a folded section's line sits above CURRENCY: the nearer edge of the section under the pointer.
+  - A faded image of the header follows the pointer.
+  - 6 px above every section's header, as in your earlier screenshot (§4.7).
+  - The panel is pure black there (#000000), and its grays darker than in your M6 screenshots, which our colors follow (§11).
+
 ## 5. Requirements (v1)
 
 ### 5.1 Chart
@@ -288,7 +308,8 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Interaction:**
   - Click or ↑/↓ switches the chart.
   - Drag to reorder, right-click menu, Delete removes.
-  - A section's trash deletes the section, keeping its symbols.
+  - A section's header drags: an open one alone, a folded one whole and only between sections.
+  - An open section's trash deletes the section, keeping its symbols.
 - **Unavailable symbols** show red text and a gray letter avatar.
 - **Persistence:** the panel is resizable and everything is remembered.
 - **Done when:** 50 rows tick smoothly and the list survives a restart.
@@ -297,12 +318,18 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Chg decimals:** at most 5, cut rather than rounded, as the reference's 6-decimal coins show. Chg% rounds to 2.
   - **Live:** every row's quotes come from the gateway and are painted in one animation frame. With all 50 rows changing in the same frame, a frame costs about 1 ms (budget 2 ms).
   - **Interaction:** click or ↑/↓ shows a row on the chart, and the chart's symbol is the highlighted row. Ctrl/⌘ + ↑/↓ still zoom the chart. Delete, Backspace or the row's remove button removes a row (TradingView's row menu has no Remove). Rows drag to a new place, also into another section. Sections fold.
-  - **Under the mouse** (M6, measured from `docs/reference/05-watchlist-hover.png`): the row turns `#2E2E2E`, and a 22 px remove button (a bin on `#4A4A4A`) covers its right end, 7 px from the edge. The chart's own row stays blue.
+  - **Under the mouse** (M6, measured from `docs/reference/05-watchlist-hover.png`): the row turns `#2E2E2E`, and a 22 px remove button (a bin on `#4A4A4A`) covers its right end, 6 px from the edge, so its bin ends 2.5 px short of the numbers' right edge, as in TradingView's screenshots (1 px further right since M8c). The chart's own row stays blue.
   - **Deleting a section** (M8b, §4.7):
-    - Under the mouse a section's header turns `#2E2E2E` and shows TradingView's trash: a row's 22 px button and bin, 7 px from the edge and 4 px down, in the header's `#8C8C8C` with no square. With the pointer on the trash, a row's `#4A4A4A` square (provisional).
+    - Under the mouse a section's header turns `#2E2E2E` and shows TradingView's trash: a row's 22 px button and bin, 6 px from the edge and 4 px down, in the header's `#8C8C8C` with no square. With the pointer on the trash, a row's `#4A4A4A` square.
     - A click deletes the section and keeps its symbols. They join the end of the section above, which opens if it was folded, or stay at the top with no header if it was the first (as symbols above a TradingView file's first section). An empty section just goes.
     - Nothing is asked. The chart's row, the flags and the other sections stay as they were, and the list saves as usual.
-    - The trash hides while a row is dragged, and Tab reaches it. Symbols with no header above them have no trash.
+    - The trash hides while a row is dragged, and Tab reaches it. Symbols with no header above them have no trash, and neither does a folded section (M8c).
+  - **Moving sections** (M8c, §4.8):
+    - A section's header drags. An open one moves alone: the rows stay where they are, the symbols below its new place (up to the next header) become its own, and the ones it leaves join the section above, which opens if folded, or stay at the top with no header. It lands anywhere: above or under any row or header, or at the end.
+    - A folded one moves whole, its symbols with it, and stays folded. It lands only between sections, above any section or at the end, at the nearer edge of the section under the pointer; never above the symbols with no header.
+    - While dragged, the header turns `#132E61`. The drop line, for rows too: 2 px of `#2962FF` on the line under the row above the landing place, from a 10 px ring (2 px, hollow) flush with the panel's left edge. The browser draws the faded image under the pointer.
+    - Dropped where it was, nothing changes. The list saves as usual, and no move takes a list past 200 sections.
+    - 6 px above a section's header that follows rows or another header; the first stays 5 px under the column titles.
   - **Thousands** are grouped with commas in Last, Chg and Chg% ("1,147.903").
   - **Flags** (TradingView's behavior from its blog and help center, §12; measured from `docs/reference/06-watchlist-flags.png`):
     - A 12 × 13 pennant with a V cut into its right side, flush with the panel's left edge, 8 px down the row, in red `#FF5252`, blue `#2A79FF`, green `#81C784`, yellow `#FBC02D`, purple `#BA68C8`, cyan `#00E5FF` or pink `#F48FB1`. The column titles carry the same flag in gray `#4A4A4A`.
@@ -320,7 +347,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Saved** by the gateway in `data/watchlists.json` on every change, so it survives restarts (several lists since M8, §5.9). A list that couldn't load is retried every 3 s and never overwritten meanwhile.
   - **Unavailable symbols:** red ticker, no prices.
   - **Default list:** your coins from the reference, on Binance. Binance doesn't list XCH and has halted SNT, so they're left out. The reference's second ARB, DASH and XCH rows come from other exchanges; those arrive in M5.
-  - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) The ⋯ menu and dragging have no reference yet (§11).
+  - **Not yet:** "Advanced view" is shown but does nothing. ("Add symbol" (+) arrived with M4, §5.4, and the list menu with M8, §5.9.) The ⋯ menu and a symbol row being dragged have no reference yet (§11); a section being dragged was measured (§4.8).
 
 ### 5.4 Add symbol dialog (also used as Symbol search)
 
@@ -739,7 +766,8 @@ Reference viewport is 1634 px wide.
 | M7b | Extended hours: Chart settings (session, backgrounds, time zone), market status (legend pill, watchlist dots and D, pre/post-market price line), whole bars, Alpaca's delayed stream with Sell and Buy | AAPL on 5 minutes shows 04:00–20:00 bars and colored sessions like your screenshot. **Committed 2026-10-24**; live-checked with your key on a Saturday (history, status, the stream's sign-in) |
 | M7c | Stock logos (Massive's free key), pixel checks against your screenshots, a live check with your key | The checks pass |
 | M8 | Several watchlists: TradingView's list menu, MY WATCHLISTS with ★ and ⤓, Open list (⇧W), Upload list… and downloads in TradingView's .txt | Your TradingView file uploads into a list and downloads back the same. **Committed 2026-10-24** |
-| M8b | Deleting a section: TradingView's trash on a section's header; its symbols stay | The trash matches your screenshot, and a deleted section's symbols land at the end of the section above. **Built 2026-10-24** |
+| M8b | Deleting a section: TradingView's trash on a section's header; its symbols stay | The trash matches your screenshot, and a deleted section's symbols land at the end of the section above. **Committed 2026-10-24** |
+| M8c | Moving sections: dragging a section's header (an open one alone, a folded one whole), TradingView's drop line, no trash on folded sections, the 6 px above headers | Your screenshot's drag reproduced on your list: the line under KOSPI, the header blue. **Built 2026-10-24** |
 
 ## 9. Testing strategy
 
@@ -780,8 +808,11 @@ Reference viewport is 1634 px wide.
   - M7b, in the browser (`tests/e2e/extended-hours.spec.ts`): Chart settings from the Settings button, its fields for stocks and crypto, extended hours with both bands, Cancel, Ok kept across a reload, day charts staying regular, the time zone; pre-market (the sunrise, the "Pre" line, the orange dot and D), the regular session (green, no line, no dot), a weekend (gray), crypto (no D, no dot).
 - **Several watchlists** (M8): the file (`packages/core/src/watchlistFile.test.ts`): your TradingView file read and written back exactly, one item a line, a byte-order mark, symbols above the first section, repeats and ones without an exchange left out, the 1,000 limit, titles cut without splitting 🇺🇸, file names; the lists' names and order; the store (`apps/gateway/test/watchlists.test.ts`): the old list moved in as "Watchlist" with its file left as it was, creating, copying, uploading, renaming, starring, opening, saving two lists at once, deleting, the limits; the routes (`server.test.ts`); in the browser (`tests/e2e/watchlists.spec.ts`): the menu, creating, copying, renaming, clearing, starring and downloading, uploading your file and downloading it back the same, symbols above the first section, Open list (⇧W) with search and delete, the last list, Add section.
 - **Deleting a section** (M8b):
-  - The model (`apps/web/src/watchlist/model.test.ts`): symbols to the end of the section above, in order; a folded section above opening; deleting a folded section; the first section's symbols left with no header, joining any already there; an empty section; the only section; an unknown section, and one with no header.
+  - The model (`apps/web/src/watchlist/model.test.ts`): symbols to the end of the section above, in order; a folded section above opening; a folded section refused (M8c); the first section's symbols left with no header, joining any already there; an empty section; the only section; an unknown section, and one with no header.
   - In the browser (`tests/e2e/watchlist.spec.ts`): the trash only under the mouse and only on that header, in the header's gray; its place against your screenshot (the bin 12 × 14, 8 px down, where a row's is); a row's square under the pointer. Deleting keeps the symbols and saves, asks nothing, and leaves the chart's row and the flags alone, across a reload. An empty section; a folded section above; the first section, downloading with no "###". The keyboard. A row dropped on a header, with the trash hidden during the drag.
+- **Moving sections** (M8c):
+  - The model (`apps/web/src/watchlist/model.test.ts`): an open header up, down, to the end, above another header, where it is, from the first section, into and above the symbols with no header, a folded section above opening, what it refuses, the 200 limit; a folded section whole: above another, to the end, where it is, never above the symbols with no header; the rows shown and where a drop draws its line.
+  - In the browser (`tests/e2e/watchlist.spec.ts`): an open header with the browser's own drag, up and down, the rows staying put, saved, dropped where it is, across a reload; under the last row to the end, the first section's rows left with no header; a folded section's line snapping between sections, the end, staying folded, unfolding, the browser's own drag; the line and ring (sizes, color, hollow, centered on the line, flush with the edge) and the blue header; a row's drag with the same ring; no trash on a folded section; the 6 px above headers. The two screenshots with a row under the mouse were updated for its trash, 1 px to the right.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -885,8 +916,8 @@ Reference viewport is 1634 px wide.
 40. How TradingView keeps the pre/post-market label clear of the last price's (ours: right above or below it, on its price's side), and whether autoscale includes that price (ours: no).
 41. Alpaca gave AAPL's Friday 23 October close as 347.725, half a cent; ours shows it to 2 decimals. Worth comparing with TradingView's close for that day.
 42. Watchlists, provisional: what TradingView names an uploaded list (ours: the file's name); a copy's name (ours: " (1)", as your "Watchlist (1)" suggests); the order of MY WATCHLISTS (ours: starred, then by name; TradingView's "Recently used" is by use); the dialogs' look (Create new list, Make a copy, Clear list, Open list, deleting); the menu icons' exact paths (the broom's and the new list's differ a little); whether Rename types in place; where the list menu's Add section goes; how a spread shows in a row (ours: what follows the first colon).
-43. Deleting a section, provisional: whether TradingView asks first (ours: no, since nothing is lost); whether a folded section above opens to take the symbols (ours: yes); the trash's look with the pointer on it (ours: a row's square); its name (ours: "Delete section NAME", for screen readers); whether a section's right-click menu has a delete item (ours has no section menu yet). A screenshot of TradingView's section right-click menu would settle the last one.
-44. Measured against your section screenshot (§4.7), from before M8b: TradingView leaves 6 px between the row above and a section's header (ours: none), and its trash bins, a row's and a header's, sit about 1 px further right than ours.
+43. Moving sections, provisional: where a folded section's line snaps (ours: the nearer edge of the section under the pointer; your screenshot shows one case); a symbol row's drag line (ours: the section drag's, with its ring).
+44. Your recent TradingView screenshots show a pure black panel (#000000) and darker grays (about #1A1A1A) than the #0F0F0F and #2E2E2E our colors follow, from your M6 screenshots. TradingView may have darkened its dark theme; worth checking before changing every color.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -897,7 +928,7 @@ Reference viewport is 1634 px wide.
 - The "Add custom interval" dialog.
 - The prompt after typing `5` on the chart.
 - The watchlist's ⋯ menu.
-- A watchlist row being dragged.
+- A watchlist row being dragged (a section being dragged was measured, §4.8).
 - The Add symbol dialog with a row under the mouse, a filter menu open, and a grouped row's ⌄ opened (TradingView's list of sources).
 - The symbol search opened from the chart (its title and anything that differs from Add symbol).
 
@@ -925,6 +956,7 @@ Reference viewport is 1634 px wide.
 - TradingView's lists (M8): import and export https://www.tradingview.com/support/solutions/43000487233-how-to-import-or-export-a-watchlist/ · the advanced view's Export list https://www.tradingview.com/support/solutions/43000771546-watchlist-advanced-view-mode/ · the list menu https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · Open list and deleting https://www.tradingview.com/support/solutions/43000645262-how-to-delete-a-list/ · 1,000 symbols https://www.tradingview.com/support/solutions/43000611193-how-many-symbols-can-i-add-to-the-watchlist/ · ### sections https://www.tradingview.com/charting-library-docs/latest/trading_terminal/Watch-List/
 - TradingView watchlist sections and adding at a point: https://www.tradingview.com/support/solutions/43000615520-how-to-add-a-section-to-the-watchlist/ · https://www.tradingview.com/blog/en/add-symbols-to-the-watchlist-at-a-specific-point-in-the-list-22486 · renaming by double-click (community guide): https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW
 - Deleting a section (M8b): "named, moved, and deleted" https://www.tradingview.com/blog/en/new-watchlist-features-21389 · "remove these dividers at any time" https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · sections and folding in the Charting Library https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · community guides that say the symbols go too, which your report corrected: https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW · https://blueberrymarkets.com/market-analysis/how-to-manage-the-tradingview-watchlist/
+- Moving sections (M8c): dividers you can "rename, move, or remove" https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · "named, moved, and deleted" https://www.tradingview.com/blog/en/new-watchlist-features-21389 · folding https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · selecting several https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443/ · the same rules in a clone project https://github.com/deepentropy/opentrader/issues/21 · sections moved like symbols, several dragged together (Japanese) https://tetori.jp/tradingview/watchlist/
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual
