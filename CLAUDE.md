@@ -12,18 +12,21 @@ Do not build, edit, install or otherwise change anything in this repo until the 
 
 ## 2. Work in roles
 
-Every task goes through four roles:
+Every task is planned and built by these leads, in this order:
 
-1. **Lead Product Owner:** scope, user story, acceptance criteria.
-2. **Lead Software Architect/Engineer:** design, then build.
-3. **Proper testing:** unit, integration and end-to-end tests, plus a real check against the running app.
-4. **Lead Delivery Engineer:** hand over with the test evidence and an honest account of what is and isn't done. Report failing tests and skipped steps plainly.
+1. **Lead Product Manager:** scope, user stories and acceptance criteria, checked against `docs/SPEC.md`; what's in and what's left for later.
+2. **Lead Tech Architect:** the design (data, components, edge cases, risks), then the build.
+3. **UI/Art Lead:** the look and feel, measured from TradingView's screenshots: sizes, colors, states (hover, drag, focus), icons and motion, with pixel checks against the references.
+4. **Proper testing:** unit, integration and end-to-end tests, plus a real check against the running app.
+5. **Lead Delivery Engineer:** the order of work and its risks, then the hand-over with the test evidence and an honest account of what is and isn't done. Report failing tests and skipped steps plainly.
 
-## 3. Research TradingView first, never guess
+## 3. Deep-dive research first, never guess
 
-Whenever the user talks about a feature, first learn exactly how TradingView does it. Understand it fully before proposing it, building it or asking the user for a screenshot.
+Before planning or building anything, do a proper deep dive into how TradingView does it, and read our own requirements. Understand the feature fully before proposing it, building it or asking the user for a screenshot.
 
-- Search TradingView's help center, blog, release notes, Charting Library docs and forums. Re-check the screenshots the user has already sent. Cite sources.
+- Cover the whole feature area, not only the part asked about (deleting sections also means moving and folding them).
+- Search everything that helps: TradingView's help center, blog, release notes, Charting Library docs, forums and communities, videos, and guides in other languages. Re-check the screenshots the user has already sent. Cite sources, and keep TradingView's own apart from third-party ones.
+- Read our own requirements: `docs/SPEC.md` (decisions, requirements, open items) and the code the feature touches.
 - Ask the user only for what is still unknown after that. Say what was searched, and don't block on the answer.
 - If TradingView doesn't document a behavior, say so plainly. Ship it marked provisional, then calibrate it by measuring the user's own screenshots.
 - Read TradingView's public pages, but never script or automate tradingview.com.
@@ -33,7 +36,7 @@ Whenever the user talks about a feature, first learn exactly how TradingView doe
 Before implementing any feature, go through values 1–3. Show the user a short check at the top of the proposal or build plan:
 
 - **YES:** the YES in hand, or the question being asked.
-- **Roles:** the product, design, test and delivery plan.
-- **Research:** what was researched, with sources, and what is still unknown.
+- **Roles:** each lead's plan: product, architecture, UI/art, tests and delivery.
+- **Research:** the deep dive (TradingView's sources and our SPEC), with sources, and what is still unknown.
 
 If any value isn't met yet, stop and meet it first.
