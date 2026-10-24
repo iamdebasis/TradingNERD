@@ -1,4 +1,4 @@
-import type { SymbolId } from '@tradingnerd/core';
+import { parseSymbolId, type SymbolId } from '@tradingnerd/core';
 import type { QuoteSource } from '../data/GatewayConnection';
 
 export interface Quote {
@@ -44,6 +44,13 @@ export class QuoteBoard {
     }
     for (const symbol of wanted) {
       if (this.subscriptions.has(symbol)) continue;
+      // Symbols of shapes we don't chart (a list from TradingView's spreads) have no quotes.
+      if (!parseSymbolId(symbol)) {
+        this.subscriptions.set(symbol, () => {});
+        this.missing.add(symbol);
+        for (const view of this.views.get(symbol) ?? []) view.unavailable();
+        continue;
+      }
       this.subscriptions.set(
         symbol,
         this.source.subscribeQuotes(symbol, {

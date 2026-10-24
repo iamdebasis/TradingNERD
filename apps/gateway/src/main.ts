@@ -16,7 +16,7 @@ import { DIRECTORY_URLS, UsListings } from './stocks/UsListings.ts';
 import { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import { FlagStore } from './storage/FlagStore.ts';
 import { SecretStore } from './storage/secrets.ts';
-import { WatchlistStore } from './storage/WatchlistStore.ts';
+import { WatchlistsStore } from './storage/WatchlistsStore.ts';
 
 const config = loadConfig();
 const warn = (exchange: string) => (message: string) => console.warn(`[${exchange}] ${message}`);
@@ -74,7 +74,7 @@ const catalog = new SymbolCatalog({
   onWarning: warn('catalog'),
 });
 
-const watchlist = new WatchlistStore(config.dataDir, warn('data'));
+const watchlist = new WatchlistsStore(config.dataDir, warn('data'));
 const flags = new FlagStore(config.dataDir, warn('data'));
 
 const logos = new LogoService({

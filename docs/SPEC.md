@@ -113,6 +113,9 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-20 | **Alpaca's delayed stream** moves live bars trade by trade between the minute polls and gives stocks **Sell and Buy** from its best bid and ask, 15 minutes late; at most 30 symbols, a chart's first | Your YES. Checked with your key: the free plan signs in and subscribes. Trades Alpaca's own bars leave out (odd lots, average-price trades and the rest of its list, §12) are left out. |
 | 2026-10-20 | **Extended hours** (M7b): TradingView's **Chart settings** (its Settings button, top right) → Symbol: Session, the pre/post market hours background, Timezone. Intraday charts only; day and longer bars stay on the regular sessions | Your YES, after TradingView's help center and Charting Library docs (§4.5, §12). |
 | 2026-10-20 | **Market status** as TradingView marks it: the legend's pill (status icon and "D"), the watchlist's dot and superscript "D", and the pre/post-market price line on regular-hours charts | Your YES; measured from your screenshots where they show it, the rest provisional (§11). |
+| 2026-10-24 | **Several watchlists** (M8), from TradingView's list menu on the list's name: Make a copy…, Rename, Add section, Clear list, Create new list…, Upload list…, **MY WATCHLISTS** (every list; starred first) and Open list… (⇧W) | Your YES after the research (§4.6). "MY WATCHLISTS" in place of TradingView's "Recently used" was your call; Share list, Copy link and alerts need TradingView's accounts, so they're left out. |
+| 2026-10-24 | **Upload list…** reads TradingView's .txt into a new list named after the file; each list's **⤓** saves it back in the same format | Your YES. TradingView's own export is in its advanced view; the ⤓ beside each list's ★ was your idea. |
+| 2026-10-24 | Symbols we don't chart (Bitstamp, CRYPTOCAP, GLASSNODE, OTC, indices, spreads) stay in an uploaded list, in red | Your YES: nothing uploaded is lost, and a list downloads back exactly as it came. |
 
 ## 4. Research findings
 
@@ -203,6 +206,13 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **TradingView's market status** (its stylesheet's status classes and release notes): open green, pre-market orange (a sunrise icon), post-market blue (a moon icon), closed and holidays gray. Delayed symbols show "D"; Cboe's data a pink icon instead.
 - **Measured from your screenshots** (sRGB): the pre-market dot and the D #FF9800, the closed dot #9C9C9C, both dots 6 px; the legend pill 40 × 18 px, its sunrise #FF9100 on #402B14; the "Pre" tag 27 × 17 px and its price label 17 px, #FB8C00 with white text; a one-row last-price label 17 px (the crosshair's stays 21); the open badge's green from your crypto screenshots. Crypto rows have no dot.
 - **Alpaca's stream** (checked with your key, 2026-10-24): the free plan's `delayed_sip` feed signs in and takes subscriptions to trades and quotes; one connection and 30 symbols on the free plan.
+
+### 4.6 TradingView's watchlists (researched 2026-10-24)
+
+- **The list menu** (its help center and your screenshot): a click on the list's name: Share list, Copy link…, Add alert on the list…, Make a copy…, Rename, Add section, Clear list, Create new list…, Upload list…, RECENTLY USED (★ = favorites, "to switch between them quickly"), Open list… (⇧W). A list is deleted in Open list: hover it, press remove.
+- **The file:** a .txt, symbols with their exchange prefix, separated by commas (its help center); in its Charting Library "any list item that has the ### prefix is considered a section divider". Export: "Export list" ("Download list as TXT") in the advanced view: section names and tickers. At most 1,000 symbols a list.
+- **Measured from your screenshot** (1×): the menu 210 px wide, 6 px above and below; 32 px rows, labels 43 px in; separators inset 6 px with 6 px either side; the heading 30 px from the separator to the first list; the open list on a light pill inset 6 px (radius 6) with its star.
+- **Your example file:** 53 symbols in 4 sections; 21 chart here (3 Binance pairs, 18 US stocks and ETFs), 32 come from sources we don't have.
 - **Nasdaq's directory** (19 October 2026): 13,269 listings: NASDAQ 5,623, NYSE 2,891, NYSE Arca 2,747, NYSE American 309, Cboe BZX 1,680, Texas Stock Exchange 19. By kind: 5,788 ETFs (about 175 crypto, 645 leveraged and 323 inverse by name), 5,655 stocks, 509 preferreds, 432 warrants, 310 units, 302 ADRs, 147 notes, 126 rights.
 
 ## 5. Requirements (v1)
@@ -289,7 +299,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
     - **Add section** puts a new section above the row, holding it and the rows after it, named "Section N" with the name selected to type over: Enter or a click elsewhere keeps the name, Escape keeps "Section N". A double-click on a section's name renames it.
     - **Add symbol** opens the Add symbol dialog, and what's added goes right after that row, each next one after the last.
     - Left out, your call: the menu's lists, compare and note items; each color's list (the ⌄ switcher); what the header's flag does; flags in symbol search.
-  - **Saved** by the gateway in `data/watchlist.json` on every change, so it survives restarts. A list that couldn't load is retried every 3 s and never overwritten meanwhile.
+  - **Saved** by the gateway in `data/watchlists.json` on every change, so it survives restarts (several lists since M8, §5.9). A list that couldn't load is retried every 3 s and never overwritten meanwhile.
   - **Unavailable symbols:** red ticker, no prices.
   - **Default list:** your coins from the reference, on Binance. Binance doesn't list XCH and has halted SNT, so they're left out. The reference's second ARB, DASH and XCH rows come from other exchanges; those arrive in M5.
   - **Not yet:** "Advanced view" and the list switcher are shown but do nothing (one list in v1). ("Add symbol" (+) arrived with M4, §5.4.) The ⋯ menu and dragging have no reference yet (§11).
@@ -385,6 +395,18 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **The legend's pill:** the market status icon in an 18 px circle (a green dot when open, an orange sunrise in the pre-market, a blue moon in the post-market, gray when closed), joined by an orange "D" half for delayed data. While the data isn't live, the connection's gray or red shows instead. Hovering names the status ("Market open", "Pre-market", "Post-market", "Market closed").
 - **Status timing:** from the exchange's calendar and the real clock; it changes at each session boundary as it passes. Crypto is always open.
 
+### 5.9 Several watchlists, upload and download (M8)
+
+- **The list menu:** a click on the list's name (now the open list's name) opens TradingView's list menu, measured from your screenshot:
+  - **Make a copy…** (a name dialog, "Watchlist (1)" ready), **Rename** (typed in place), **Add section** (above the selected row, or at the top), **Clear list** (after asking).
+  - **Create new list…** (a name dialog) and **Upload list…** (a file to pick).
+  - **MY WATCHLISTS:** every list, starred ones first, then by name; the open one on a light pill; a click opens one. Under the mouse each shows ⤓ (download) and ★ (star); a starred list's star always shows.
+  - **Open list… (⇧W):** every list, a search, a click opens one; under the mouse a list shows its remove button (deleting asks first). The last list can't go.
+- **Upload list…:** TradingView's .txt (commas or one a line; `###NAME` starts a section; symbols above the first section have no header) becomes a new list named after the file, opened at once. Each symbol once; ones without an exchange are left out; at most 1,000. A note under the list sums it up ("Uploaded “MARKET LISTS”: 53 symbols in 4 sections").
+- **Download (⤓):** `<list name>.txt` in TradingView's one-line format, which its "Upload list…" reads.
+- **Symbols we don't chart** are kept and shown red, as a symbol an exchange doesn't list.
+- **Flags** stay with the symbol in every list, as on TradingView.
+
 ## 6. Architecture
 
 ### 6.1 Overview
@@ -428,6 +450,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - Messages are typed in `packages/core`, and any breaking change bumps `PROTOCOL_VERSION`.
 - **Symbol search** (M4): `GET /api/symbols/search?query=&exchange=&offset=&limit=` returns `{matches, hasMore}`. Each match is one ticker with its exchanges' `listings`, each saying whether it's `live`. `GET /api/exchanges` lists the exchanges.
 - **Sessions** (protocol v6): `GET /api/bars?…&session=extended` and `{channel: 'bars', …, session: 'extended'}` ask for intraday bars with pre- and post-market hours; `regular` is the default, and markets without extended hours (and day and longer bars) give their regular bars either way.
+- **Watchlists** (protocol v7, M8): `GET /api/watchlists` lists them (`{activeId, lists: [{id, name, favorite, count}]}`); `POST` creates one (`{name, sections?, copyOf?, activate?}`, the name made unique); `GET`/`PUT /api/watchlists/:id` read and save one list's sections; `PATCH` renames or stars it; `DELETE` deletes it (never the last); `POST /api/watchlists/:id/activate` opens it. An unknown list answers `not_found` (404). `GET`/`PUT /api/watchlist` still read and save the open list. A list's symbols may be any TradingView symbol with an exchange prefix (spreads included), kept as written when it isn't one we chart.
 - **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
@@ -508,7 +531,8 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 
 | Path | Contents |
 |---|---|
-| `watchlist.json` | The watchlist: its sections and their symbols |
+| `watchlists.json` | The watchlists (M8): each list's name, star and sections, and which one is open |
+| `watchlist.json` | The one list kept before M8; moved into `watchlists.json` as "Watchlist" the first time, then left as it was |
 | `flags.json` | Flagged symbols and their colors, and the last color used |
 | `settings.json` | Settings the gateway keeps; so far, whether the logo prompt was skipped |
 | `secrets.json` | CoinGecko key and the Alpaca key pair, each saved and removed on its own (owner-only permissions) |
@@ -696,6 +720,7 @@ Reference viewport is 1634 px wide.
 | M7a | US stocks on the chart: listings and search, the market clock, the Alpaca source, the key dialog, charts and watchlist 15 minutes delayed, the "D" sign | SPY, AAPL, GBTC, XXRP and DOG found, added and charted 1 minute to 12 months back to 2016, matching TradingView's candles 15 minutes later. **Committed 2026-10-20**; the live check with your key matched TradingView's watchlist 25 of 25 |
 | M7b | Extended hours: Chart settings (session, backgrounds, time zone), market status (legend pill, watchlist dots and D, pre/post-market price line), whole bars, Alpaca's delayed stream with Sell and Buy | AAPL on 5 minutes shows 04:00–20:00 bars and colored sessions like your screenshot. **Built 2026-10-24**; live-checked with your key on a Saturday (history, status, the stream's sign-in) |
 | M7c | Stock logos (Massive's free key), pixel checks against your screenshots, a live check with your key | The checks pass |
+| M8 | Several watchlists: TradingView's list menu, MY WATCHLISTS with ★ and ⤓, Open list (⇧W), Upload list… and downloads in TradingView's .txt | Your TradingView file uploads into a list and downloads back the same. **Built 2026-10-24** |
 
 ## 9. Testing strategy
 
@@ -734,6 +759,7 @@ Reference viewport is 1634 px wide.
   - M7b, gateway: a forming bar left to the live feed (the fake Alpaca hands bars back whole, as the real one does); 04:00–20:00 history and live pre-market bars; day bars the same in either session; the official daily bar kept while post-market minutes come in; a post-market trade moving no regular bar; the session parameter's routes; the stream (`alpacaStream.test.ts`, a mock Alpaca stream): sign-in, the delayed feed, trades and quotes routed, the condition filter, the 30-symbol cap with charts first, unsubscribing, and Alpaca's 402, 405 and 406; trades moving a live bar between polls and quotes giving Sell and Buy.
   - M7b, core and chart: market status through a trading day, weekends, holidays and an early close; the session field in messages; the pre/post label stepping clear of the last price's.
   - M7b, in the browser (`tests/e2e/extended-hours.spec.ts`): Chart settings from the Settings button, its fields for stocks and crypto, extended hours with both bands, Cancel, Ok kept across a reload, day charts staying regular, the time zone; pre-market (the sunrise, the "Pre" line, the orange dot and D), the regular session (green, no line, no dot), a weekend (gray), crypto (no D, no dot).
+- **Several watchlists** (M8): the file (`packages/core/src/watchlistFile.test.ts`): your TradingView file read and written back exactly, one item a line, a byte-order mark, symbols above the first section, repeats and ones without an exchange left out, the 1,000 limit, titles cut without splitting 🇺🇸, file names; the lists' names and order; the store (`apps/gateway/test/watchlists.test.ts`): the old list moved in as "Watchlist" with its file left as it was, creating, copying, uploading, renaming, starring, opening, saving two lists at once, deleting, the limits; the routes (`server.test.ts`); in the browser (`tests/e2e/watchlists.spec.ts`): the menu, creating, copying, renaming, clearing, starring and downloading, uploading your file and downloading it back the same, symbols above the first section, Open list (⇧W) with search and delete, the last list, Add section.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -836,6 +862,7 @@ Reference viewport is 1634 px wide.
 39. City names in the time zone menu come from the zone ids ("US/Mountain" shows as Mountain); TradingView may name a few differently. TradingView's own default zone isn't documented (ours: Exchange).
 40. How TradingView keeps the pre/post-market label clear of the last price's (ours: right above or below it, on its price's side), and whether autoscale includes that price (ours: no).
 41. Alpaca gave AAPL's Friday 23 October close as 347.725, half a cent; ours shows it to 2 decimals. Worth comparing with TradingView's close for that day.
+42. Watchlists, provisional: what TradingView names an uploaded list (ours: the file's name); a copy's name (ours: " (1)", as your "Watchlist (1)" suggests); the order of MY WATCHLISTS (ours: starred, then by name; TradingView's "Recently used" is by use); the dialogs' look (Create new list, Make a copy, Clear list, Open list, deleting); the menu icons' exact paths (the broom's and the new list's differ a little); whether Rename types in place; where the list menu's Add section goes; how a spread shows in a row (ours: what follows the first colon).
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -871,6 +898,7 @@ Reference viewport is 1634 px wide.
 - Alpaca: https://docs.alpaca.markets/us/docs/about-market-data-api · https://docs.alpaca.markets/us/reference/stockbars · https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data · free whole-market history https://forum.alpaca.markets/t/cant-read-spy-minutes/14293 · the stream's errors and limits https://docs.alpaca.markets/docs/streaming-market-data · trades in bars https://alpaca.markets/learn/stock-minute-bars/
 - TradingView extended hours and market status (M7b): the session button and 24h https://www.tradingview.com/support/solutions/43000790593/ · Symbol tab (Session, Timezone "Exchange") https://www.tradingview.com/support/solutions/43000748166-how-to-configure-your-supercharts/ · extended sessions https://www.tradingview.com/charting-library-docs/latest/connecting_data/Extended-Sessions/ · background overrides https://www.tradingview.com/charting-library-docs/latest/customization/overrides/chart-overrides/ · the pre/post-market price line https://www.tradingview.com/support/solutions/43000762938-how-do-i-display-the-price-line-for-the-extended-session/ · https://www.tradingview.com/blog/en/pre-post-market-price-labels-are-now-available-on-charts-20418 · daily bars standard https://www.tradingview.com/blog/en/extended-hours-support-59226/ · the sunrise and moon icons https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · the legend's D https://www.tradingview.com/charting-library-docs/latest/ui_elements/Legend/ · D versus Cboe's icon https://in.tradingview.com/support/solutions/43000698958-alerts-based-on-real-time-and-non-real-time-symbols/ · the time zones https://www.tradingview.com/charting-library-docs/latest/ui_elements/timezones/ · the search's type words https://www.tradingview.com/support/solutions/43000746682-tradingview-symbol-search-tips-for-finding-assets/
 - Nasdaq symbol directory: https://www.nasdaqtrader.com/trader.aspx?id=symboldirdefs · IEX hours: https://www.sec.gov/files/rules/sro/iex/2026/34-105959.pdf · Lightweight Charts time zones: https://tradingview.github.io/lightweight-charts/docs/time-zones
+- TradingView's lists (M8): import and export https://www.tradingview.com/support/solutions/43000487233-how-to-import-or-export-a-watchlist/ · the advanced view's Export list https://www.tradingview.com/support/solutions/43000771546-watchlist-advanced-view-mode/ · the list menu https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · Open list and deleting https://www.tradingview.com/support/solutions/43000645262-how-to-delete-a-list/ · 1,000 symbols https://www.tradingview.com/support/solutions/43000611193-how-many-symbols-can-i-add-to-the-watchlist/ · ### sections https://www.tradingview.com/charting-library-docs/latest/trading_terminal/Watch-List/
 - TradingView watchlist sections and adding at a point: https://www.tradingview.com/support/solutions/43000615520-how-to-add-a-section-to-the-watchlist/ · https://www.tradingview.com/blog/en/add-symbols-to-the-watchlist-at-a-specific-point-in-the-list-22486 · renaming by double-click (community guide): https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels

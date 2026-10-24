@@ -1,0 +1,152 @@
+/*
+ * TradingView's list menu, measured from a screenshot of it at 1× (CSS px): 210 px wide, 6 px
+ * above and below the rows; 32 px rows, icons ~10 px in, labels 43 px in; separators 1 px
+ * inset 6 px with 6 px either side; MY WATCHLISTS a small gray heading; the open list on a
+ * light pill inset 6 px (radius 6) with dark text and its star. Colors follow our menus'.
+ */
+.menu {
+  position: fixed;
+  z-index: 150;
+  width: 210px;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 20%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 1px 15px 0 43px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: var(--color-gutter);
+  outline: none;
+}
+
+.icon {
+  position: absolute;
+  top: 2px;
+  left: 10px;
+  display: flex;
+}
+
+.shortcut {
+  margin-left: auto;
+  color: var(--color-avatar-text);
+  font-size: 12px;
+}
+
+.separator {
+  height: 1px;
+  margin: 6px;
+  border: 0;
+  background: var(--color-separator);
+}
+
+.heading {
+  height: 24px;
+  padding: 6px 15px 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+
+/* Every list is here, so a long collection scrolls. */
+.lists {
+  max-height: min(50vh, 416px);
+  overflow-y: auto;
+}
+
+.listRow {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  margin: 0 6px;
+  border-radius: 6px;
+}
+
+.listRow:hover,
+.listRow:focus-within {
+  background: var(--color-gutter);
+}
+
+.listRow[data-active] {
+  background: #f2f2f2;
+  color: #0f0f0f;
+}
+
+.listName {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 1px 0 0 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.listName:focus-visible {
+  outline: none;
+}
+
+/* A list's download and star show under the mouse; a starred list's star always does. */
+.rowIcon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  /* Hidden but still in the tab order, so the keyboard reaches them. */
+  opacity: 0;
+}
+
+.star {
+  margin-right: 6px;
+}
+
+.listRow:hover .rowIcon,
+.listRow:focus-within .rowIcon,
+.star[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.rowIcon:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.rowIcon:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}

@@ -21,13 +21,13 @@ import { registerWatchlistRoutes } from './routes/watchlist.ts';
 import { isAllowedOrigin, isLoopbackHost } from './security.ts';
 import type { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import type { FlagStore } from './storage/FlagStore.ts';
-import type { WatchlistStore } from './storage/WatchlistStore.ts';
+import type { WatchlistsStore } from './storage/WatchlistsStore.ts';
 import { attachSession } from './ws/session.ts';
 
 export interface GatewayDeps {
   market: MarketService;
   catalog: SymbolCatalog;
-  watchlist: WatchlistStore;
+  watchlist: WatchlistsStore;
   flags: FlagStore;
   logos: LogoService;
   /** US stocks' Alpaca key routes (absent in tests that don't need them). */

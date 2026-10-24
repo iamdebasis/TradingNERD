@@ -102,6 +102,16 @@ export function addSection(list: Watchlist, symbol: SymbolId): { list: Watchlist
   return { list: { ...list, sections }, id: added.id };
 }
 
+/** A new, empty section at the top ("Add section" with no row to put it above). */
+export function addTopSection(list: Watchlist): { list: Watchlist; id: string } {
+  const ids = new Set(list.sections.map((section) => section.id));
+  const titles = new Set(list.sections.map((section) => section.title.toLowerCase()));
+  let n = 1;
+  while (ids.has(`section-${n}`) || titles.has(`section ${n}`)) n++;
+  const added = { id: `section-${n}`, title: `Section ${n}`, collapsed: false, symbols: [] };
+  return { list: { ...list, sections: [added, ...list.sections] }, id: added.id };
+}
+
 /** A section's new name; an empty one keeps the old. */
 export function renameSection(list: Watchlist, sectionId: string, title: string): Watchlist {
   const name = title.trim().slice(0, 64);

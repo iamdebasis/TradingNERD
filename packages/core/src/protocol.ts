@@ -10,8 +10,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 4: the `quotes` channel for watchlist rows.
  * 5: US stocks: symbol kinds, time zones, data delays and trading calendars; `needs_key`.
  * 6: extended hours: bars of a session (`session` on bar requests and subscriptions).
+ * 7: several watchlists (/api/watchlists); `not_found`.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -32,6 +33,8 @@ export const ERROR_CODES = [
   'internal_error',
   /** The data needs a key the user hasn't given yet (US stocks: Alpaca's). */
   'needs_key',
+  /** Something asked for by id doesn't exist (a watchlist). */
+  'not_found',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

@@ -13,6 +13,7 @@ import {
   parseFlagState,
   parseResolution,
   parseWatchlist,
+  parseWatchlistName,
   SEARCH_PAGE_SIZE,
   type SearchCategory,
   type SessionHours,
@@ -21,7 +22,9 @@ import {
   type SymbolKind,
   searchCatalog,
   sessionClock,
+  uniqueListName,
   type Watchlist,
+  type WatchlistSection,
 } from '@tradingnerd/core';
 import { NYSE_2026 } from '@tradingnerd/core/testing';
 
@@ -397,10 +400,13 @@ export function makeTickBars(count = 1_500): Bar[] {
 export interface MockMarket {
   /** Daily history served by GET /api/bars (other intervals get makeIntervalBars). */
   bars: Bar[];
-  /** The watchlist GET /api/watchlist serves; PUTs replace it. */
+  /** The open list's sections (the one list, unless a test adds more). */
   watchlist: Watchlist;
-  /** Every watchlist the page saved, in order. */
+  /** Every list the page saved, in order. */
   readonly watchlistSaves: Watchlist[];
+  /** Every list, the first "Watchlist"; `activeId` is the open one. */
+  lists: MockList[];
+  activeId: string;
   /** The flags GET /api/flags serves; PUTs replace them. */
   flags: FlagState;
   /** Every flag state the page saved, in order. */
@@ -447,9 +453,50 @@ export interface MockMarket {
   drop(): Promise<void>;
 }
 
+export interface MockList {
+  id: string;
+  name: string;
+  favorite: boolean;
+  sections: WatchlistSection[];
+}
+
+const summaryOf = (list: MockList) => ({
+  id: list.id,
+  name: list.name,
+  favorite: list.favorite,
+  count: list.sections.reduce((sum, section) => sum + section.symbols.length, 0),
+});
+
 class MockGateway implements MockMarket {
   bars: Bar[] = makeBars();
-  watchlist: Watchlist = structuredClone(DEFAULT_WATCHLIST);
+  lists: MockList[] = [
+    {
+      id: 'watchlist',
+      name: 'Watchlist',
+      favorite: false,
+      sections: structuredClone(DEFAULT_WATCHLIST.sections),
+    },
+  ];
+  activeId = 'watchlist';
+  private nextList = 1;
+
+  get watchlist(): Watchlist {
+    return { sections: this.openList().sections };
+  }
+
+  set watchlist(value: Watchlist) {
+    this.openList().sections = structuredClone(value.sections);
+  }
+
+  private openList(): MockList {
+    const list = this.lists.find((item) => item.id === this.activeId) ?? this.lists[0];
+    if (!list) throw new Error('The mock has no lists');
+    return list;
+  }
+
+  private index() {
+    return { activeId: this.activeId, lists: this.lists.map(summaryOf) };
+  }
   logoStatus: LogoStatus = {
     key: null,
     promptDismissed: true,
@@ -552,20 +599,76 @@ class MockGateway implements MockMarket {
       }
       return route.fulfill({ json: this.flags });
     });
-    await this.page.route(/\/api\/watchlist$/, (route) => {
-      if (route.request().method() === 'PUT') {
-        const saved = parseWatchlist(route.request().postDataJSON());
-        if (!saved)
-          return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'x' } });
-        this.watchlist = saved;
-        this.watchlistSaves.push(saved);
-        return route.fulfill({ json: saved });
-      }
-      if (this.failingLoads) {
+    // The user's lists, as the gateway keeps them (apps/gateway/src/routes/watchlist.ts).
+    await this.page.route(/\/api\/watchlists(\/[^?]*)?$/, (route) => {
+      const request = route.request();
+      const method = request.method();
+      const [, id, action] = new URL(request.url()).pathname.split('/').slice(2);
+      const bad = (message = 'x') =>
+        route.fulfill({ status: 400, json: { error: 'bad_request', message } });
+      const missing = () =>
+        route.fulfill({ status: 404, json: { error: 'not_found', message: 'no such list' } });
+      if (method === 'GET' && this.failingLoads) {
         this.refusedLoads++;
         return route.abort('connectionrefused');
       }
-      return route.fulfill({ json: this.watchlist });
+      if (!id) {
+        if (method === 'GET') return route.fulfill({ json: this.index() });
+        // POST: a new list, a copy, or an upload's
+        const body = request.postDataJSON() as Record<string, unknown>;
+        const name = parseWatchlistName(body.name);
+        if (!name) return bad('A watchlist needs a name');
+        const source =
+          typeof body.copyOf === 'string' ? this.lists.find((l) => l.id === body.copyOf) : null;
+        if (body.copyOf !== undefined && !source) return missing();
+        const sections =
+          body.sections === undefined ? [] : parseWatchlist({ sections: body.sections })?.sections;
+        if (!sections) return bad();
+        const list: MockList = {
+          id: `l-${this.nextList++}`,
+          name: uniqueListName(
+            name,
+            this.lists.map((l) => l.name),
+          ),
+          favorite: false,
+          sections: source ? structuredClone(source.sections) : sections,
+        };
+        this.lists.push(list);
+        if (body.activate !== false) this.activeId = list.id;
+        return route.fulfill({ json: summaryOf(list) });
+      }
+      const list = this.lists.find((item) => item.id === id);
+      if (!list) return missing();
+      if (action === 'activate') {
+        this.activeId = list.id;
+        return route.fulfill({ json: this.index() });
+      }
+      if (method === 'GET') return route.fulfill({ json: list });
+      if (method === 'PUT') {
+        const saved = parseWatchlist(request.postDataJSON());
+        if (!saved) return bad();
+        list.sections = saved.sections;
+        this.watchlistSaves.push(saved);
+        return route.fulfill({ json: list });
+      }
+      if (method === 'PATCH') {
+        const body = request.postDataJSON() as { name?: unknown; favorite?: unknown };
+        if (body.name !== undefined) {
+          const name = parseWatchlistName(body.name);
+          if (!name) return bad();
+          list.name = name;
+        }
+        if (typeof body.favorite === 'boolean') list.favorite = body.favorite;
+        return route.fulfill({ json: summaryOf(list) });
+      }
+      if (method === 'DELETE') {
+        if (this.lists.length === 1) return bad("The last watchlist can't be deleted");
+        this.lists = this.lists.filter((item) => item !== list);
+        // As the gateway: the open list hands over to the first one left.
+        if (this.activeId === list.id) this.activeId = this.lists[0]?.id ?? '';
+        return route.fulfill({ json: this.index() });
+      }
+      return bad();
     });
     await this.page.route(/\/api\/bars\?/, (route) => {
       const params = new URL(route.request().url()).searchParams;

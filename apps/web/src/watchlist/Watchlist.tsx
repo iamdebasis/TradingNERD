@@ -1,4 +1,13 @@
-import type { SymbolId, Watchlist as WatchlistDoc } from '@tradingnerd/core';
+import {
+  fileSymbolCount,
+  formatWatchlistFile,
+  parseWatchlistFile,
+  type SymbolId,
+  uniqueListName,
+  type Watchlist as WatchlistDoc,
+  watchlistFileName,
+  watchlistFromFile,
+} from '@tradingnerd/core';
 import {
   type DragEvent,
   type KeyboardEvent,
@@ -9,7 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { marketApi } from '../data/api';
+import { ApiError, marketApi, watchlistsApi } from '../data/api';
 import type { QuoteSource } from '../data/GatewayConnection';
 import { isEditable } from '../lib/dom';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
@@ -27,9 +36,12 @@ import {
   MoreIcon,
   SectionCaret,
 } from './icons';
+import { ConfirmDialog, ListNameDialog, OpenListDialog } from './ListDialogs';
+import { ListMenu } from './ListMenu';
 import {
   addSection,
   addSymbol,
+  addTopSection,
   allSymbols,
   insertSymbol,
   moveSymbol,
@@ -41,8 +53,10 @@ import {
 import { PopupMenu, type PopupMenuEntry, type PopupMenuItem } from './PopupMenu';
 import { QuoteBoard } from './QuoteBoard';
 import { SymbolDirectory } from './SymbolDirectory';
+import { saveTextFile } from './saveTextFile';
 import { useFlags } from './useFlags';
-import { useWatchlist, type WatchlistApi } from './useWatchlist';
+import { useWatchlist } from './useWatchlist';
+import { useWatchlists } from './useWatchlists';
 import styles from './Watchlist.module.css';
 import { WatchlistRow } from './WatchlistRow';
 
@@ -52,7 +66,6 @@ export interface WatchlistProps {
   /** A row was chosen: show it on the chart. */
   onChoose(symbol: SymbolId): void;
   quotes: QuoteSource;
-  api?: WatchlistApi;
   /** Extra items for the ⋯ menu, e.g. coin logo settings. */
   moreItems?: readonly PopupMenuItem[];
   /** A line under the ⋯ menu's items, e.g. a data credit. */
@@ -74,23 +87,29 @@ export const FLAG_HOVER_MS = 300;
 export const FLAG_LEAVE_MS = 200;
 /** TradingView's shortcut for "Flag/Unflag", as its menu shows it on a Mac. */
 const FLAG_SHORTCUT = '⌥ ↵';
+/** How long a note under the list (an upload's summary) stays. */
+export const NOTICE_MS = 8_000;
+/** No watchlist file is this big (1,000 symbols are about 20 KB). */
+const MAX_FILE_BYTES = 1_000_000;
+
+type ListDialog =
+  | { kind: 'create' | 'copy' | 'clear' | 'open' }
+  | { kind: 'delete'; id: string; name: string };
 
 /**
  * The right-hand watchlist (docs/reference/01-chart-layout.png): sections of symbols with
  * live Last, Chg and Chg%. Click or ↑/↓ shows a symbol on the chart; Delete or a row's remove
  * button removes it; rows drag to a new place; sections fold. Symbols carry TradingView's flags
- * (docs/reference/06-watchlist-flags.png, 07-watchlist-row-menu.png). Every change is saved by
- * the gateway: the list in data/watchlist.json, the flags in data/flags.json.
+ * (docs/reference/06-watchlist-flags.png, 07-watchlist-row-menu.png). The list's name opens
+ * TradingView's list menu: several lists, uploaded from and downloaded to TradingView's .txt
+ * (docs/SPEC.md §5.9). Every change is saved by the gateway: the lists in
+ * data/watchlists.json, the flags in data/flags.json.
  */
-export function Watchlist({
-  symbol,
-  onChoose,
-  quotes,
-  api,
-  moreItems = [],
-  moreNote,
-}: WatchlistProps) {
-  const { list, edit } = useWatchlist(api);
+export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }: WatchlistProps) {
+  const lists = useWatchlists();
+  const activeId = lists.index?.activeId ?? null;
+  const active = lists.index?.lists.find((item) => item.id === activeId) ?? null;
+  const { list, edit } = useWatchlist(activeId);
   const { flags, editFlags } = useFlags();
   // A saved Alpaca key looks the stocks up and subscribes to them again.
   const { version: stockKeyVersion } = useStockKeys();
@@ -113,6 +132,13 @@ export function Watchlist({
   const added = useMemo(() => new Set(list ? allSymbols(list) : []), [list]);
   const rows = useRef(new Map<SymbolId, HTMLButtonElement>());
   const more = useRef<HTMLButtonElement>(null);
+  const titleButton = useRef<HTMLButtonElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [listMenu, setListMenu] = useState<{ x: number; y: number } | null>(null);
+  const [dialog, setDialog] = useState<ListDialog | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
@@ -123,6 +149,33 @@ export function Watchlist({
   // The chart's symbol is the selected row.
   useEffect(() => setSelected(symbol), [symbol]);
   useEffect(() => () => clearTimeout(bubbleTimer.current), []);
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
+
+  // ⇧W, TradingView's shortcut for "Open list…".
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'w' || !event.shiftKey) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.defaultPrevented || isEditable(event.target)) return;
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+      event.preventDefault();
+      setDialog({ kind: 'open' });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  /** A note under the list for a while (an upload's summary, a failure). */
+  const notify = useCallback((text: string) => {
+    clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+  }, []);
+  const failed = useCallback(
+    (error: unknown) =>
+      notify(error instanceof ApiError ? error.message : 'The gateway could not do that'),
+    [notify],
+  );
 
   // ⌥↵ (Alt+Enter), as in TradingView: flags or unflags the selected symbol.
   useEffect(() => {
@@ -292,14 +345,116 @@ export function Watchlist({
 
   const menuItems: PopupMenuEntry[] = menu?.symbol != null ? rowMenu(menu.symbol) : [...moreItems];
 
+  // ---- the list menu: several lists, uploads and downloads ----
+  const openListMenu = () => {
+    const box = titleButton.current?.getBoundingClientRect();
+    if (!box || !lists.index) return;
+    void lists.refresh().catch(() => {}); // the open list's count changes as it's edited
+    setListMenu({ x: box.left - 4, y: box.bottom + 2 });
+  };
+  const names = () => lists.index?.lists.map((item) => item.name) ?? [];
+
+  /** "Add section" from the list menu: above the selected row, or at the top. */
+  const addSectionFromMenu = () => {
+    if (selected && added.has(selected)) {
+      startSection(selected);
+      return;
+    }
+    let created = '';
+    edit((current) => {
+      const next = addTopSection(current);
+      created = next.id;
+      return next.list;
+    });
+    if (created) setNaming(created);
+  };
+
+  const finishRenaming = (name: string) => {
+    setRenaming(false);
+    const trimmed = name.trim();
+    if (!active || trimmed === '' || trimmed === active.name) return;
+    lists.update(active.id, { name: trimmed }).catch(failed);
+  };
+
+  /** "Upload list…": a TradingView .txt becomes a new list named after the file, opened. */
+  const upload = async (file: File) => {
+    if (file.size > MAX_FILE_BYTES) {
+      notify('That file is too big to be a watchlist');
+      return;
+    }
+    const parsed = parseWatchlistFile(await file.text());
+    const symbols = fileSymbolCount(parsed);
+    if (parsed.sections.length === 0) {
+      notify(`${file.name} has no symbols in it`);
+      return;
+    }
+    try {
+      const created = await lists.create({
+        name: file.name.replace(/\.txt$/i, ''),
+        sections: watchlistFromFile(parsed).sections,
+      });
+      const titled = parsed.sections.filter((section) => section.title !== '').length;
+      const parts = [
+        `Uploaded “${created.name}”: ${symbols} ${symbols === 1 ? 'symbol' : 'symbols'}` +
+          (titled > 0 ? ` in ${titled} ${titled === 1 ? 'section' : 'sections'}` : ''),
+      ];
+      if (parsed.skipped > 0) parts.push(`${parsed.skipped} left out (repeats or no exchange)`);
+      if (parsed.overLimit > 0) parts.push(`${parsed.overLimit} past the 1,000 a list holds`);
+      notify(parts.join('; '));
+    } catch (error) {
+      failed(error);
+    }
+  };
+
+  /** A list as TradingView's .txt, saved to the computer (the open one as it is now). */
+  const download = async (id: string) => {
+    const meta = lists.index?.lists.find((item) => item.id === id);
+    if (!meta) return;
+    try {
+      const sections = id === activeId && list ? list : await watchlistsApi.get(id);
+      saveTextFile(watchlistFileName(meta.name), formatWatchlistFile(sections));
+    } catch (error) {
+      failed(error);
+    }
+  };
+
   return (
     <div className={styles.watchlist}>
       <div className={styles.titleRow}>
-        {/* One list in v1: TradingView's list switcher has nothing to switch between. */}
-        <span className={styles.title}>
-          Watchlist
-          <ChevronDownIcon />
-        </span>
+        {renaming && active ? (
+          <input
+            className={styles.titleInput}
+            aria-label="List name"
+            defaultValue={active.name}
+            maxLength={64}
+            // biome-ignore lint/a11y/noAutofocus: "Rename" types the name at once
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') finishRenaming(event.currentTarget.value);
+              else if (event.key === 'Escape') {
+                event.preventDefault();
+                setRenaming(false);
+              }
+            }}
+            onBlur={(event) => finishRenaming(event.currentTarget.value)}
+          />
+        ) : (
+          // TradingView's list name: it opens the list menu.
+          <button
+            ref={titleButton}
+            type="button"
+            className={styles.title}
+            aria-haspopup="menu"
+            aria-expanded={listMenu !== null}
+            aria-label={`${active?.name ?? 'Watchlist'}: list menu`}
+            disabled={!lists.index}
+            onClick={openListMenu}
+          >
+            <span className={styles.titleText}>{active?.name ?? 'Watchlist'}</span>
+            <ChevronDownIcon />
+          </button>
+        )}
         <span className={styles.actions}>
           <button
             type="button"
@@ -351,8 +506,14 @@ export function Watchlist({
         onDrop={onDrop}
       >
         {list?.sections.map((section) => (
-          <section key={section.id} aria-label={section.title} className={styles.section}>
-            {naming === section.id ? (
+          <section
+            key={section.id}
+            aria-label={section.title || 'Symbols'}
+            className={styles.section}
+          >
+            {/* An untitled section (an uploaded list's symbols above its first section) has no
+                header, as on TradingView. */}
+            {section.title === '' && naming !== section.id ? null : naming === section.id ? (
               <div className={styles.sectionHeader}>
                 <SectionCaret open={!section.collapsed} />
                 <input
@@ -419,7 +580,105 @@ export function Watchlist({
               ))}
           </section>
         ))}
+        {list?.sections.every((section) => section.symbols.length === 0) && (
+          <p className={styles.empty}>This list is empty. Add symbols with +.</p>
+        )}
       </div>
+      {notice && (
+        <p className={styles.notice} role="status">
+          {notice}
+        </p>
+      )}
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".txt,text/plain"
+        aria-label="Upload list"
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = ''; // the same file can be picked again
+          if (file) void upload(file);
+        }}
+      />
+      {listMenu && lists.index && (
+        <ListMenu
+          x={listMenu.x}
+          y={listMenu.y}
+          index={lists.index}
+          onCopy={() => setDialog({ kind: 'copy' })}
+          onRename={() => setRenaming(true)}
+          onAddSection={addSectionFromMenu}
+          onClear={() => setDialog({ kind: 'clear' })}
+          onCreate={() => setDialog({ kind: 'create' })}
+          onUpload={() => fileInput.current?.click()}
+          onOpenDialog={() => setDialog({ kind: 'open' })}
+          onOpen={(id) => void lists.open(id).catch(failed)}
+          onStar={(id, favorite) => void lists.update(id, { favorite }).catch(failed)}
+          onDownload={(id) => void download(id)}
+          onClose={() => setListMenu(null)}
+        />
+      )}
+      {dialog?.kind === 'create' && (
+        <ListNameDialog
+          title="Create new list"
+          action="Create"
+          initialName=""
+          onSubmit={(name) => {
+            setDialog(null);
+            lists.create({ name }).catch(failed);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'copy' && active && (
+        <ListNameDialog
+          title="Make a copy"
+          action="Copy"
+          initialName={uniqueListName(active.name, names())}
+          onSubmit={(name) => {
+            setDialog(null);
+            lists.create({ name, copyOf: active.id }).catch(failed);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'clear' && active && (
+        <ConfirmDialog
+          title="Clear list"
+          message={`Remove every symbol and section from “${active.name}”?`}
+          action="Clear"
+          onConfirm={() => {
+            setDialog(null);
+            edit(() => ({ sections: [] }));
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'open' && lists.index && (
+        <OpenListDialog
+          index={lists.index}
+          onOpen={(id) => {
+            setDialog(null);
+            if (id !== activeId) lists.open(id).catch(failed);
+          }}
+          onDelete={(id, name) => setDialog({ kind: 'delete', id, name })}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'delete' && (
+        <ConfirmDialog
+          title="Delete list"
+          message={`Delete “${dialog.name}” and its sections? Flags stay with their symbols.`}
+          action="Delete"
+          onConfirm={() => {
+            const { id } = dialog;
+            setDialog({ kind: 'open' });
+            lists.remove(id).catch(failed);
+          }}
+          onClose={() => setDialog({ kind: 'open' })}
+        />
+      )}
       {bubble && flags && (
         <FlagPalette
           anchor={bubble.button}

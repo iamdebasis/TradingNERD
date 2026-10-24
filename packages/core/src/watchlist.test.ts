@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WATCHLIST, MAX_WATCHLIST_SYMBOLS, parseWatchlist } from './watchlist.ts';
+import {
+  DEFAULT_WATCHLIST,
+  MAX_WATCHLIST_SYMBOLS,
+  parseWatchlist,
+  parseWatchlistSymbol,
+} from './watchlist.ts';
 
 const section = (symbols: unknown[], extra: Record<string, unknown> = {}) => ({
   id: 'crypto',
@@ -23,7 +28,39 @@ describe('the default watchlist', () => {
   });
 });
 
+describe('a watchlist symbol', () => {
+  it('is canonical when it has our shape, and kept as written when it is TradingView-only', () => {
+    expect(parseWatchlistSymbol(' binance:xrpusdt ')).toBe('BINANCE:XRPUSDT');
+    expect(parseWatchlistSymbol('GLASSNODE:BTC_HASHRATE')).toBe('GLASSNODE:BTC_HASHRATE');
+    expect(parseWatchlistSymbol('CRYPTOCAP:TOTAL2/BITSTAMP:XRPUSD')).toBe(
+      'CRYPTOCAP:TOTAL2/BITSTAMP:XRPUSD',
+    );
+    expect(parseWatchlistSymbol('CME_MINI:ES1!')).toBe('CME_MINI:ES1!');
+  });
+
+  it.each([
+    ['no exchange prefix', 'XRPUSDT'],
+    ['an empty symbol', 'BINANCE:'],
+    ['a comma', 'A:B,C'],
+    ['a line break', 'A:B\nC'],
+    ['a section marker', '###A:B'],
+    ['too long', `X:${'Y'.repeat(127)}`],
+  ])('refuses %s', (_label, value) => {
+    expect(parseWatchlistSymbol(value)).toBeNull();
+  });
+});
+
 describe('parseWatchlist', () => {
+  it("keeps TradingView's symbols that we don't chart, and an untitled first section", () => {
+    const list = parseWatchlist({
+      sections: [section(['CRYPTOCAP:BTC.D', 'OTC:NTDOY', 'cboe:sixt'], { title: '' })],
+    });
+    expect(list?.sections[0]).toMatchObject({
+      title: '',
+      symbols: ['CRYPTOCAP:BTC.D', 'OTC:NTDOY', 'CBOE:SIXT'],
+    });
+  });
+
   it('canonicalizes symbol ids and keeps each symbol once, in its first place', () => {
     const list = parseWatchlist({
       sections: [

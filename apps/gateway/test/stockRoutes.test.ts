@@ -13,7 +13,7 @@ import { UsListings } from '../src/stocks/UsListings.ts';
 import { UsStocksMarket } from '../src/stocks/UsStocksMarket.ts';
 import { FlagStore } from '../src/storage/FlagStore.ts';
 import { SecretStore } from '../src/storage/secrets.ts';
-import { WatchlistStore } from '../src/storage/WatchlistStore.ts';
+import { WatchlistsStore } from '../src/storage/WatchlistsStore.ts';
 import { NASDAQ_LISTED, OTHER_LISTED } from './fixtures/usDirectory.ts';
 import { createFakeAlpaca } from './helpers/fakeAlpaca.ts';
 
@@ -63,7 +63,7 @@ describe('the gateway with US stocks', () => {
       {
         market: new MarketService([...stocks.exchanges()]),
         catalog,
-        watchlist: new WatchlistStore(dataDir),
+        watchlist: new WatchlistsStore(dataDir),
         flags: new FlagStore(dataDir),
         logos: new LogoService({ client: new CoinGeckoClient({ fetch }), secrets, dataDir, fetch }),
         stocks,

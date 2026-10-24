@@ -1,4 +1,5 @@
-import { parseSymbolId, type SymbolId } from './market.ts';
+import type { SymbolId } from './market.ts';
+import { parseWatchlistSymbol } from './watchlist.ts';
 
 /**
  * TradingView's flag colors, in its palette's order (docs/reference/06-watchlist-flags.png):
@@ -30,8 +31,9 @@ export const DEFAULT_FLAG_STATE: Readonly<FlagState> = Object.freeze({
 export const MAX_FLAGS = 10_000;
 
 /**
- * A valid flag state from anything (a PUT body, the stored file), normalized: canonical symbol
- * ids and known colors only. Null if it isn't one at all or holds too many flags.
+ * A valid flag state from anything (a PUT body, the stored file), normalized: watchlist symbols
+ * (any a list can hold, in canonical form) and known colors only. Null if it isn't one at all
+ * or holds too many flags.
  */
 export function parseFlagState(value: unknown): FlagState | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
@@ -41,8 +43,8 @@ export function parseFlagState(value: unknown): FlagState | null {
   if (entries.length > MAX_FLAGS) return null;
   const kept: Record<SymbolId, FlagColor> = {};
   for (const [symbol, color] of entries) {
-    const parsed = parseSymbolId(symbol);
-    if (parsed && isFlagColor(color)) kept[`${parsed.exchange}:${parsed.ticker}`] = color;
+    const canonical = parseWatchlistSymbol(symbol);
+    if (canonical && isFlagColor(color)) kept[canonical] = color;
   }
   return { flags: kept, lastColor: isFlagColor(lastColor) ? lastColor : 'red' };
 }

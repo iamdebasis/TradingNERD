@@ -14,3 +14,5 @@ export * from './stocks.ts';
 export * from './ticks.ts';
 export * from './timezone.ts';
 export * from './watchlist.ts';
+export * from './watchlistFile.ts';
+export * from './watchlists.ts';

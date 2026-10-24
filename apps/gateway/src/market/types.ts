@@ -128,6 +128,7 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
   too_many_subscriptions: 429,
   internal_error: 500,
   needs_key: 424,
+  not_found: 404,
 };
 
 /** An error with a protocol error code, safe to show to the UI. */

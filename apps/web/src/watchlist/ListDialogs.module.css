@@ -1,0 +1,248 @@
+/* Our dark dialog idiom (as "Add custom interval"); TradingView's own look isn't measured yet. */
+.backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+}
+
+.dialog {
+  width: 360px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 20px;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.dialog[data-wide] {
+  width: 440px;
+  height: min(520px, calc(100vh - 32px));
+}
+
+.titleRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.input {
+  flex: none;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-separator);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  color-scheme: dark;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.message {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.cancel,
+.submit,
+.danger {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cancel {
+  border: 1px solid var(--color-separator);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.cancel:hover {
+  background: var(--color-gutter);
+}
+
+.submit {
+  border: 0;
+  background: var(--color-accent);
+  color: var(--color-label-text);
+}
+
+.submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.danger {
+  border: 0;
+  background: var(--color-down);
+  color: var(--color-label-text);
+}
+
+.lists {
+  flex: 1;
+  min-height: 0;
+  margin: 12px -20px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.list {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.list:hover {
+  background: var(--color-gutter);
+}
+
+.open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 52px 0 20px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list[data-active] .name {
+  color: var(--color-bright);
+  font-weight: 600;
+}
+
+.starred {
+  display: flex;
+  flex: none;
+  color: #f2c94c;
+}
+
+.count {
+  margin-left: auto;
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* As TradingView's: a list under the mouse shows its remove button. */
+.remove {
+  position: absolute;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.list:hover .remove,
+.list:focus-within .remove {
+  opacity: 1;
+}
+
+.list:hover .count,
+.list:focus-within .count {
+  visibility: hidden;
+}
+
+.remove:hover {
+  background: var(--color-chip);
+  color: var(--color-text);
+}
+
+.empty {
+  padding: 12px 20px;
+  color: var(--color-text-secondary);
+}
+
+.close:focus-visible,
+.cancel:focus-visible,
+.submit:focus-visible,
+.danger:focus-visible,
+.open:focus-visible,
+.remove:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}

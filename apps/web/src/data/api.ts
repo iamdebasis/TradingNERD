@@ -5,21 +5,27 @@ import {
   type ExchangeSummary,
   type FlagState,
   type LogoStatus,
+  type NamedWatchlist,
   parseApiError,
   parseBarsResponse,
   parseExchangeList,
   parseFlagState,
   parseLogoStatus,
+  parseNamedWatchlist,
   parseStockKeyStatus,
   parseSymbolInfo,
   parseSymbolSearchResponse,
-  parseWatchlist,
+  parseWatchlistSummary,
+  parseWatchlistsIndex,
   type SearchCategory,
   type SessionHours,
   type StockKeyStatus,
   type SymbolInfo,
   type SymbolSearchResponse,
   type Watchlist,
+  type WatchlistSection,
+  type WatchlistSummary,
+  type WatchlistsIndex,
 } from '@tradingnerd/core';
 
 /** A failed gateway call, with the gateway's error code or `network` if it couldn't be reached. */
@@ -123,26 +129,58 @@ export const searchApi = {
 
 export type SearchApi = typeof searchApi;
 
-/** The watchlist the gateway keeps in data/watchlist.json. */
-export const watchlistApi = {
-  async load(signal?: AbortSignal): Promise<Watchlist> {
-    const list = parseWatchlist(await getJson(`${API_PREFIX}/watchlist`, signal));
-    if (!list) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
-    return list;
-  },
+/** What a new list starts with: nothing, another list's symbols (a copy), or a file's. */
+export interface NewWatchlist {
+  name: string;
+  sections?: WatchlistSection[];
+  copyOf?: string;
+  /** Open it at once (the default). */
+  activate?: boolean;
+}
 
-  async save(list: Watchlist): Promise<Watchlist> {
-    const saved = parseWatchlist(
-      await getJson(`${API_PREFIX}/watchlist`, undefined, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(list),
-      }),
-    );
-    if (!saved) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
-    return saved;
-  },
+const sendJson = (method: string, body?: unknown): RequestInit => ({
+  method,
+  ...(body === undefined
+    ? {}
+    : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+});
+
+function index(body: unknown): WatchlistsIndex {
+  const parsed = parseWatchlistsIndex(body);
+  if (!parsed) throw new ApiError('internal_error', 'The gateway sent a malformed list of lists');
+  return parsed;
+}
+
+function oneList(body: unknown): NamedWatchlist {
+  const parsed = parseNamedWatchlist(body);
+  if (!parsed) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
+  return parsed;
+}
+
+function summary(body: unknown): WatchlistSummary {
+  const parsed = parseWatchlistSummary(body);
+  if (!parsed) throw new ApiError('internal_error', 'The gateway sent a malformed watchlist');
+  return parsed;
+}
+
+const listPath = (id: string) => `${API_PREFIX}/watchlists/${encodeURIComponent(id)}`;
+
+/** The user's watchlists, which the gateway keeps in data/watchlists.json. */
+export const watchlistsApi = {
+  index: async (signal?: AbortSignal) => index(await getJson(`${API_PREFIX}/watchlists`, signal)),
+  get: async (id: string, signal?: AbortSignal) => oneList(await getJson(listPath(id), signal)),
+  save: async (id: string, list: Watchlist) =>
+    oneList(await getJson(listPath(id), undefined, sendJson('PUT', list))),
+  create: async (list: NewWatchlist) =>
+    summary(await getJson(`${API_PREFIX}/watchlists`, undefined, sendJson('POST', list))),
+  update: async (id: string, change: { name?: string; favorite?: boolean }) =>
+    summary(await getJson(listPath(id), undefined, sendJson('PATCH', change))),
+  remove: async (id: string) => index(await getJson(listPath(id), undefined, sendJson('DELETE'))),
+  activate: async (id: string) =>
+    index(await getJson(`${listPath(id)}/activate`, undefined, sendJson('POST'))),
 };
+
+export type WatchlistsApi = typeof watchlistsApi;
 
 /** Flagged symbols, kept by the gateway in data/flags.json. */
 export const flagsApi = {

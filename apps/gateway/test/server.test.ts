@@ -29,7 +29,7 @@ import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
 import { FlagStore } from '../src/storage/FlagStore.ts';
 import { SecretStore } from '../src/storage/secrets.ts';
-import { WatchlistStore } from '../src/storage/WatchlistStore.ts';
+import { WatchlistsStore } from '../src/storage/WatchlistsStore.ts';
 import { FakeCatalogSource, pair } from './helpers/FakeCatalog.ts';
 import { fakeCoinGecko } from './helpers/FakeCoinGecko.ts';
 import { dailyBars, FAKE_INFO, FakeExchange } from './helpers/FakeExchange.ts';
@@ -85,7 +85,7 @@ async function start() {
     {
       market: new MarketService([fake], { emitIntervalMs: 0, quoteIntervalMs: 0 }),
       catalog,
-      watchlist: new WatchlistStore(dataDir),
+      watchlist: new WatchlistsStore(dataDir),
       flags: new FlagStore(dataDir),
       logos,
     },
@@ -475,8 +475,9 @@ describe('gateway watchlist', () => {
     };
     expect(res.json()).toEqual(saved);
     expect((await request('GET')).json()).toEqual(saved);
-    const file = join(dataDir, 'watchlist.json');
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(saved);
+    // The open list of the lists file.
+    const file = JSON.parse(readFileSync(join(dataDir, 'watchlists.json'), 'utf8'));
+    expect(file.lists[0]).toMatchObject({ id: 'watchlist', name: 'Watchlist', ...saved });
     expect(readdirSync(dataDir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
@@ -491,15 +492,105 @@ describe('gateway watchlist', () => {
   });
 
   it('moves an unreadable file aside instead of losing it', async () => {
-    writeFileSync(join(dataDir, 'watchlist.json'), '{ broken');
-    expect((await request('GET')).json()).toEqual(DEFAULT_WATCHLIST);
-    const kept = readdirSync(dataDir).filter((name) => name.startsWith('watchlist.json.invalid-'));
-    expect(kept).toHaveLength(1);
-    expect(readFileSync(join(dataDir, kept[0] as string), 'utf8')).toBe('{ broken');
+    const fresh = await start();
+    try {
+      mkdirSync(fresh.dataDir, { recursive: true });
+      writeFileSync(join(fresh.dataDir, 'watchlists.json'), '{ broken');
+      const res = await fresh.app.inject({
+        method: 'GET',
+        url: '/api/watchlist',
+        headers: { host: '127.0.0.1:5180', origin: UI_ORIGIN },
+      });
+      expect(res.json()).toEqual(DEFAULT_WATCHLIST);
+      const kept = readdirSync(fresh.dataDir).filter((name) =>
+        name.startsWith('watchlists.json.invalid-'),
+      );
+      expect(kept).toHaveLength(1);
+      expect(readFileSync(join(fresh.dataDir, kept[0] as string), 'utf8')).toBe('{ broken');
+    } finally {
+      await fresh.app.close();
+    }
   });
 
   it('keeps the data folder private to the user', () => {
     expect(statSync(dataDir).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe('gateway watchlists', () => {
+  const call = (app: FastifyInstance, method: string, url: string, payload?: unknown) =>
+    app.inject({
+      method: method as 'GET',
+      url,
+      headers: { host: '127.0.0.1:5180', origin: UI_ORIGIN },
+      ...(payload === undefined ? {} : { payload: payload as Record<string, unknown> }),
+    });
+
+  it('list, create, read, save, rename, star, open and delete lists', async () => {
+    const { app } = await start();
+    try {
+      const index = (await call(app, 'GET', '/api/watchlists')).json();
+      expect(index).toMatchObject({ activeId: 'watchlist', lists: [{ name: 'Watchlist' }] });
+
+      const created = await call(app, 'POST', '/api/watchlists', {
+        name: 'From TradingView',
+        sections: [
+          { id: 's1', title: 'ETFS', collapsed: false, symbols: ['AMEX:GBTC', 'OTC:LTCN'] },
+        ],
+      });
+      expect(created.statusCode).toBe(200);
+      const { id } = created.json() as { id: string };
+      expect((await call(app, 'GET', '/api/watchlists')).json().activeId).toBe(id);
+      expect((await call(app, 'GET', `/api/watchlists/${id}`)).json()).toMatchObject({
+        name: 'From TradingView',
+        sections: [{ symbols: ['AMEX:GBTC', 'OTC:LTCN'] }],
+      });
+      // The open list is what /api/watchlist serves, as before several lists.
+      expect((await call(app, 'GET', '/api/watchlist')).json().sections[0].title).toBe('ETFS');
+
+      const saved = await call(app, 'PUT', `/api/watchlists/${id}`, {
+        sections: [{ id: 's1', title: 'ETFS', collapsed: true, symbols: ['nasdaq:ibit'] }],
+      });
+      expect(saved.json()).toMatchObject({
+        sections: [{ collapsed: true, symbols: ['NASDAQ:IBIT'] }],
+      });
+      expect(
+        (
+          await call(app, 'PATCH', `/api/watchlists/${id}`, { name: 'ETFs', favorite: true })
+        ).json(),
+      ).toMatchObject({ name: 'ETFs', favorite: true, count: 1 });
+      expect((await call(app, 'POST', '/api/watchlists/watchlist/activate')).json().activeId).toBe(
+        'watchlist',
+      );
+      const after = (await call(app, 'DELETE', `/api/watchlists/${id}`)).json();
+      expect(after.lists.map((list: { id: string }) => list.id)).toEqual(['watchlist']);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each([
+    ['an unknown list', 'GET', '/api/watchlists/nope', undefined, 404, 'not_found'],
+    ['a list without a name', 'POST', '/api/watchlists', { name: ' ' }, 400, 'bad_request'],
+    [
+      'a copy of nothing',
+      'POST',
+      '/api/watchlists',
+      { name: 'x', copyOf: 'nope' },
+      404,
+      'not_found',
+    ],
+    ['a bad list', 'PUT', '/api/watchlists/watchlist', { sections: 'x' }, 400, 'bad_request'],
+    ['the last list', 'DELETE', '/api/watchlists/watchlist', undefined, 400, 'bad_request'],
+  ])('answers %s with a clear error', async (_label, method, url, payload, status, code) => {
+    const { app } = await start();
+    try {
+      const res = await call(app, method, url, payload);
+      expect(res.statusCode).toBe(status);
+      expect(res.json()).toMatchObject({ error: code });
+    } finally {
+      await app.close();
+    }
   });
 });
 
