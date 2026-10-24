@@ -314,16 +314,18 @@
 
 /*
  * TradingView's overlay while several rows are dragged (measured from its screenshot): their
- * tickers in list order, a 29 px row each, 16 px in, on the selection blue, 300 px wide with
- * square corners. Built off-screen for the browser's drag image, which the browser fades.
+ * tickers in list order, a 29 px row each, 16 px in, 300 px wide with square corners. It's
+ * see-through itself: over black its blue reads (15,23,47) and its text 138, 55% of the selection
+ * blue (#132E61) and of near-white (#F2F2F2), since the browser draws a drag image as given.
+ * Built off-screen for the browser's drag image.
  */
 .dragOverlay {
   position: fixed;
   top: -10000px;
   left: 0;
   width: 300px;
-  background: var(--color-selection);
-  color: var(--color-bright);
+  background: rgb(19 46 97 / 55%);
+  color: rgb(242 242 242 / 55%);
   font-size: 14px;
   line-height: 18px;
 }
@@ -337,9 +339,9 @@
   white-space: nowrap;
 }
 
-/* Past ten symbols, how many more (provisional). */
+/* Past ten symbols, how many more (provisional): the secondary gray (#8C8C8C), as see-through. */
 .dragOverlayMore {
-  color: var(--color-text-secondary);
+  color: rgb(140 140 140 / 55%);
 }
 
 /*

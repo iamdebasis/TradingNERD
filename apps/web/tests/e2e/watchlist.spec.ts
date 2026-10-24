@@ -1323,13 +1323,14 @@ test("dragging one of several selected rows shows TradingView's overlay of their
     clientX: bat.x + 50,
     clientY: bat.y + 12,
   });
-  const white = 'rgb(242, 242, 242)';
+  // See-through itself, as TradingView's: 55% of the selection blue and of near-white.
+  const white = 'rgba(242, 242, 242, 0.55)';
   expect(await dragImages(page)).toEqual([
     {
       lines: ['LINKUSDT', 'BATUSDT', 'MANAUSDT'], // in list order
       width: 300,
       heights: [29, 29, 29],
-      background: 'rgb(19, 46, 97)',
+      background: 'rgba(19, 46, 97, 0.55)',
       colors: [white, white, white],
       paddingLeft: '16px',
       radius: '0px',
@@ -1358,7 +1359,7 @@ test('past ten rows, the overlay lists ten and counts the rest', async ({ page }
   const more = DEFAULT_TICKERS.length - 10;
   expect(image?.lines).toEqual([...DEFAULT_TICKERS.slice(0, 10), `+${more} more`]);
   expect(image?.heights).toHaveLength(11);
-  expect(image?.colors.at(-1)).toBe('rgb(140, 140, 140)');
+  expect(image?.colors.at(-1)).toBe('rgba(140, 140, 140, 0.55)');
   await row(page, 'LINKUSDT').dispatchEvent('dragend', { dataTransfer });
   await expect(overlays(page)).toHaveCount(0);
 });
