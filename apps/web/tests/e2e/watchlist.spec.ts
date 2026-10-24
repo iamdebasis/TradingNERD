@@ -1260,6 +1260,145 @@ test("typing a section's name, Backspace edits the name and never removes a row"
   await expect.poll(async () => (await tickers(page)).length).toBe(DEFAULT_TICKERS.length);
 });
 
+// ---- the overlay of a drag of several rows, and the outline of a selected row under the mouse,
+// measured from TradingView's screenshot of several rows dragged (docs/SPEC.md §5.3) ----
+
+interface DragImage {
+  lines: (string | null)[];
+  width: number;
+  heights: number[];
+  background: string;
+  colors: string[];
+  paddingLeft: string;
+  radius: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Records what the page hands the browser as a drag image. The browser draws that image itself,
+ * outside the page, so no screenshot shows it.
+ */
+async function watchDragImages(page: Page) {
+  await page.evaluate(() => {
+    const seen: DragImage[] = [];
+    Object.assign(window, { dragImages: seen });
+    const original = DataTransfer.prototype.setDragImage;
+    DataTransfer.prototype.setDragImage = function (element: Element, x: number, y: number) {
+      const lines = [...element.children];
+      seen.push({
+        lines: lines.map((line) => line.textContent),
+        width: element.getBoundingClientRect().width,
+        heights: lines.map((line) => line.getBoundingClientRect().height),
+        background: getComputedStyle(element).backgroundColor,
+        colors: lines.map((line) => getComputedStyle(line).color),
+        paddingLeft: lines[0] ? getComputedStyle(lines[0]).paddingLeft : '',
+        radius: getComputedStyle(element).borderTopLeftRadius,
+        x,
+        y,
+      });
+      original.call(this, element, x, y);
+    };
+  });
+}
+const dragImages = (page: Page) =>
+  page.evaluate(() => (window as unknown as { dragImages: DragImage[] }).dragImages);
+const overlays = (page: Page) => page.locator('body > div[class*="dragOverlay"]');
+
+test("dragging one of several selected rows shows TradingView's overlay of their tickers", async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  await watchDragImages(page);
+  await row(page, 'BATUSDT').click();
+  await row(page, 'MANAUSDT').click({ modifiers: ['ControlOrMeta'] });
+  await row(page, 'LINKUSDT').click({ modifiers: ['ControlOrMeta'] });
+  // Grabbed on BATUSDT, 50 px in and 12 px down: the pointer keeps that spot on the overlay.
+  const bat = await boxOf(row(page, 'BATUSDT'));
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await row(page, 'BATUSDT').dispatchEvent('dragstart', {
+    dataTransfer,
+    clientX: bat.x + 50,
+    clientY: bat.y + 12,
+  });
+  const white = 'rgb(242, 242, 242)';
+  expect(await dragImages(page)).toEqual([
+    {
+      lines: ['LINKUSDT', 'BATUSDT', 'MANAUSDT'], // in list order
+      width: 300,
+      heights: [29, 29, 29],
+      background: 'rgb(19, 46, 97)',
+      colors: [white, white, white],
+      paddingLeft: '16px',
+      radius: '0px',
+      x: 50,
+      y: 12,
+    },
+  ]);
+  // Gone from the page once the browser has it.
+  await expect(overlays(page)).toHaveCount(0);
+  await row(page, 'BATUSDT').dispatchEvent('dragend', { dataTransfer });
+
+  // One row dragged on its own keeps the browser's image of the row.
+  await row(page, 'XRPUSDT').dispatchEvent('dragstart', { dataTransfer });
+  expect(await dragImages(page)).toHaveLength(1);
+  await row(page, 'XRPUSDT').dispatchEvent('dragend', { dataTransfer });
+});
+
+test('past ten rows, the overlay lists ten and counts the rest', async ({ page }) => {
+  await openChart(page);
+  await watchDragImages(page);
+  await row(page, 'XRPUSDT').click();
+  await page.keyboard.press('ControlOrMeta+a');
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await row(page, 'LINKUSDT').dispatchEvent('dragstart', { dataTransfer });
+  const [image] = await dragImages(page);
+  const more = DEFAULT_TICKERS.length - 10;
+  expect(image?.lines).toEqual([...DEFAULT_TICKERS.slice(0, 10), `+${more} more`]);
+  expect(image?.heights).toHaveLength(11);
+  expect(image?.colors.at(-1)).toBe('rgb(140, 140, 140)');
+  await row(page, 'LINKUSDT').dispatchEvent('dragend', { dataTransfer });
+  await expect(overlays(page)).toHaveCount(0);
+});
+
+test('a selected row under the mouse gains the rounded gray outline; others the gray', async ({
+  page,
+  market,
+}) => {
+  market.watchlist = THREE_SECTIONS;
+  await openChart(page);
+  const outlineOf = (ticker: string) =>
+    row(page, ticker).evaluate((element) => {
+      const wrap = element.parentElement;
+      if (!wrap) return null;
+      const style = getComputedStyle(wrap, '::after');
+      return {
+        content: style.content,
+        border: [style.borderTopWidth, style.borderTopColor, style.borderTopLeftRadius],
+        inset: [style.top, style.right, style.bottom, style.left],
+      };
+    });
+  await row(page, 'XRPUSDT').hover(); // the chart's symbol, selected
+  expect(await outlineOf('XRPUSDT')).toEqual({
+    content: '""',
+    border: ['2px', 'rgb(146, 146, 146)', '5px'],
+    inset: ['1px', '0px', '1px', '0px'],
+  });
+  await expect(row(page, 'XRPUSDT')).toHaveCSS('background-color', 'rgb(19, 46, 97)');
+
+  // A row not selected: the gray under the mouse, no outline.
+  await row(page, 'LINKUSDT').hover();
+  expect((await outlineOf('LINKUSDT'))?.content).toBe('none');
+  expect((await outlineOf('XRPUSDT'))?.content).toBe('none');
+  await expect(row(page, 'LINKUSDT')).toHaveCSS('background-color', 'rgb(46, 46, 46)');
+
+  // Selected with others, under the mouse: the outline.
+  await row(page, 'LINKUSDT').click({ modifiers: ['ControlOrMeta'] });
+  expect((await outlineOf('LINKUSDT'))?.content).toBe('""');
+});
+
 test('a symbol the exchange does not list shows in red, without prices', async ({
   page,
   market,

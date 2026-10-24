@@ -1,6 +1,6 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-24** (M0–M8c committed; M8d, selecting several symbols, built and verified, awaiting review).
+Living document. Last updated **2026-10-24** (M0–M8d committed; M8e, the overlay of a drag of several symbols, built and verified, awaiting review).
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
@@ -123,6 +123,8 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-24 | **Selecting several symbols** (M8d), as TradingView's Shift and Ctrl (⌘ on a Mac): ⌘-click adds or takes a row, Shift-click selects every row shown up to it, Shift+↓/↑ grow or shrink the selection, ⌘A selects every row shown; none of them moves the chart. Delete or a selected row's trash removes them all, ⌥↵ and the row menu flag them all, and dragging one moves them all. Space and Shift+Space switch the chart, as ↓ and ↑ do | Your YES after the deep dive (§4.9). |
 | 2026-10-24 | Escape goes back to the chart's symbol alone; ⌘A leaves out the rows of folded sections; ⌥↵ on a mix flags the unflagged ones in the last color and keeps the others' colors; Shift-click replaces the selection with the range | Not documented by TradingView; provisional (§11). |
 | 2026-10-24 | Keys typed into a section's name stay in it: Backspace or Delete there used to remove the selected row | A bug found while building M8d; fixed in the list's key handler. |
+| 2026-10-24 | **The overlay of a drag of several rows** (M8e), as TradingView's: their tickers in list order, a 29 px row each, 16 px in, near-white on the selection blue, 300 px wide; the browser fades it, and the pointer keeps the spot where it grabbed its row. Past ten, "+N more". One row dragged keeps the browser's own image of the row | Your YES; measured from your screenshot (§4.10). |
+| 2026-10-24 | A selected row under the mouse keeps its blue and gains TradingView's rounded gray outline (2 px #929292, 5 px corners) | Your YES to my reading of your screenshot, where the row grabbed has it (provisional). |
 
 ## 4. Research findings
 
@@ -259,6 +261,14 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Not documented:** whether ⌘- or Shift-clicks move the chart, what Escape does, the menu's wording for several, the color of several selected rows.
 - **On a Mac,** Ctrl-click is a right-click, so TradingView's "Ctrl (Command)" is ⌘ there.
 
+### 4.10 Dragging several rows (measured 2026-10-24)
+
+- **TradingView documents nothing about it;** your screenshot of five selected rows being dragged (Display P3, 1.322×) is the source.
+- **The overlay near the pointer:** their tickers only, in list order (though the row grabbed was the second), a 29 px row each, 16 px in; 300 px wide with square corners; the selection blue and near-white text, faded to about 55% (the same fade as the header in your section drag, the browser's for a drag image). Its top sits at the pointer.
+- **The browser's way to draw it:** an element handed over as the drag image when the drag starts, the pointer at an offset on it (MDN, `setDragImage`). The browser draws it outside the page, so no screenshot of the page shows it.
+- **Settled by the same screenshot:** a row's drag draws the section drag's line with its ring (§11, item 43); several selected rows share the one selection blue (item 45).
+- **Also seen:** the row grabbed keeps its blue and has a rounded gray outline (about 2 px of #929292, 5 px corners, flush with its sides, 1 px in from its top and bottom; over its flag). While dragged, it still shows its trash, with no square, and its gray flag; ours hides both during a drag.
+
 ## 5. Requirements (v1)
 
 ### 5.1 Chart
@@ -348,6 +358,10 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
     - Selected rows are `#132E61`, the chart row's blue, under the mouse too.
     - With several selected: Delete or Backspace, or the trash on one of them, removes them all, and the row after them is selected. ⌥↵ flags the unflagged ones in the last color (the others keep theirs), or unflags them all when all are flagged. The row menu on one of them reads "Flag/Unflag N symbols ⌥ ↵", and a color picked is for all of them (their shared color ringed; picking it unflags them). Dragging one moves them all, together and in their list order. A right-click or a drag on a row not selected is for that row alone.
     - Rows that go out of sight (folded away, removed, another list) leave the selection. Keys typed into a section's name stay in it.
+  - **Dragging several** (M8e, §4.10):
+    - Dragging one of several selected rows shows TradingView's overlay by the pointer: their tickers in list order, a 29 px row each, 16 px in, `#F2F2F2` on `#132E61`, 300 px wide, with square corners. The browser fades it, and the pointer keeps the spot where it grabbed its row. Past ten symbols, the first ten and "+N more" (in `#8C8C8C`). It's handed to the browser when the drag starts, then taken out of the page.
+    - One row dragged on its own keeps the browser's image of the row.
+    - A selected row under the mouse keeps its blue and gains a rounded gray outline: 2 px of `#929292`, 5 px corners, flush with its sides and 1 px in from its top and bottom, over its flag. It shows on the row grabbed while it's dragged, as in TradingView's screenshot.
   - **Flags** (TradingView's behavior from its blog and help center, §12; measured from `docs/reference/06-watchlist-flags.png`):
     - A 12 × 13 pennant with a V cut into its right side, flush with the panel's left edge, 8 px down the row, in red `#FF5252`, blue `#2A79FF`, green `#81C784`, yellow `#FBC02D`, purple `#BA68C8`, cyan `#00E5FF` or pink `#F48FB1`. The column titles carry the same flag in gray `#4A4A4A`.
     - A flag belongs to the symbol, not the row. The gateway keeps the flags and the last color used in `data/flags.json`, so a symbol keeps its flag when its row is removed or moved, and shows it again when added back.
@@ -785,7 +799,8 @@ Reference viewport is 1634 px wide.
 | M8 | Several watchlists: TradingView's list menu, MY WATCHLISTS with ★ and ⤓, Open list (⇧W), Upload list… and downloads in TradingView's .txt | Your TradingView file uploads into a list and downloads back the same. **Committed 2026-10-24** |
 | M8b | Deleting a section: TradingView's trash on a section's header; its symbols stay | The trash matches your screenshot, and a deleted section's symbols land at the end of the section above. **Committed 2026-10-24** |
 | M8c | Moving sections: dragging a section's header (an open one alone, a folded one whole), TradingView's drop line, no trash on folded sections, the 6 px above headers | Your screenshot's drag reproduced on your list: the line under KOSPI, the header blue. **Committed 2026-10-24** |
-| M8d | Selecting several symbols: Shift and ⌘ (Ctrl) clicks, Shift+↓/↑, ⌘A, Escape; Delete, the trash, ⌥↵, the row menu and dragging for all of them; Space and Shift+Space | Every gesture checked on your list, nothing saved. **Built 2026-10-24** |
+| M8d | Selecting several symbols: Shift and ⌘ (Ctrl) clicks, Shift+↓/↑, ⌘A, Escape; Delete, the trash, ⌥↵, the row menu and dragging for all of them; Space and Shift+Space | Every gesture checked on your list, nothing saved. **Committed 2026-10-24** |
+| M8e | The overlay of a drag of several rows, and the outline of a selected row under the mouse, as TradingView's | Measured against your screenshot; the overlay handed to the browser checked on your list. **Built 2026-10-24** |
 
 ## 9. Testing strategy
 
@@ -834,6 +849,7 @@ Reference viewport is 1634 px wide.
 - **Selecting several** (M8d):
   - The model (`apps/web/src/watchlist/model.test.ts`): removing several; moving several together in list order, where they were, into a section that isn't there; Shift ranges either way, across sections, never into a folded one. The flags (`flagEdits.test.ts`): flagging and unflagging several, a color for several, the color they share.
   - In the browser (`tests/e2e/watchlist.spec.ts`): ⌘-click and Shift-click across sections with the chart staying, the blue, a plain click; Shift+↓/↑, ⌘A without a folded section's rows, Escape; Space and Shift+Space, and Space folding a header; Delete on several, the row after them selected, flags kept; a selected row's trash and another row's; ⌥↵ both ways; the row menu on several, its colors, and on a row not selected; dragging several together and an unselected row alone; folding taking rows out of the selection; Backspace while typing a section's name.
+- **Dragging several** (M8e, `tests/e2e/watchlist.spec.ts`): what the page hands the browser as the drag image, recorded (the browser draws it outside the page): the tickers in list order, 300 px wide, 29 px rows, the colors, 16 px in, square corners, the pointer's spot; nothing left in the page after; one row on its own keeping the browser's image; past ten, ten and "+N more" in gray. The outline: its size, color, corners and place on a selected row under the mouse, none on a row not selected, and the blue kept.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -937,9 +953,10 @@ Reference viewport is 1634 px wide.
 40. How TradingView keeps the pre/post-market label clear of the last price's (ours: right above or below it, on its price's side), and whether autoscale includes that price (ours: no).
 41. Alpaca gave AAPL's Friday 23 October close as 347.725, half a cent; ours shows it to 2 decimals. Worth comparing with TradingView's close for that day.
 42. Watchlists, provisional: what TradingView names an uploaded list (ours: the file's name); a copy's name (ours: " (1)", as your "Watchlist (1)" suggests); the order of MY WATCHLISTS (ours: starred, then by name; TradingView's "Recently used" is by use); the dialogs' look (Create new list, Make a copy, Clear list, Open list, deleting); the menu icons' exact paths (the broom's and the new list's differ a little); whether Rename types in place; where the list menu's Add section goes; how a spread shows in a row (ours: what follows the first colon).
-43. Moving sections, provisional: where a folded section's line snaps (ours: the nearer edge of the section under the pointer; your screenshot shows one case); a symbol row's drag line (ours: the section drag's, with its ring).
+43. Moving sections, provisional: where a folded section's line snaps (ours: the nearer edge of the section under the pointer; your screenshot shows one case). A row's drag line is the section drag's, with its ring, as your screenshot of several rows dragged shows (§4.10).
 44. Your recent TradingView screenshots show a pure black panel (#000000) and darker grays (about #1A1A1A) than the #0F0F0F and #2E2E2E our colors follow, from your M6 screenshots. TradingView may have darkened its dark theme; worth checking before changing every color.
-45. Selecting several, provisional: whether ⌘- and Shift-clicks move the chart (ours: no); what Escape does (ours: back to the chart's symbol); whether Shift-click adds the range or replaces the selection (ours: replaces); the menu's wording for several (ours: "Flag/Unflag N symbols"; TradingView's 2018 blog: "Flag All Selected"); ⌥↵ on a mix (ours: the unflagged ones flagged, the others' colors kept); whether ⌘A takes the rows of folded sections (ours: no); the color of several selected rows (ours: the chart row's blue). A screenshot of TradingView with several rows selected, and with the row menu open on them, would settle most of these.
+45. Selecting several, provisional: whether ⌘- and Shift-clicks move the chart (ours: no); what Escape does (ours: back to the chart's symbol); whether Shift-click adds the range or replaces the selection (ours: replaces); the menu's wording for several (ours: "Flag/Unflag N symbols"; TradingView's 2018 blog: "Flag All Selected"); ⌥↵ on a mix (ours: the unflagged ones flagged, the others' colors kept); whether ⌘A takes the rows of folded sections (ours: no). Several selected rows share the chart row's blue, as your screenshot of several rows dragged shows (§4.10). A screenshot with the row menu open on several would settle the wording.
+46. Dragging several, provisional: "+N more" past ten (your screenshot has five); one row's drag image (ours: the browser's image of the row); how strongly the browser fades the overlay (ours: the browser's own fade of an opaque overlay; compare it with TradingView's in your browser); whether the outline marks every selected row under the mouse (ours) or only the one grabbed; a selected row's trash with no square, and the grabbed row keeping its trash and gray flag while dragged (ours: the square, and both hidden during a drag).
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -950,8 +967,8 @@ Reference viewport is 1634 px wide.
 - The "Add custom interval" dialog.
 - The prompt after typing `5` on the chart.
 - The watchlist's ⋯ menu.
-- A watchlist row being dragged (a section being dragged was measured, §4.8).
-- Several watchlist rows selected, and the row menu open on them (§11, item 45).
+- One watchlist row being dragged on its own (a section, §4.8, and several rows, §4.10, were measured).
+- The row menu open on several selected rows (§11, item 45).
 - The Add symbol dialog with a row under the mouse, a filter menu open, and a grouped row's ⌄ opened (TradingView's list of sources).
 - The symbol search opened from the chart (its title and anything that differs from Add symbol).
 
@@ -981,6 +998,7 @@ Reference viewport is 1634 px wide.
 - Deleting a section (M8b): "named, moved, and deleted" https://www.tradingview.com/blog/en/new-watchlist-features-21389 · "remove these dividers at any time" https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · sections and folding in the Charting Library https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · community guides that say the symbols go too, which your report corrected: https://in.tradingview.com/chart/BAJFINANCE/PRDrc70Y-HOW-TO-WATCHLIST-ADD-DELETE-SYMBOL-OR-SECTION-IN-TRADINGVIEW · https://blueberrymarkets.com/market-analysis/how-to-manage-the-tradingview-watchlist/
 - Moving sections (M8c): dividers you can "rename, move, or remove" https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · "named, moved, and deleted" https://www.tradingview.com/blog/en/new-watchlist-features-21389 · folding https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · selecting several https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443/ · the same rules in a clone project https://github.com/deepentropy/opentrader/issues/21 · sections moved like symbols, several dragged together (Japanese) https://tetori.jp/tradingview/watchlist/
 - Selecting several (M8d): the watchlist's keyboard shortcuts https://www.tradingview.com/charting-library-docs/latest/getting_started/Shortcuts/ · Shift and Ctrl (Command), deleting several, "Flag All Selected" https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443/ · Alt (Opt)+Enter https://tradingview.com/blog/en/flagged-lists-improved-9521 · Alt+Enter on a selection (Japanese) https://www.oanda.jp/lab-education/tradingviewstrategy/basic/shortcut/ · several dragged together (Japanese) https://tetori.jp/tradingview/watchlist/ · clicks that leave the chart (clone project) https://github.com/deepentropy/opentrader/issues/21
+- Dragging several (M8e): the drag image handed to the browser https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/setDragImage
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

@@ -299,6 +299,50 @@
 }
 
 /*
+ * A selected row under the mouse keeps its blue and gains TradingView's rounded gray outline,
+ * over its flag too (measured from its screenshot of several rows dragged, on the row grabbed:
+ * about 2 px of #929292, 5 px corners, 1 px in from the top and bottom; provisional).
+ */
+.rowWrap:hover:has(> .row[data-selected])::after {
+  content: "";
+  position: absolute;
+  inset: 1px 0;
+  border: 2px solid #929292;
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+/*
+ * TradingView's overlay while several rows are dragged (measured from its screenshot): their
+ * tickers in list order, a 29 px row each, 16 px in, on the selection blue, 300 px wide with
+ * square corners. Built off-screen for the browser's drag image, which the browser fades.
+ */
+.dragOverlay {
+  position: fixed;
+  top: -10000px;
+  left: 0;
+  width: 300px;
+  background: var(--color-selection);
+  color: var(--color-bright);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.dragOverlayRow {
+  display: flex;
+  align-items: center;
+  height: 29px;
+  padding: 0 16px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Past ten symbols, how many more (provisional). */
+.dragOverlayMore {
+  color: var(--color-text-secondary);
+}
+
+/*
  * 22 px, 4 px corners, centered on the row above its line, 6 px from its right edge: the bin
  * ends 2.5 px short of the numbers' right edge, as in TradingView's screenshots (2 and 2.5 px).
  */

@@ -121,6 +121,38 @@ const FLAG_SHORTCUT = '⌥ ↵';
 export const NOTICE_MS = 8_000;
 /** No watchlist file is this big (1,000 symbols are about 20 KB). */
 const MAX_FILE_BYTES = 1_000_000;
+/** The overlay of a drag of several rows lists this many tickers at most, then counts the rest. */
+export const DRAG_OVERLAY_ROWS = 10;
+/** Its rows' height, as measured. */
+const DRAG_OVERLAY_ROW_PX = 29;
+
+/**
+ * TradingView's overlay while several rows are dragged (measured from its screenshot): their
+ * tickers in list order, built off-screen and handed to the browser as the drag image, with the
+ * pointer where it grabbed its row; taken out of the page once the browser has it.
+ */
+function setDragOverlay(event: DragEvent, symbols: readonly SymbolId[]) {
+  const overlay = document.createElement('div');
+  overlay.className = styles.dragOverlay ?? '';
+  const lines = symbols
+    .slice(0, DRAG_OVERLAY_ROWS)
+    .map((symbol) => symbol.slice(symbol.indexOf(':') + 1));
+  const more = symbols.length - lines.length;
+  const rows = lines.map((text) => [text, styles.dragOverlayRow]);
+  if (more > 0) rows.push([`+${more} more`, `${styles.dragOverlayRow} ${styles.dragOverlayMore}`]);
+  for (const [text, className] of rows) {
+    const line = document.createElement('div');
+    line.className = className ?? '';
+    line.textContent = text ?? '';
+    overlay.append(line);
+  }
+  document.body.append(overlay);
+  const box = event.currentTarget.getBoundingClientRect();
+  const x = Math.min(Math.max(event.clientX - box.left, 0), overlay.offsetWidth);
+  const y = Math.min(Math.max(event.clientY - box.top, 0), DRAG_OVERLAY_ROW_PX);
+  event.dataTransfer.setDragImage(overlay, x, y);
+  setTimeout(() => overlay.remove(), 0);
+}
 
 type ListDialog =
   | { kind: 'create' | 'copy' | 'clear' | 'open' }
@@ -408,13 +440,17 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
     event.dataTransfer.setData('text/plain', text);
     setDragging(dragged);
   };
-  /** A row of several selected carries them all, in their list order; another row, itself. */
+  /**
+   * A row of several selected carries them all, in their list order, under TradingView's overlay
+   * of their tickers; another row, itself, as the browser draws it.
+   */
   const onDragStart = (event: DragEvent, dragged: SymbolId) => {
     const symbols =
       list && selection.size > 1 && selection.has(dragged)
         ? allSymbols(list).filter((item) => selection.has(item))
         : [dragged];
     startDrag(event, { symbols }, symbols.join(','));
+    if (symbols.length > 1) setDragOverlay(event, symbols);
   };
   const onHeaderDragStart = (event: DragEvent, section: WatchlistSection) =>
     startDrag(event, { section: section.id, folded: section.collapsed }, section.title);
