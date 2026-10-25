@@ -1,6 +1,6 @@
 # tradingNerd: core values
 
-tradingNerd is a local clone of TradingView. It should look and feel identical to TradingView, and the user wants a perfect product, maybe better than TradingView. These four core values apply to every task in this repo, in this order.
+tradingNerd is a local clone of TradingView. It should look and feel identical to TradingView, and the user wants a perfect product, maybe better than TradingView. These five core values apply to every task in this repo, in this order.
 
 ## 1. YES before any change
 
@@ -38,5 +38,14 @@ Before implementing any feature, go through values 1–3. Show the user a short 
 - **YES:** the YES in hand, or the question being asked.
 - **Roles:** each lead's plan: product, architecture, UI/art, tests and delivery.
 - **Research:** the deep dive (TradingView's sources and our SPEC), with sources, and what is still unknown.
+- **Data:** for chart integrations, the providers compared (history depth and accuracy; free, free key or paid) and the one chosen (value 5).
 
 If any value isn't met yet, stop and meet it first.
+
+## 5. The best data for every chart
+
+Every chart integration (a token, a symbol, an index such as TOTAL) gets the most accurate and longest history we can find. Before building one:
+
+- Compare providers on history depth and accuracy, free ones first, measured from this machine against TradingView's own numbers and depth.
+- Say which need a free API key, and what a paid tier would add.
+- Use official APIs and data the provider allows. TradingView is the benchmark, never the source (value 3).
