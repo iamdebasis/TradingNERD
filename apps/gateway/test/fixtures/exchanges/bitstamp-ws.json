@@ -1,0 +1,53 @@
+{
+  "subscribed": {
+    "event": "bts:subscription_succeeded",
+    "channel": "live_trades_btcusd",
+    "data": {}
+  },
+  "trade": {
+    "data": {
+      "id": 660766002,
+      "timestamp": "1792926238",
+      "amount": 7.5e-6,
+      "amount_str": "0.00000750",
+      "price": 80302.52,
+      "price_str": "80302.52",
+      "type": 0,
+      "microtimestamp": "1792926238022000",
+      "buy_order_id": 2064757814738944,
+      "sell_order_id": 2064757580861442
+    },
+    "channel": "live_trades_btcusd",
+    "event": "trade"
+  },
+  "order_book": {
+    "data": {
+      "timestamp": "1792926237",
+      "microtimestamp": "1792926237911414",
+      "bids": [
+        ["1.29352", "144.00000000"],
+        ["1.29351", "25214.61516679"],
+        ["1.29347", "1300.00000000"]
+      ],
+      "asks": [
+        ["1.29359", "144.00000000"],
+        ["1.29360", "4251.70068027"],
+        ["1.29362", "25214.61516679"]
+      ]
+    },
+    "channel": "order_book_xrpusd",
+    "event": "data"
+  },
+  "heartbeat": {
+    "event": "bts:heartbeat",
+    "channel": "",
+    "data": {
+      "status": "success"
+    }
+  },
+  "unsubscribed": {
+    "event": "bts:unsubscription_succeeded",
+    "channel": "order_book_xrpusd",
+    "data": {}
+  }
+}

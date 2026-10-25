@@ -35,21 +35,22 @@ export const INSTRUMENTS_TTL_MS = 12 * 60 * 60_000;
 
 /**
  * An exchange's pairs by ticker, loaded once and kept for 12 hours; shared by symbol lookups
- * and the search catalog, so the list is fetched once for both.
+ * and the search catalog, so the list is fetched once for both. An exchange can keep more about
+ * each pair than `Instrument` holds (Bitstamp its own description).
  */
-export class InstrumentBook {
-  private readonly load: () => Promise<Instrument[]>;
+export class InstrumentBook<T extends Instrument = Instrument> {
+  private readonly load: () => Promise<T[]>;
   private readonly exchangeName: string;
-  private cached: { list: Promise<Map<string, Instrument>>; fetchedAt: number } | null = null;
+  private cached: { list: Promise<Map<string, T>>; fetchedAt: number } | null = null;
   /** The last list that arrived, for lookups that can't wait. */
-  private ready: ReadonlyMap<string, Instrument> = new Map();
+  private ready: ReadonlyMap<string, T> = new Map();
 
-  constructor(exchangeName: string, load: () => Promise<Instrument[]>) {
+  constructor(exchangeName: string, load: () => Promise<T[]>) {
     this.exchangeName = exchangeName;
     this.load = load;
   }
 
-  async get(ticker: string): Promise<Instrument> {
+  async get(ticker: string): Promise<T> {
     const instrument = (await this.byTicker()).get(ticker);
     if (!instrument) {
       throw new MarketError('unknown_symbol', `${this.exchangeName} does not list this symbol`);
@@ -61,12 +62,12 @@ export class InstrumentBook {
    * An instrument already loaded, for setting up streams synchronously: every feed resolves
    * its symbol before it subscribes.
    */
-  loaded(ticker: string): Instrument | undefined {
+  loaded(ticker: string): T | undefined {
     return this.ready.get(ticker);
   }
 
   /** Keeps a list just fetched for the catalog, saving lookups a request. */
-  remember(instruments: readonly Instrument[]): void {
+  remember(instruments: readonly T[]): void {
     const map = new Map(instruments.map((instrument) => [instrument.ticker, instrument]));
     this.cached = { list: Promise.resolve(map), fetchedAt: Date.now() };
     this.ready = map;
@@ -77,7 +78,7 @@ export class InstrumentBook {
     await this.byTicker().catch(() => {});
   }
 
-  private byTicker(): Promise<Map<string, Instrument>> {
+  private byTicker(): Promise<Map<string, T>> {
     if (!this.cached) return this.refresh();
     if (Date.now() - this.cached.fetchedAt > INSTRUMENTS_TTL_MS) {
       // An old list still answers while a new one loads, so no lookup waits on the download.
@@ -89,7 +90,7 @@ export class InstrumentBook {
     return this.cached.list;
   }
 
-  private refresh(): Promise<Map<string, Instrument>> {
+  private refresh(): Promise<Map<string, T>> {
     const list = this.load().then(
       (instruments) => new Map(instruments.map((instrument) => [instrument.ticker, instrument])),
     );

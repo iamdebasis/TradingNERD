@@ -97,6 +97,7 @@ export const MOCK_EXCHANGES: ExchangeSummary[] = [
   { id: 'OKX', name: 'OKX', live: true },
   { id: 'COINBASE', name: 'Coinbase', live: true },
   { id: 'KRAKEN', name: 'Kraken', live: true },
+  { id: 'BITSTAMP', name: 'Bitstamp', live: true },
 ];
 const EXCHANGE_NAMES = new Map(MOCK_EXCHANGES.map((exchange) => [exchange.id, exchange.name]));
 
@@ -140,6 +141,10 @@ export const MOCK_CATALOG: CatalogEntry[] = [
   listing('BINANCE', 'XRPU', 'XRP', 'U', 'XRP / United Stables', 0.5e6),
   listing('BINANCE', 'BTCUSDT', 'BTC', 'USDT', 'Bitcoin / TetherUS', 900e6),
   listing('KRAKEN', 'XBTUSD', 'BTC', 'USD', 'Bitcoin / US Dollar', 117e6),
+  // Bitstamp, with its volumes of 2026-10-25: its XRPBTC trades only about $30,000 a day.
+  listing('BITSTAMP', 'XRPUSD', 'XRP', 'USD', 'XRP / US Dollar', 12e6),
+  listing('BITSTAMP', 'XRPBTC', 'XRP', 'BTC', 'XRP / Bitcoin', 0.03e6),
+  listing('BITSTAMP', 'BTCUSD', 'BTC', 'USD', 'Bitcoin / US Dollar', 110e6),
   listing('OKX', 'XCHUSDT', 'XCH', 'USDT', 'Chia / TetherUS', 1e6),
   ...(DEFAULT_WATCHLIST.sections[0]?.symbols ?? [])
     .filter((symbol) => symbol !== XRP_INFO.id)
@@ -291,6 +296,16 @@ export function formulaBars(symbol: string, bars: readonly Bar[]): Bar[] | null 
   });
 }
 
+/**
+ * Bitstamp's pairs as its symbol lookups describe them, with its own decimals; its search rows
+ * use the names every exchange shares.
+ */
+const BITSTAMP_INFO: Record<string, { description: string; pricePrecision: number }> = {
+  'BITSTAMP:XRPUSD': { description: 'XRP / U.S. dollar', pricePrecision: 5 },
+  'BITSTAMP:XRPBTC': { description: 'XRP / Bitcoin', pricePrecision: 8 },
+  'BITSTAMP:BTCUSD': { description: 'Bitcoin / U.S. dollar', pricePrecision: 2 },
+};
+
 /** SymbolInfo for any pair in the mock catalog, or any BINANCE:…USDT but the unlisted. */
 export function infoFor(symbol: string): SymbolInfo | null {
   if (symbol === XRP_INFO.id) return XRP_INFO;
@@ -303,7 +318,8 @@ export function infoFor(symbol: string): SymbolInfo | null {
   const quote = listed?.quote ?? 'USDT';
   if (!base || UNLISTED.has(base)) return null;
   const exchange = listed?.exchange ?? 'BINANCE';
-  const pricePrecision = PRECISION[base] ?? 4;
+  const own = BITSTAMP_INFO[symbol];
+  const pricePrecision = own?.pricePrecision ?? PRECISION[base] ?? 4;
   return {
     ...XRP_INFO,
     id: symbol,
@@ -312,7 +328,7 @@ export function infoFor(symbol: string): SymbolInfo | null {
     ticker: listed?.ticker ?? `${base}${quote}`,
     base,
     quote,
-    description: listed?.description ?? `${base} / TetherUS`,
+    description: own?.description ?? listed?.description ?? `${base} / TetherUS`,
     tickSize: 10 ** -pricePrecision,
     pricePrecision,
   };
@@ -335,6 +351,9 @@ export function quoteFor(symbol: string): { last: number; prevClose: number } {
   }
   if (symbol === 'BINANCE:LINKUSDT') return { last: 11.947, prevClose: 12.35 };
   if (symbol === 'BINANCE:VETUSDT') return { last: 0.006731, prevClose: 0.006979 };
+  // Bitstamp's, as its quotes read on 2026-10-25.
+  if (symbol === 'BITSTAMP:XRPUSD') return { last: 1.29475, prevClose: 1.29786 };
+  if (symbol === 'BITSTAMP:BTCUSD') return { last: 80344.53, prevClose: 80771.95 };
   if (symbol === XRP_INFO.id) return { last: 1.2955, prevClose: 1.3115 };
   const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   const last = 0.5 + (seed % 97) / 10;

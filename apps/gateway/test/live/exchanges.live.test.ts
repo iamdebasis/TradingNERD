@@ -1,5 +1,6 @@
 import { type Bar, barOpenTime, parseResolution } from '@tradingnerd/core';
 import { afterAll, describe, expect, it } from 'vitest';
+import { BitstampExchange } from '../../src/exchanges/bitstamp/BitstampExchange.ts';
 import { BybitExchange } from '../../src/exchanges/bybit/BybitExchange.ts';
 import { CoinbaseExchange } from '../../src/exchanges/coinbase/CoinbaseExchange.ts';
 import { KrakenExchange } from '../../src/exchanges/kraken/KrakenExchange.ts';
@@ -7,7 +8,7 @@ import { OkxExchange } from '../../src/exchanges/okx/OkxExchange.ts';
 import { MarketService } from '../../src/market/MarketService.ts';
 import type { ExchangeAdapter } from '../../src/market/types.ts';
 
-// Talks to Bybit, OKX, Coinbase and Kraken. Skipped unless LIVE=1 (`pnpm test:live`).
+// Talks to Bybit, OKX, Coinbase, Kraken and Bitstamp. Skipped unless LIVE=1 (`pnpm test:live`).
 const LIVE = process.env.LIVE === '1';
 
 const CASES: { name: string; adapter: () => ExchangeAdapter; symbol: string; built: string[] }[] = [
@@ -25,6 +26,12 @@ const CASES: { name: string; adapter: () => ExchangeAdapter; symbol: string; bui
     adapter: () => new KrakenExchange(),
     symbol: 'KRAKEN:XBTUSD',
     built: ['120', '1W'],
+  },
+  {
+    name: 'Bitstamp',
+    adapter: () => new BitstampExchange(),
+    symbol: 'BITSTAMP:XRPUSD',
+    built: ['45', '3D', '1W'],
   },
 ];
 
@@ -114,4 +121,21 @@ describe.runIf(LIVE).concurrent.each(CASES)('$name, live', ({ adapter, symbol, b
     expect(quotes[0]?.prevClose).toBe(previous.close);
     expect(Math.abs((quotes.at(-1)?.last ?? 0) / previous.close - 1)).toBeLessThan(0.5);
   }, 30_000);
+});
+
+describe.runIf(LIVE)('Bitstamp, live history', () => {
+  const market = new MarketService([new BitstampExchange()]);
+  afterAll(() => market.close());
+
+  it("reaches back to Bitcoin's first day there, 18 August 2011, every day since", async () => {
+    const newer = await market.getBars('BITSTAMP:BTCUSD', '1D', null, 5_000);
+    const first = newer.bars[0] as Bar;
+    const older = await market.getBars('BITSTAMP:BTCUSD', '1D', first.time, 5_000);
+    expect(older.hasMore).toBe(false);
+    const bars = [...older.bars, ...newer.bars];
+    expect(bars[0]?.time).toBe(Date.UTC(2011, 7, 18) / 1000);
+    expect(bars.at(-1)?.time).toBe(today());
+    const gaps = bars.slice(1).filter((bar, i) => bar.time - (bars[i] as Bar).time !== 86_400);
+    expect(gaps).toEqual([]);
+  }, 120_000);
 });

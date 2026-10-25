@@ -1,6 +1,10 @@
 import { type Bar, barOpenTime } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
 import { BINANCE_DEFAULTS, BinanceExchange } from '../../src/exchanges/binance/BinanceExchange.ts';
+import {
+  BITSTAMP_DEFAULTS,
+  BitstampExchange,
+} from '../../src/exchanges/bitstamp/BitstampExchange.ts';
 import { BYBIT_DEFAULTS, BybitExchange } from '../../src/exchanges/bybit/BybitExchange.ts';
 import {
   COINBASE_DEFAULTS,
@@ -55,6 +59,12 @@ const CASES: Case[] = [
     symbol: 'KRAKEN:XBTUSD',
     upstreams: [KRAKEN_DEFAULTS.streamUrl],
     adapter: ([url]) => new KrakenExchange({ streamUrl: url }),
+  },
+  {
+    name: 'Bitstamp',
+    symbol: 'BITSTAMP:BTCUSD',
+    upstreams: [BITSTAMP_DEFAULTS.streamUrl],
+    adapter: ([url]) => new BitstampExchange({ streamUrl: url }),
   },
 ];
 

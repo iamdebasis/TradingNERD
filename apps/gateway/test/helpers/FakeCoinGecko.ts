@@ -80,7 +80,14 @@ export function fakeCoinGecko(options: FakeCoinGeckoOptions = {}) {
       });
     }
     if (path === '/exchanges') {
-      const ids = options.exchanges ?? ['binance', 'bybit_spot', 'okex', 'gdax', 'kraken'];
+      const ids = options.exchanges ?? [
+        'binance',
+        'bybit_spot',
+        'okex',
+        'gdax',
+        'kraken',
+        'bitstamp',
+      ];
       return Response.json(
         ids.map((id) => ({
           id,

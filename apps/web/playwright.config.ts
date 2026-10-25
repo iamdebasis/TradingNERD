@@ -12,7 +12,7 @@ const viewport = { width: 1634, height: 1000 };
 const live = process.env.LIVE === '1';
 const nowhere = { rest: 'http://127.0.0.1:9', stream: 'ws://127.0.0.1:9' };
 const offlineExchanges = Object.fromEntries(
-  ['BINANCE', 'BYBIT', 'OKX', 'COINBASE', 'KRAKEN'].flatMap((exchange) => [
+  ['BINANCE', 'BYBIT', 'OKX', 'COINBASE', 'KRAKEN', 'BITSTAMP'].flatMap((exchange) => [
     [`${exchange}_REST_URL`, nowhere.rest],
     [`${exchange}_STREAM_URL`, nowhere.stream],
   ]),

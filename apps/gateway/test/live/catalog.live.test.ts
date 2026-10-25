@@ -5,12 +5,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { SymbolCatalog } from '../../src/catalog/SymbolCatalog.ts';
 import type { CatalogSource } from '../../src/catalog/types.ts';
 import { BinanceExchange } from '../../src/exchanges/binance/BinanceExchange.ts';
+import { BitstampExchange } from '../../src/exchanges/bitstamp/BitstampExchange.ts';
 import { BybitExchange } from '../../src/exchanges/bybit/BybitExchange.ts';
 import { CoinbaseExchange } from '../../src/exchanges/coinbase/CoinbaseExchange.ts';
 import { KrakenExchange } from '../../src/exchanges/kraken/KrakenExchange.ts';
 import { OkxExchange } from '../../src/exchanges/okx/OkxExchange.ts';
 
-// Talks to the five exchanges' public APIs. Skipped unless LIVE=1 (`pnpm test:live`).
+// Talks to the six exchanges' public APIs. Skipped unless LIVE=1 (`pnpm test:live`).
 const LIVE = process.env.LIVE === '1';
 
 describe.runIf(LIVE)('symbol catalog, live', () => {
@@ -21,14 +22,17 @@ describe.runIf(LIVE)('symbol catalog, live', () => {
     new OkxExchange(),
     new CoinbaseExchange(),
     new KrakenExchange(),
+    new BitstampExchange(),
   ];
+  /** Bitstamp lists about 255 spot pairs; the others well over 300. */
+  const fewest = (source: CatalogSource) => (source.id === 'BITSTAMP' ? 200 : 300);
   afterAll(() => binance.close());
 
   it.each(sources.map((source) => [source.name, source] as const))(
     '%s lists its trading spot pairs, XRPUSDT among them with a price and volume',
     async (_name, source) => {
       const { pairs } = await source.fetchCatalog();
-      expect(pairs.length).toBeGreaterThan(300);
+      expect(pairs.length).toBeGreaterThan(fewest(source));
       const xrp = pairs.find((pair) => pair.ticker === 'XRPUSDT');
       expect(xrp).toMatchObject({ base: 'XRP', quote: 'USDT' });
       expect(xrp?.last).toBeGreaterThan(0);
@@ -53,7 +57,7 @@ describe.runIf(LIVE)('symbol catalog, live', () => {
       expect(first?.ticker).toBe('XRPUSDT');
       expect(first?.description).toBe('XRP / TetherUS');
       expect(new Set(first?.listings.map((listing) => listing.exchange))).toEqual(
-        new Set(['BINANCE', 'BYBIT', 'OKX', 'COINBASE', 'KRAKEN']),
+        new Set(['BINANCE', 'BYBIT', 'OKX', 'COINBASE', 'KRAKEN', 'BITSTAMP']),
       );
       expect(first?.listings[0]).toEqual({
         id: 'BINANCE:XRPUSDT',

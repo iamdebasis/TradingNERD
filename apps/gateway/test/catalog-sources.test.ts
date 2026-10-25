@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BinanceExchange } from '../src/exchanges/binance/BinanceExchange.ts';
 import { parseMiniTickers, parseTradingSymbols } from '../src/exchanges/binance/parse.ts';
+import { BitstampExchange } from '../src/exchanges/bitstamp/BitstampExchange.ts';
+import { parseBitstampCatalog } from '../src/exchanges/bitstamp/parse.ts';
 import { BybitExchange } from '../src/exchanges/bybit/BybitExchange.ts';
 import { parseBybitPairs } from '../src/exchanges/bybit/parse.ts';
 import { CoinbaseExchange } from '../src/exchanges/coinbase/CoinbaseExchange.ts';
@@ -13,8 +15,9 @@ import { MarketError } from '../src/market/types.ts';
 import { fixture, fixtureFetch } from './helpers/FakeCatalog.ts';
 
 /**
- * Each exchange's public pair list, parsed from responses recorded on 2026-10-19 (trimmed to a
- * few pairs, plus ones that must be left out: halted, pre-launch, suspended, delisted, aliases).
+ * Each exchange's public pair list, parsed from responses recorded on 2026-10-19 (Bitstamp's on
+ * 2026-10-25), trimmed to a few pairs, plus ones that must be left out: halted, pre-launch,
+ * suspended, delisted, aliases, perpetuals.
  */
 const tickers = (pairs: { ticker: string }[]) => pairs.map((pair) => pair.ticker).sort();
 
@@ -171,6 +174,54 @@ describe('Kraken pair list', () => {
     expect(() =>
       parseKrakenPairs({ error: ['EGeneral:Too many requests'] }, fixture('kraken-ticker')),
     ).toThrow(MarketError);
+  });
+});
+
+describe('Bitstamp pair list', () => {
+  it("keeps the spot pairs trading, with the asset names Bitstamp's descriptions give", async () => {
+    const { pairs, names } = parseBitstampCatalog(
+      fixture('bitstamp-markets'),
+      fixture('bitstamp-ticker'),
+    );
+    // ZK/EUR's trading is disabled, and BTC/USD-PERP is a perpetual.
+    expect(tickers(pairs)).toEqual(['BTCUSD', 'EURUSD', 'USDTUSD', 'XRPBTC', 'XRPEUR', 'XRPUSD']);
+    const xrp = pairs.find((pair) => pair.ticker === 'XRPUSD');
+    expect(xrp).toMatchObject({ base: 'XRP', quote: 'USD', last: 1.30055 });
+    // Bitstamp counts volume in the base asset: 9,344,208 XRP at the last price.
+    expect(xrp?.quoteVolume).toBeCloseTo(9344208.38216504 * 1.30055, 2);
+    expect(names).toEqual({
+      EUR: 'Euro',
+      USD: 'U.S. dollar',
+      BTC: 'Bitcoin',
+      XRP: 'XRP',
+      USDT: 'Tether',
+    });
+
+    const { fetch, requested } = fixtureFetch({
+      '/api/v2/markets/': fixture('bitstamp-markets'),
+      '/api/v2/ticker/': fixture('bitstamp-ticker'),
+    });
+    const bitstamp = new BitstampExchange({ fetch });
+    try {
+      expect((await bitstamp.fetchCatalog()).pairs).toHaveLength(6);
+      // The list answers symbol lookups too, without asking again; described as Bitstamp does.
+      const before = requested.length;
+      expect(await bitstamp.resolveSymbol('XRPUSD')).toMatchObject({
+        id: 'BITSTAMP:XRPUSD',
+        exchangeName: 'Bitstamp',
+        description: 'XRP / U.S. dollar',
+        tickSize: 0.00001,
+        pricePrecision: 5,
+      });
+      expect(requested).toHaveLength(before);
+    } finally {
+      await bitstamp.close();
+    }
+  });
+
+  it('refuses an unexpected answer', () => {
+    expect(() => parseBitstampCatalog({ error: 'nope' }, [])).toThrow(MarketError);
+    expect(() => parseBitstampCatalog([], { error: 'nope' })).toThrow(MarketError);
   });
 });
 

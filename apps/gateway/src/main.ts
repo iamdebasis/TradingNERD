@@ -4,6 +4,7 @@ import type { CatalogSource } from './catalog/types.ts';
 import { loadConfig } from './config.ts';
 import { CryptoCapExchange } from './cryptocap/CryptoCapExchange.ts';
 import { BinanceExchange } from './exchanges/binance/BinanceExchange.ts';
+import { BitstampExchange } from './exchanges/bitstamp/BitstampExchange.ts';
 import { BybitExchange } from './exchanges/bybit/BybitExchange.ts';
 import { CoinbaseExchange } from './exchanges/coinbase/CoinbaseExchange.ts';
 import { KrakenExchange } from './exchanges/kraken/KrakenExchange.ts';
@@ -36,6 +37,8 @@ const exchanges: (ExchangeAdapter & CatalogSource)[] = [
   new OkxExchange({ ...config.okx, names, onWarning: warn('okx') }),
   new CoinbaseExchange({ ...config.coinbase, names, onWarning: warn('coinbase') }),
   new KrakenExchange({ ...config.kraken, names, onWarning: warn('kraken') }),
+  // Last: its asset names ("U.S. dollar") fill in only what the others don't name.
+  new BitstampExchange({ ...config.bitstamp, names, onWarning: warn('bitstamp') }),
 ];
 const secrets = new SecretStore(config.dataDir);
 

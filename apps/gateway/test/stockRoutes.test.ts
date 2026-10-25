@@ -27,6 +27,7 @@ const config: GatewayConfig = {
   okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
   coinbase: { restUrl: undefined, streamUrl: undefined },
   kraken: { restUrl: undefined, streamUrl: undefined },
+  bitstamp: { restUrl: undefined, streamUrl: undefined },
   alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
   dataDir: '',

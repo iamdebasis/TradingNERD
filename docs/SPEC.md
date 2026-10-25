@@ -140,6 +140,11 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-25 | **A formula's look**, from your screenshot 22: named by its tickers (TOTAL2/XRPUSD) with a gray letter; Last in its first symbol's format (809.23B, 80.98); Chg in full digits, trailing zeros dropped (−2,215,826,337, 0.1), or in thousands to trillions where our column is too narrow for them; the legend "TOTAL3-USDT-USDC · 1D · CRYPTOCAP", its first symbol's exchange; Sell and Buy its value | Measured from your screenshot 22; the narrow column's fallback is ours (§11). |
 | 2026-10-25 | **Typing one:** "XRP/USDT" stays a pair's search. A formula is plain from + * or brackets, from a / or − with a space beside it (TradingView's "operator followed by a space"), or before a number or an exchange's symbol; text no symbol matches is read as one (NVDA/AMD). The list searches for the symbol being typed and a pick fills it in; the formula's own row tops the list, "spread", and Enter takes it. A symbol typed without its exchange is the search's first listing of that very ticker | TradingView documents typing one and pressing Enter; the row on top and the reading of text without spaces are ours (§11). |
 | 2026-10-25 | **A formula with a symbol we lack names it.** Next to market caps, a coin from another exchange (your EURONEXT:USDC in TOTAL3-USDT-USDC) gets "Use CRYPTOCAP:USDC" first in its row menu: one click puts CRYPTOCAP's in its place, its flag kept | Ours: TradingView has no such item. |
+| 2026-10-25 | **Bitstamp** (M9c), the sixth exchange: every spot pair it trades (255), in search, charts from 1 minute to 12 months, watchlists, Sell and Buy, and formulas. Its perpetuals, seconds and ticks are left out | Your YES after the plan (§4.13). |
+| 2026-10-25 | **As Bitstamp describes its pairs:** "XRP / U.S. dollar", "Bitcoin / U.S. dollar", its own decimals (XRPUSD 5, BTCUSD 2, XRPBTC 8); its asset names fill only what the five others don't name, so their pairs read as before | TradingView shows Bitstamp's own label, seen on a mirror of its page (§4.13); provisional (§11). |
+| 2026-10-25 | **Bitstamp's history from its first trade:** BTCUSD from 18 August 2011 at every interval, 1 minute too; its quiet periods come filled | Bitstamp's own bars (§4.13). |
+| 2026-10-25 | **Bitstamp's requests go one at a time, a quarter second apart, and say who's asking; a 503 from its front door is asked again after 1, 2 and 4 s** | Measured: its front door turns away overlapping requests and about one in four of a quick run of them, far under its published limit (§4.13). |
+| 2026-10-25 | Bitstamp isn't one of CRYPTOCAP's price sources: market caps stay as calibrated (§4.11) | Kept out on purpose; it can join later. |
 
 ## 4. Research findings
 
@@ -310,6 +315,20 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Your screenshot 22** (TradingView, 24 October): rows named without their exchanges (TOTAL2/XRPUSD, BTCUSD/XAUUSD) with a gray letter (T, B); Last in the first symbol's format (817.2B, 20, 1,488, 80.98); Chg in full digits, trailing zeros dropped (−2,215,826,337, −0.2, −18, 0.1); Sell and Buy equal; the legend "TOTAL3-USDT-USDC · 1D · CRYPTOCAP", the first symbol's exchange; a volume shown (how it's worked out is unknown).
 - **Checked live** (your running app, 25 October): BTC.D+ETH.D+USDT.D+USDC.D at 17:28–17:30 UTC on 24 October, from 1-minute bars, read 81.027–81.034 against TradingView's 80.97–80.98 in your screenshot (+0.07%). It equals its four symbols added up, and its 5-minute bar is built from those minutes.
 
+### 4.13 Bitstamp (researched 2026-10-25)
+
+- **TradingView's own pages** (§12): BITSTAMP:XRPUSD names the exchange "Bitstamp" and shows 5 decimals (1.29694); BITSTAMP:BTCUSD's history reaches 2011 (its lowest, 2 USD on 20 October 2011).
+- **Bitstamp's own API** (§12), and measured from your Mac:
+  - 276 markets: 256 spot (255 trading; ZK/EUR disabled) and 20 perpetuals. Spot quotes: USD 116, EUR 112, USDT 7, USDC 6, GBP 4, BTC 3, and a few others. Each pair has its price decimals and its own description ("XRP / U.S. dollar").
+  - Bars of 1, 3, 5, 15 and 30 minutes, 1, 2, 4, 6 and 12 hours, 1 and 3 days; at most 1,000 a request. `end` takes the bar opening at it; `start` the bar holding it. Quiet periods come filled at the last price (MANAUSD had no trade in any of its last 1,000 minutes).
+  - History from each pair's first trade: BTCUSD 18 August 2011 (12:37 UTC, every interval), XRPUSD 16 December 2016, XRPBTC 10 February 2017, ETHUSD 16 August 2017, the rest of yours 2021–2022.
+  - Its stream: trades as they happen, the top 100 of the order book about five times a second, no candles. It "subscribes" to a pair it doesn't list without a word.
+  - Its published limit is 10,000 requests in 10 minutes. Its front door, though, turns away overlapping requests, and about one in four of a quick run of them, with an HTML 503; a descriptive client name halves that, and asking again a moment later works.
+  - Commercial use of its data needs Bitstamp's licence; this is a personal app.
+- **Third-party:** TradingView labels BITSTAMP:XRPUSD "XRP / U.S. dollar" on a mirror of its page; Tardis.dev says Bitstamp's live order and diff channels start without a snapshot (we use its order book snapshots).
+- **Your lists** hold nine of its tickers: BTCUSD, ETHUSD, XRPUSD (in TOTAL2/XRPUSD), XRPBTC, USDTUSD, NEARUSD, BATUSD, MANAUSD and GRTUSD.
+- **Checked live** (your data, 25 October): all nine live in "Watchlist (1) (1)"; TOTAL2/XRPUSD at 17:26–17:30 UTC on 24 October 815.89–816.18B against TradingView's 817.2B in your screenshot 22 (−0.12 to −0.16%, all of it TOTAL2's own, §4.11); BTCUSD every day from 18 August 2011; 30 s offline recovered in 2.5 s with no minute missing.
+
 ## 5. Requirements (v1)
 
 ### 5.1 Chart
@@ -423,7 +442,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 
 ### 5.4 Add symbol dialog (also used as Symbol search)
 
-- **Search:** instant, across every listed pair on the five exchanges.
+- **Search:** instant, across every listed pair on the six exchanges (Bitstamp since M9c).
 - **Ranking:** exact ticker > ticker prefix > base asset > description. Ties are broken by liquidity.
 - **Choosing the exchange:** one row per pair, expandable into one row per exchange. This is where you pick the price source.
 - **Filters:** tabs (All, Crypto) and filters (sources, types). Matched text is highlighted.
@@ -435,7 +454,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Done when:** typing "XRP" lists every exchange, and a picked row is live within 1 s.
 - **Status:** built in M4 (2026-10-19).
   - **Opened by:** the watchlist's + ("Add symbol"); the symbol pill, or a letter typed on the chart ("Symbol search", which shows the pick on the chart instead of adding it).
-  - **Catalog:** every trading spot pair on Binance, Bybit, OKX, Coinbase and Kraken (about 5,000), from their public APIs. Typing "XRP" lists all five.
+  - **Catalog:** every trading spot pair on Binance, Bybit, OKX, Coinbase, Kraken and, since M9c, Bitstamp (about 5,250), from their public APIs. Typing "XRP" lists all six.
   - **Every exchange can be picked** (M5). Measured live, a picked pair shows its price this soon after the click: Bybit 0.21–0.31 s, Binance 0.24–0.51 s, Kraken 0.30–0.47 s, OKX 0.33–0.40 s, Coinbase 0.53–0.61 s. Once, Coinbase took 1.15 s while its API answered slowly.
   - **An exchange without live data** would be listed with a dimmed + saying "Live data from … isn't available yet"; none is, now.
   - **Rows:** one per ticker. A ticker listed on several exchanges shows the first one's name, its logos stacked, and ⌄ to list the others. Exchanges with live data come first, then the most traded. Typed text is highlighted in the ticker and the description.
@@ -545,6 +564,12 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **A symbol we lack:** the row is red and says which; next to market caps, its row menu offers CRYPTOCAP's coin (§3).
 - **Done when:** your BTC.D+ETH.D+USDT.D+USDC.D is within 0.1% of TradingView's 80.97–80.98 at your screenshots' moment, and typing, opening, adding and the fix work end to end. **Met** on 25 October: +0.07% (§4.12). Your TOTAL2/XRPUSD from Bitstamp waits for M9c.
 
+### 5.12 Bitstamp (M9c)
+
+- **Every spot pair Bitstamp trades** goes everywhere a pair goes: search (and its source filter), the chart from 1 minute to 12 months with history from the pair's first trade, watchlist rows, Sell and Buy, and formulas.
+- **Names and decimals** as Bitstamp gives them (§3); its logo from CoinGecko.
+- **Done when:** your nine Bitstamp symbols are live in your lists and on the chart, BTCUSD back to 2011, and TOTAL2/XRPUSD within 0.3% of your screenshot 22's 817.2B at its moment. **Met** on 25 October: −0.12 to −0.16% (§4.13). Your BTCUSD/XAUUSD and BTCUSD/SILVER still wait for gold and silver (OANDA, TVC).
+
 ## 6. Architecture
 
 ### 6.1 Overview
@@ -651,10 +676,11 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   | OKX | candle, on the business stream | trades | bbo-tbt | 300 recent, then 100 | Seconds; UTC bars; two connections |
   | Coinbase | polled over REST every 30 s | market_trades | ticker | 350, side by side | Quiet periods filled; heartbeats keep the link |
   | Kraken | ohlc | trade | ticker (on bid/ask changes) | its latest 720 only | Weeks built from days |
+  | Bitstamp | polled over REST every 30 s | live_trades | order_book (its top) | 1,000, side by side | From each pair's first trade; one request at a time; its own heartbeat |
 
 - **Pair lists:** each adapter keeps its exchange's pairs (tick size, stream names) for 12 h. They're loaded when the gateway starts, and refreshed in the background while the old list answers.
 - **Pacing:** each exchange's REST requests go out in order, spaced under its limit (§3, §4.3).
-- **History:** pages are fetched one after another, each ending where the last began. Coinbase, with a bar in every period, has its pages fetched side by side (§6.5). Kraken is never asked for bars older than it keeps.
+- **History:** pages are fetched one after another, each ending where the last began. Coinbase and Bitstamp, with a bar in every period, have their pages fetched side by side (§6.5), though Bitstamp's requests then still go one at a time (§3). Kraken is never asked for bars older than it keeps.
 - **Reconnect and gap-fill:** while an exchange's stream is down, its charts say so. When it's back, the live bar is re-seeded over REST and the chart reloads its latest 1,000 bars (§6.4).
 - Code: `apps/gateway/src/exchanges/*/`, `exchanges/shared.ts`, `stream/StreamClient.ts`.
 
@@ -893,7 +919,7 @@ Reference viewport is 1634 px wide.
 | M8e | The overlay of a drag of several rows, and the outline of a selected row under the mouse, as TradingView's | Measured against your screenshot; the overlay handed to the browser checked on your list. **Built 2026-10-24** |
 | M9a | CRYPTOCAP: market caps (TOTAL, TOTAL2, TOTAL3, OTHERS, the ES ones, TOTALE50 and TOTALE100, STABLE.C, every coin's), dominance and ratios, from exchange prices and CoinGecko's supply, with TradingView's names and formats | TOTAL, TOTAL2, TOTAL3 and dominance within 0.5% of your screenshots' moment. **Built 2026-10-25**: all within 0.26%, but OTHERS (−6%, §4.11) |
 | M9b | Formulas (spreads): + − * /, numbers, brackets, up to 10 symbols, typed into search; intraday bars from 1-minute ones; in watchlists | Your formulas (BTC.D+ETH.D+USDT.D+USDC.D, TOTAL2/XRPUSD) live. **Built 2026-10-25**: +0.07% at your screenshots' moment; TOTAL2/XRPUSD from Bitstamp waits for M9c |
-| M9c | Bitstamp | Your Bitstamp symbols live. Needs its YES |
+| M9c | Bitstamp: every spot pair, from its first trade, live, in search, charts, watchlists and formulas | Your Bitstamp symbols live. **Built 2026-10-25**: all nine live; TOTAL2/XRPUSD −0.12 to −0.16% at your screenshot's moment; BTCUSD back to 18 August 2011 |
 
 ## 9. Testing strategy
 
@@ -909,7 +935,7 @@ Reference viewport is 1634 px wide.
   - Chromium runs with `--force-device-scale-factor=2`. Emulated 2× alone leaves `ResizeObserver` reporting 1× sizes, and charts then render blurry at half resolution.
   - Not `devices['Desktop Chrome']`: its Windows user agent switches on the Windows wheel handling.
   - Lightweight Charts applies view changes on the next frame, so tests read state after `settle()`.
-  - The mock also serves the watchlist, quotes and logos, and a pair catalog across all five exchanges; a test can take an exchange's live data away.
+  - The mock also serves the watchlist, quotes and logos, and a pair catalog across all six exchanges; a test can take an exchange's live data away.
   - An exchange outage: the chart says it's reconnecting, then reloads the bars it missed.
 - **Performance** (`tests/e2e/perf.spec.ts`):
   - 50 watchlist rows ticking; panning and zooming through 20,000 bars (frame cost and steadiness); symbol and interval switches under 150 ms.
@@ -953,6 +979,11 @@ Reference viewport is 1634 px wide.
   - The gateway (`apps/gateway/test/formula.test.ts`): the description from the first symbol; a symbol it lacks, and CRYPTOCAP's suggestion; exchanges required; daily bars from the symbols' opens, highs, lows and closes; a missing bar carried, and the start; ÷0 left out, with numbers; 5 minutes from 1-minute bars; the live bar; Sell and Buy; quotes; one feed for a formula typed two ways.
   - The browser's parts: reading what's typed, the symbol being typed, a pick filling it in, text read as a formula when nothing matches (`formulaTyping.test.ts`); finding exchanges, once each, and saying what's missing (`typedFormula.test.ts`); the change in full digits (`numbers.test.ts`); the watchlist asking the gateway and keeping its suggestion (`SymbolDirectory.test.ts`); quotes for formulas (`QuoteBoard.test.ts`); the fix in its row's place and its flag (`model.test.ts`, `flagEdits.test.ts`); formulas in the URL (`route.test.ts`).
   - In the browser (`tests/e2e/formulas.spec.ts`): a formula typed in the chart's search, the symbol being typed searched for, a pick filling it in while the next matches come slowly, Enter charting it; "XRP/USDT" staying a search and BTCUSDT/XRPUSDT read as a formula; Add symbol with tickers alone, added once; a missing symbol; rows as in your screenshot 22, the change in billions where it doesn't fit; the legend, Sell and Buy; the fix from the row menu, flag and all.
+- **Bitstamp** (M9c):
+  - Its pair list (`apps/gateway/test/catalog-sources.test.ts`), recorded on 25 October: the spot pairs trading, not a perpetual or a disabled pair; volumes in dollars; asset names from its descriptions; lookups answered by the same list.
+  - The adapter (`apps/gateway/test/bitstamp.test.ts`), against a fake Bitstamp with its measured `start` and `end`: decimals and descriptions; bars before a time, not the one opening at it; paging back to the first trade; ranges from their first boundary, at most 1,000; windows side by side equal to paging; 3-day bars built from days; the live candle polled; trades and the book, a channel a message; its heartbeat; a 503 asked again, and given up after three; one request at a time, a breath apart.
+  - Live (`test/live/exchanges.live.test.ts`, `outage.live.test.ts`, LIVE=1): XRPUSD's info, days, 45-minute, 3-day and weekly bars, live minute and book, quotes; BTCUSD every day from 18 August 2011; 30 s offline with the other five, no minute missing.
+  - In the browser (`tests/e2e/bitstamp.spec.ts`): found by "BITSTAMP:XRP" and its source filter; charted as "XRP / U.S. dollar · 1D · Bitstamp" with five decimals; your Bitstamp rows and TOTAL2/XRPUSD live. The two search screenshots now show Bitstamp's listings.
 - **Sell and Buy** (`tests/e2e/chart.spec.ts`, `reference.spec.ts`): XRP's boxes 65.5 px and the spread 51 px, at the reference's place with its prices shown; a long price (0.00001590) widening both boxes alike, the price inside, the three side by side.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
@@ -963,10 +994,10 @@ Reference viewport is 1634 px wide.
   - Live 45-second and 10-tick bars.
   - Watchlist quotes against Binance's own previous daily close.
   - CoinGecko rejects a made-up key.
-  - Each exchange's real pair list loads, with XRPUSDT among the pairs. Typing "XRP" lists all five exchanges in one row, Binance first.
+  - Each exchange's real pair list loads, with XRPUSDT among the pairs. Typing "XRP" lists all six exchanges in one row, Binance first.
   - In the browser, a picked Binance pair is live within 1 s of the click. The test answers the watchlist save itself, so your list isn't changed.
   - Bybit, OKX, Coinbase and Kraken: tick sizes; daily history up to today, one bar a day; intervals built from smaller ones, on their boundaries; the live minute bar; the best bid and ask; quotes against the previous close.
-  - A 30 s outage of all five exchanges' streams, cut by a local relay that refuses connections meanwhile: each recovers by itself, never shows live while cut, and misses no minute.
+  - A 30 s outage of all six exchanges' streams (Bitstamp's since M9c), cut by a local relay that refuses connections meanwhile: each recovers by itself, never shows live while cut, and misses no minute.
   - The history cache: Binance 1-second and 5-second pages brought up to date equal ones fetched afresh.
   - In the browser, a pair picked from each of Bybit, OKX, Coinbase and Kraken is live within 1 s. Coinbase's slowest API answers (about 1 in 40) can push it just past that.
 - **Feel parity (manual, M1 and M6):** side-by-side checklist against TradingView:
@@ -1069,6 +1100,9 @@ Reference viewport is 1634 px wide.
 52. Formulas, provisional (TradingView doesn't document them): brackets, a minus before a symbol and 1/X (ours: arithmetic's own rules); a symbol typed without its exchange (ours: the search's first listing of that very ticker, else its first match); a symbol without a bar (ours: its last close carries); no bar before every symbol has begun; a division by zero (ours: no bar); a formula's volume (ours: its first symbol's, not shown yet); intervals over 5 minutes (ours: from the symbols' own bars; TradingView builds every intraday spread from 1-minute bars); stocks and crypto lined up by UTC date; the legend's letter; the formula's row on top of search; text without spaces read as a formula when no symbol matches it. Tickers with "/" or "-" (NYSE:JPM/PD) can't be part of a formula.
 53. **A formula's change in full digits needs a wider column than ours** (Chg is 73 px, from the reference): where it doesn't fit, ours writes thousands to trillions (−2.76B) rather than cut it. Your screenshot 22 shows TradingView's −2,215,826,337 whole, so its columns seem to widen to fit; whether and how isn't known. A big formula's Last can still be cut, as can any long name or price today.
 54. The first look at a CRYPTOCAP formula at 1 to 5 minutes takes the gateway about 10 s, building 1-minute market caps; after, it's kept. Meanwhile the chart keeps the previous one, as for any symbol, with the legend already named for the new one.
+55. Bitstamp, provisional: TradingView's name for its pairs (ours: Bitstamp's own, "XRP / U.S. dollar", seen for TradingView only on a mirror); its decimals (ours: Bitstamp's, BTCUSD 2; TradingView's 1.29694 for XRPUSD matches); where its listing ranks among an XRPUSD's (ours: by volume, after Coinbase and Kraken). A screenshot of BITSTAMP:BTCUSD in TradingView would settle the first two.
+56. Bitstamp's front door turns some requests away (§4.13): its requests go one at a time, so a first long look (5,000 days of BTCUSD) takes about 15 s, and a 503 that outlasts three tries shows as an error.
+57. Found during M9c, not from it: the monthly chart's price scale shows labels under zero (−5,000, −10,000 for BTCUSD's $2 to $126k); when the dev servers aren't running, the browser tests start a gateway of their own on your data folder (offline, but it still syncs logos with your key); a few of Coinbase's pairs answer CRYPTOCAP's history with HTTP 400 (EURC, TRAC, FARTCOIN), whose coins then count at CoinGecko's market cap.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -1113,6 +1147,7 @@ Reference viewport is 1634 px wide.
 - Dragging several (M8e): the drag image handed to the browser https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/setDragImage
 - CRYPTOCAP (M9a): market caps and dominance https://www.tradingview.com/support/solutions/43000550480/ · the coins OTHERS leaves out https://www.tradingview.com/markets/cryptocurrencies/dominance/ · TradingView's ranking https://www.tradingview.com/markets/cryptocurrencies/prices-all/ · names https://www.tradingview.com/symbols/CRYPTOCAP-TOTAL/ (and its TOTAL3, OTHERS, OTHERS.D, BTC, BTC.D, STABLE.C, TOTALES, TOTAL2ES, TOTAL3ES, TOTALE50, TOTALE100, OTHERSBTC and TOTAL3ESBTC pages) · spreads https://www.tradingview.com/support/solutions/43000502298-spread-charts-explained/ · `format: 'volume'` https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.LibrarySymbolInfo/ · CoinGecko's plans https://www.coingecko.com/en/api/pricing · its history https://docs.coingecko.com/reference/coins-id-market-chart-range · its global chart (paid) https://docs.coingecko.com/reference/global-market-cap-chart · DefiLlama's stablecoins https://stablecoins.llama.fi/stablecoincharts/all
 - Formulas (M9b): TradingView's Symbol Search tips https://www.tradingview.com/support/solutions/43000746682-tradingview-symbol-search-tips-for-finding-assets/ · spread charts explained https://www.tradingview.com/support/solutions/43000502298-spread-charts-explained/ · third-party: NexusFi https://nexusfi.com/a/platforms/tradingview-spread-charts · Pineify https://pineify.app/tradingview/workflows/spread-ratio-charts · LuxAlgo https://www.luxalgo.com/library/concept/ratio-spread-charts/ · Barchart's chart equations https://www.barchart.com/trader/help/chart/equations.php
+- Bitstamp (M9c): TradingView's BITSTAMP:XRPUSD https://www.tradingview.com/symbols/XRPUSD/?exchange=BITSTAMP · BITSTAMP:BTCUSD https://www.tradingview.com/symbols/BTCUSD/?exchange=BITSTAMP · Bitstamp's API https://www.bitstamp.net/api/ (its WebSocket page renders in the browser only; measured instead) · third-party: a mirror of TradingView's page https://www.tradingviewapi.com/markets/asset/BITSTAMP-XRPUSD · Tardis.dev https://docs.tardis.dev/historical-data-details/bitstamp
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

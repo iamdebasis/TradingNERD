@@ -107,7 +107,7 @@ const EMPTY_SET: ReadonlySet<SymbolId> = new Set();
 
 /**
  * TradingView's "Add symbol" dialog (docs/reference/04-add-symbol.png), also the chart's symbol
- * search: every listed pair on the five exchanges, ranked by the gateway, one row per pair with
+ * search: every listed pair on the six exchanges, ranked by the gateway, one row per pair with
  * the exchanges that list it. Typing stays in the search field: ↑/↓ move, Enter adds (or shows
  * the symbol), Shift+Enter and Shift+click add and close, Escape closes. A formula of symbols
  * (TradingView's spread, docs/SPEC.md §5.11) gets its own row on top, which Enter takes; the

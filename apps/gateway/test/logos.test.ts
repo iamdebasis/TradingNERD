@@ -214,7 +214,7 @@ describe('the logo list', () => {
     await logos.whenIdle();
     const file = join(dataDir, 'logos', 'index.json');
     const index = JSON.parse(readFileSync(file, 'utf8'));
-    expect(index.version).toBe(2);
+    expect(index.version).toBe(3);
     delete index.version;
     delete index.exchangeImages;
     writeFileSync(file, JSON.stringify(index));
@@ -234,6 +234,32 @@ describe('the logo list', () => {
     await restarted.whenIdle();
     expect(fake.calls.length).toBeGreaterThan(calls);
     expect((await restarted.exchangeLogo('KRAKEN'))?.contentType).toBe('image/png');
+  });
+
+  it("refreshes a list saved before Bitstamp's logo, which it then has", async () => {
+    const { logos, fake, dataDir } = setup();
+    await logos.saveKey(KEY);
+    await logos.whenIdle();
+    const file = join(dataDir, 'logos', 'index.json');
+    const index = JSON.parse(readFileSync(file, 'utf8'));
+    expect(index.exchangeImages.BITSTAMP).toBeDefined();
+    // As the list was until Bitstamp came: version 2, no logo for it.
+    index.version = 2;
+    delete index.exchangeImages.BITSTAMP;
+    writeFileSync(file, JSON.stringify(index));
+
+    const restarted = new LogoService({
+      client: new CoinGeckoClient({ fetch: fake.fetch }),
+      secrets: new SecretStore(dataDir, {}),
+      dataDir,
+      fetch: fake.fetch,
+      paceMs: 0,
+      now: () => Date.UTC(2026, 9, 19),
+    });
+    expect(await restarted.exchangeLogo('BITSTAMP')).toBeNull();
+    await restarted.refreshIfStale();
+    await restarted.whenIdle();
+    expect((await restarted.exchangeLogo('BITSTAMP'))?.contentType).toBe('image/png');
   });
 
   it('remembers that the first-launch prompt was skipped', async () => {

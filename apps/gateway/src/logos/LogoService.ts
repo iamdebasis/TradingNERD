@@ -21,9 +21,10 @@ export const COINGECKO_EXCHANGE_IDS: Readonly<Record<string, string>> = {
   OKX: 'okex',
   COINBASE: 'gdax',
   KRAKEN: 'kraken',
+  BITSTAMP: 'bitstamp',
 };
 /** Bumped when a refresh learns something new; an older list is refreshed at start. */
-const INDEX_VERSION = 2;
+const INDEX_VERSION = 3;
 
 /** Logos are refreshed weekly. */
 export const LOGO_REFRESH_MS = 7 * 24 * 3_600_000;

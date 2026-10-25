@@ -31,10 +31,12 @@ describe('loadConfig', () => {
     const config = loadConfig({
       KRAKEN_REST_URL: 'http://127.0.0.1:9',
       KRAKEN_STREAM_URL: 'ws://127.0.0.1:9',
+      BITSTAMP_REST_URL: 'http://127.0.0.1:9',
       OKX_BUSINESS_STREAM_URL: 'ws://127.0.0.1:9',
       BYBIT_REST_URL: '',
     });
     expect(config.kraken).toEqual({ restUrl: 'http://127.0.0.1:9', streamUrl: 'ws://127.0.0.1:9' });
+    expect(config.bitstamp).toEqual({ restUrl: 'http://127.0.0.1:9', streamUrl: undefined });
     expect(config.okx.businessStreamUrl).toBe('ws://127.0.0.1:9');
     expect(config.bybit).toEqual({ restUrl: undefined, streamUrl: undefined });
   });
