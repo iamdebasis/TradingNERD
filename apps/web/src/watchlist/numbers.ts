@@ -1,4 +1,5 @@
-import { formatPrice } from '@tradingnerd/chart';
+import { formatPrice, formatVolume } from '@tradingnerd/chart';
+import type { PriceFormat } from '@tradingnerd/core';
 
 /** TradingView prints negative numbers with a true minus sign, not a hyphen. */
 const MINUS = '−';
@@ -10,17 +11,22 @@ export const CHANGE_DECIMALS = 5;
  * A change as the watchlist shows it: "−0.403", "0.0101" (no plus sign), "0.0000". A coin
  * priced to more than 5 decimals gets 5, cut rather than rounded, with the real change's sign.
  * In the reference, VET at 0.006731 shows −0.00024 at −3.55%, which only a change of −0.000248
- * gives, and SHIB shows −0.00000.
+ * gives, and SHIB shows −0.00000. A market cap's change is in its own units: "−36.71B".
  */
-export function formatChange(value: number, precision: number): string {
+export function formatChange(value: number, precision: number, format?: PriceFormat): string {
+  if (format === 'volume') return formatVolume(value);
   const exact = Math.abs(value).toFixed(precision);
   const cut = precision - CHANGE_DECIMALS;
   const text = groupThousands(cut > 0 ? exact.slice(0, -cut) : exact);
   return directionOf(value, precision) === 'down' ? `${MINUS}${text}` : text;
 }
 
-/** The last price as the watchlist shows it: the symbol's decimals, thousands grouped. */
-export function formatLast(value: number, precision: number): string {
+/**
+ * The last price as the watchlist shows it: the symbol's decimals, thousands grouped; a market
+ * cap in thousands to trillions ("2.65T").
+ */
+export function formatLast(value: number, precision: number, format?: PriceFormat): string {
+  if (format === 'volume') return formatVolume(value);
   return groupThousands(formatPrice(value, precision));
 }
 

@@ -11,8 +11,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 5: US stocks: symbol kinds, time zones, data delays and trading calendars; `needs_key`.
  * 6: extended hours: bars of a session (`session` on bar requests and subscriptions).
  * 7: several watchlists (/api/watchlists); `not_found`.
+ * 8: CRYPTOCAP market caps: the `index` kind and a symbol's price `format`.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -144,6 +145,7 @@ export function parseSymbolInfo(value: unknown): SymbolInfo | null {
     return null;
   if (typeof v.timezone !== 'string' || v.timezone === '') return null;
   if (!isNumber(v.delayMs) || v.delayMs < 0 || typeof v.hasBook !== 'boolean') return null;
+  if (v.format !== undefined && v.format !== 'price' && v.format !== 'volume') return null;
   const schedule = v.schedule === undefined ? undefined : parseMarketSchedule(v.schedule);
   if (schedule === null) return null;
   const info: SymbolInfo = {
@@ -162,6 +164,7 @@ export function parseSymbolInfo(value: unknown): SymbolInfo | null {
     delayMs: v.delayMs,
     hasBook: v.hasBook,
   };
+  if (v.format !== undefined) info.format = v.format;
   if (schedule) info.schedule = schedule;
   return info;
 }

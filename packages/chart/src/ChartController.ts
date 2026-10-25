@@ -2,6 +2,7 @@ import {
   type Bar,
   type BarClock,
   isIntraday,
+  type PriceFormat,
   type Resolution,
   timeZone,
   UTC_CLOCK,
@@ -21,7 +22,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { formatCountdown, formatCrosshairTime, formatPrice, formatTickMark } from './format';
+import { formatCountdown, formatCrosshairTime, formatTickMark, formatValue } from './format';
 import { installKeyboard } from './interaction/keyboard';
 import { installVerticalDrag } from './interaction/verticalDrag';
 import { TimeViewport } from './interaction/viewport';
@@ -54,6 +55,8 @@ const SCALE_MARGINS = { top: 0.1, bottom: 0.08 };
 export interface ChartInstrument {
   pricePrecision: number;
   tickSize: number;
+  /** How prices are written: market caps in thousands to trillions ("price" when absent). */
+  format?: PriceFormat;
   resolution: Resolution;
   /** The exchange's time zone, which the time axis shows (UTC when absent). */
   timezone?: string;
@@ -273,7 +276,7 @@ export class ChartController {
 
   setInstrument(instrument: ChartInstrument): void {
     this.instrument = instrument;
-    const { pricePrecision: precision, tickSize, resolution } = instrument;
+    const { pricePrecision: precision, tickSize, resolution, format } = instrument;
     // Lightweight Charts has no time zones; it shows UTC, so local times go in as if they were
     // (its docs' own advice). Bars keep their real times everywhere else.
     const zone =
@@ -285,11 +288,11 @@ export class ChartController {
     this.chart.applyOptions({
       localization: {
         locale: 'en-US',
-        priceFormatter: (price: number) => formatPrice(price, precision),
+        priceFormatter: (price: number) => formatValue(price, precision, format),
         // Also records where the tick labels are, so our labels can hide the ones they hit.
         tickmarksPriceFormatter: (prices: readonly number[]) => {
           this.tickPrices = [...prices];
-          return prices.map((price) => formatPrice(price, precision));
+          return prices.map((price) => formatValue(price, precision, format));
         },
         timeFormatter: (time: Time) => {
           // A tick bar's `time` is its number; show when its first trade happened.
@@ -459,6 +462,11 @@ export class ChartController {
     return this.series.coordinateToPrice(y);
   }
 
+  /** A price as the price scale labels it ("1.8T" for a market cap). */
+  priceLabel(price: number): string {
+    return this.format(price);
+  }
+
   /** The crosshair's time label for a bar time, as the chart draws it. */
   timeLabel(time: number): string {
     const formatter = this.chart.options().localization.timeFormatter;
@@ -511,7 +519,7 @@ export class ChartController {
   }
 
   private format(price: number): string {
-    return formatPrice(price, this.instrument?.pricePrecision ?? 2);
+    return formatValue(price, this.instrument?.pricePrecision ?? 2, this.instrument?.format);
   }
 
   /**

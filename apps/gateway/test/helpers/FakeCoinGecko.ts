@@ -4,6 +4,18 @@ export const PNG_BYTES = Buffer.from(
   'base64',
 );
 
+/** A coin as /coins/markets describes it, for market caps. */
+export interface FakeMarketRow {
+  id: string;
+  symbol: string;
+  name?: string;
+  rank?: number | null;
+  price: number;
+  cap: number;
+  supply?: number;
+  volume?: number;
+}
+
 export interface FakeCoinGeckoOptions {
   /** Keys CoinGecko accepts, by plan. */
   keys?: Record<string, 'demo' | 'pro'>;
@@ -19,6 +31,12 @@ export interface FakeCoinGeckoOptions {
   imageBytes?: Record<string, Buffer>;
   /** Exchanges with logos, most traded first: CoinGecko ids (default: our five). */
   exchanges?: string[];
+  /** Coins with market data, largest first; /coins/markets answers with these when given. */
+  markets?: FakeMarketRow[];
+  /** Ids in CoinGecko's "stablecoins" category. */
+  stablecoins?: string[];
+  /** A coin's history for /coins/{id}/market_chart: [ms, price] and [ms, cap] points. */
+  charts?: Record<string, { prices: [number, number][]; caps: [number, number][] }>;
 }
 
 /** A fetch that answers like CoinGecko's API and image CDN, recording every request. */
@@ -70,6 +88,40 @@ export function fakeCoinGecko(options: FakeCoinGeckoOptions = {}) {
           image: `https://coin-images.coingecko.com/markets/images/9/small/${id}.png`,
         })),
       );
+    }
+    if (path === '/coins/markets' && options.markets) {
+      const ids = url.searchParams.get('ids')?.split(',');
+      const category = url.searchParams.get('category');
+      const page = Number(url.searchParams.get('page') ?? 1);
+      let rows = options.markets;
+      if (category === 'stablecoins') {
+        rows = rows.filter((row) => options.stablecoins?.includes(row.id));
+      }
+      if (ids) rows = rows.filter((row) => ids.includes(row.id));
+      return Response.json(
+        rows.slice((page - 1) * 250, page * 250).map((row) => ({
+          id: row.id,
+          symbol: row.symbol.toLowerCase(),
+          name: row.name ?? row.symbol,
+          image: image(row.id),
+          market_cap_rank:
+            row.rank === undefined ? (options.markets ?? rows).indexOf(row) + 1 : row.rank,
+          current_price: row.price,
+          market_cap: row.cap,
+          circulating_supply: row.supply ?? row.cap / row.price,
+          total_volume: row.volume ?? 1_000_000,
+        })),
+      );
+    }
+    const chart = /^\/coins\/([a-z0-9-]+)\/market_chart$/.exec(path);
+    if (chart?.[1]) {
+      const history = options.charts?.[chart[1]];
+      if (!history) return Response.json({ error: 'coin not found' }, { status: 404 });
+      return Response.json({
+        prices: history.prices,
+        market_caps: history.caps,
+        total_volumes: history.prices.map(([ms]) => [ms, 1_000_000]),
+      });
     }
     if (path === '/coins/markets') {
       const ids = url.searchParams.get('ids');

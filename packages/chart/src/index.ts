@@ -14,6 +14,9 @@ export {
   formatPrice,
   formatSignedPercent,
   formatSignedPrice,
+  formatSignedValue,
+  formatValue,
+  formatVolume,
 } from './format';
 export type { SessionPart, SessionShading } from './plugins/SessionShadePrimitive';
 export type { ChartTheme } from './theme';

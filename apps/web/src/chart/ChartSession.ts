@@ -142,6 +142,7 @@ export class ChartSession {
       chart.setInstrument({
         pricePrecision: info.pricePrecision,
         tickSize: info.tickSize,
+        ...(info.format ? { format: info.format } : {}),
         resolution,
         timezone:
           this.settings.timezone === 'exchange' ? info.timezone : intlZone(this.settings.timezone),

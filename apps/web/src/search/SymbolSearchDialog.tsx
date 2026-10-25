@@ -57,6 +57,7 @@ const KIND_LABELS: Readonly<Record<SymbolKind, string>> = {
   right: 'right',
   unit: 'unit',
   note: 'note',
+  index: 'index crypto',
 };
 
 /** `add`: TradingView's "Add symbol" for the watchlist; `search`: the chart's symbol search. */

@@ -1,7 +1,50 @@
-import type { Resolution } from '@tradingnerd/core';
+import type { PriceFormat, Resolution } from '@tradingnerd/core';
 
 /** TradingView prints negative numbers with a true minus sign, not a hyphen. */
 const MINUS = '−';
+
+/** Thousands, millions, billions and trillions. */
+const UNITS = [
+  { size: 1e3, suffix: 'K' },
+  { size: 1e6, suffix: 'M' },
+  { size: 1e9, suffix: 'B' },
+  { size: 1e12, suffix: 'T' },
+] as const;
+
+/** "1.80" → "1.8", "142.00" → "142". */
+const trimZeros = (text: string) => (text.includes('.') ? text.replace(/\.?0+$/, '') : text);
+
+/** The digits of a formatted value, without its sign and unit. */
+const digitsOf = (text: string) => Number(text.replace(/^−/, '').replace(/[KMBT]$/, ''));
+
+/**
+ * A value in thousands, millions, billions or trillions with at most two decimals, trailing
+ * zeros dropped: "2.65T", "758.92B", "213.6B", "142M" (TradingView's market caps, measured from
+ * the user's screenshots). The unit is the largest the value shows at least 1 of once rounded,
+ * so 999.999M reads "1B".
+ */
+export function formatVolume(value: number): string {
+  const size = Math.abs(value);
+  let text = trimZeros(size.toFixed(2));
+  for (const unit of UNITS) {
+    const scaled = (size / unit.size).toFixed(2);
+    if (Number(scaled) >= 1) text = `${trimZeros(scaled)}${unit.suffix}`;
+  }
+  return value < 0 && digitsOf(text) !== 0 ? `${MINUS}${text}` : text;
+}
+
+/** A price in the symbol's format: its decimals, or thousands to trillions for market caps. */
+export function formatValue(value: number, precision: number, format?: PriceFormat): string {
+  return format === 'volume' ? formatVolume(value) : formatPrice(value, precision);
+}
+
+/** A signed change in the symbol's format: "+0.0106", "−18.03B". */
+export function formatSignedValue(value: number, precision: number, format?: PriceFormat): string {
+  if (format !== 'volume') return formatSignedPrice(value, precision);
+  const text = formatVolume(Math.abs(value));
+  if (digitsOf(text) === 0) return text;
+  return `${value < 0 ? MINUS : '+'}${text}`;
+}
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

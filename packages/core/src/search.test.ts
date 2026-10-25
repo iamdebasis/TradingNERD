@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type CatalogEntry,
+  categoryOf,
   compactQuery,
   descriptionMatches,
   parseExchangeList,
@@ -238,5 +239,67 @@ describe('US stocks and funds in the search', () => {
     });
     const response = searchCatalog(MIXED, { query: 'SPY' });
     expect(parseSymbolSearchResponse(JSON.parse(JSON.stringify(response)))).toEqual(response);
+  });
+});
+
+describe('CRYPTOCAP in the search', () => {
+  const cap = (ticker: string, base: string, description: string): CatalogEntry => ({
+    exchange: 'CRYPTOCAP',
+    ticker,
+    base,
+    quote: ticker.endsWith('.D') ? '%' : 'USD',
+    description,
+    volumeUsd: 0,
+    live: true,
+    kind: 'index',
+  });
+  const WITH_CAPS: CatalogEntry[] = [
+    ...CATALOG,
+    cap('TOTAL', 'CRYPTOCAP', 'Crypto Total Market Cap, $'),
+    cap('TOTAL2', 'CRYPTOCAP', 'Crypto Total Market Cap Excluding BTC, $'),
+    cap('XRP', 'XRP', 'Market Cap XRP, $'),
+    cap('XRP.D', 'XRP', 'Market Cap XRP Dominance, %'),
+    cap('BTC', 'BTC', 'Market Cap BTC, $'),
+    cap('BTC.D', 'BTC', 'Market Cap BTC Dominance, %'),
+    {
+      exchange: 'AMEX',
+      ticker: 'BTC',
+      base: 'BTC',
+      quote: 'USD',
+      description: 'Grayscale Bitcoin Mini Trust (BTC)',
+      volumeUsd: 200e6,
+      live: true,
+      kind: 'etf',
+    },
+  ];
+  const find = (query: string, options = {}) =>
+    searchCatalog(WITH_CAPS, { query, ...options }).matches.map(
+      (match) => `${match.type === 'index' ? 'CRYPTOCAP:' : ''}${match.ticker}`,
+    );
+
+  it('finds TOTAL and its kin by name', () => {
+    expect(find('TOTAL')).toEqual(['CRYPTOCAP:TOTAL', 'CRYPTOCAP:TOTAL2']);
+    expect(find('excluding btc')).toEqual(['CRYPTOCAP:TOTAL2']);
+  });
+
+  it("puts a coin's pairs before its market cap and dominance when just the coin is typed", () => {
+    const xrp = find('XRP');
+    expect(xrp.indexOf('XRPUSDT')).toBeLessThan(xrp.indexOf('CRYPTOCAP:XRP'));
+    expect(xrp.indexOf('CRYPTOCAP:XRP')).toBeLessThan(xrp.indexOf('CRYPTOCAP:XRP.D'));
+  });
+
+  it('finds a dominance typed in full first', () => {
+    expect(find('BTC.D')[0]).toBe('CRYPTOCAP:BTC.D');
+    expect(find('xrp.d')[0]).toBe('CRYPTOCAP:XRP.D');
+  });
+
+  it('lists CRYPTOCAP under the Crypto tab, apart from a fund named BTC', () => {
+    expect(categoryOf('index')).toBe('crypto');
+    expect(find('BTC', { category: 'crypto' })).toContain('CRYPTOCAP:BTC');
+    expect(find('BTC', { category: 'funds' })).toEqual(['BTC']);
+    const btc = searchCatalog(WITH_CAPS, { query: 'BTC' }).matches.filter(
+      (match) => match.ticker === 'BTC',
+    );
+    expect(btc.map((match) => match.type).sort()).toEqual(['etf', 'index']);
   });
 });

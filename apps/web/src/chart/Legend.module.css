@@ -233,6 +233,22 @@
   text-align: center;
 }
 
+/*
+ * A market cap's Sell and Buy are long ("1,041,724,313,303"): the boxes grow to fit it with
+ * 12 px either side, and the spread between them takes only its own width, as TradingView's do
+ * (measured in the user's screenshots 20–22).
+ */
+.legend[data-format="volume"] .trade {
+  width: auto;
+  min-width: 65.5px;
+  padding: 0 12px;
+}
+
+.legend[data-format="volume"] .spread {
+  width: auto;
+  padding: 0 9px;
+}
+
 /* The pill's data half: TradingView's "Data is delayed" D, in the delayed sign's orange. */
 .delayed {
   display: flex;

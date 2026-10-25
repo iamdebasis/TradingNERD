@@ -75,12 +75,13 @@ export function WatchlistRow(props: WatchlistRowProps) {
   }, [directory, symbol]);
 
   const precision = lookup?.state === 'ready' ? lookup.info.pricePrecision : null;
+  const format = lookup?.state === 'ready' ? lookup.info.format : undefined;
 
   useEffect(() => {
     if (precision === null) return;
     return board.attach(symbol, {
       show: ({ last, prevClose }) => {
-        const text = formatLast(last, precision);
+        const text = formatLast(last, precision, format);
         // The same price again keeps the last change's colored digits, as in the reference,
         // where nearly every row shows some.
         if (text !== previous.current?.text) {
@@ -103,14 +104,14 @@ export function WatchlistRow(props: WatchlistRowProps) {
         }
         const delta = last - prevClose;
         const direction = directionOf(delta, precision);
-        setText(change.current, formatChange(delta, precision));
+        setText(change.current, formatChange(delta, precision, format));
         setText(percent.current, formatChangePercent((delta / prevClose) * 100));
         if (change.current) change.current.dataset.direction = direction;
         if (percent.current) percent.current.dataset.direction = direction;
       },
       unavailable: () => setMissing(true),
     });
-  }, [board, symbol, precision]);
+  }, [board, symbol, precision, format]);
 
   const unavailable = missing || lookup?.state === 'unavailable';
   const letter = (lookup?.state === 'ready' ? lookup.info.base : ticker).charAt(0);

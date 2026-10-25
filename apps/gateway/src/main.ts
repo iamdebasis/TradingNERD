@@ -2,6 +2,7 @@ import { AssetNames } from './catalog/names.ts';
 import { SymbolCatalog } from './catalog/SymbolCatalog.ts';
 import type { CatalogSource } from './catalog/types.ts';
 import { loadConfig } from './config.ts';
+import { CryptoCapExchange } from './cryptocap/CryptoCapExchange.ts';
 import { BinanceExchange } from './exchanges/binance/BinanceExchange.ts';
 import { BybitExchange } from './exchanges/bybit/BybitExchange.ts';
 import { CoinbaseExchange } from './exchanges/coinbase/CoinbaseExchange.ts';
@@ -9,6 +10,7 @@ import { KrakenExchange } from './exchanges/kraken/KrakenExchange.ts';
 import { OkxExchange } from './exchanges/okx/OkxExchange.ts';
 import { CoinGeckoClient } from './logos/coingecko.ts';
 import { LogoService } from './logos/LogoService.ts';
+import { CoinGeckoUsage } from './logos/usage.ts';
 import { MarketService } from './market/MarketService.ts';
 import type { ExchangeAdapter } from './market/types.ts';
 import { buildServer } from './server.ts';
@@ -61,13 +63,30 @@ const stocks = new UsStocksMarket({
   onWarning: warn('stocks'),
 });
 
-const market = new MarketService([...exchanges, ...stocks.exchanges()]);
+// CoinGecko, for logos and market caps; every call counts against the plan's monthly allowance.
+const coingeckoUsage = new CoinGeckoUsage(config.dataDir);
+const coingecko = new CoinGeckoClient({ onCall: () => coingeckoUsage.record() });
 
-// Symbol search lists every exchange's pairs (each with an adapter here is live), and every
-// US-listed stock and fund.
+// CRYPTOCAP's market caps and dominance: coins' prices from the exchanges, their supply from
+// CoinGecko. The search catalog (below) says which pairs each exchange trades.
+const cryptocap = new CryptoCapExchange({
+  client: coingecko,
+  secrets,
+  usage: coingeckoUsage,
+  dataDir: config.dataDir,
+  adapters: exchanges,
+  pairs: () => catalog.pairs(),
+  waitForPairs: () => catalog.ready(10_000),
+  onWarning: warn('cryptocap'),
+});
+
+const market = new MarketService([...exchanges, ...stocks.exchanges(), cryptocap]);
+
+// Symbol search lists every exchange's pairs (each with an adapter here is live), every
+// US-listed stock and fund, and CRYPTOCAP's symbols.
 const catalog = new SymbolCatalog({
   sources: exchanges,
-  extra: usListings,
+  extra: [usListings, cryptocap],
   live: new Set(exchanges.map((exchange) => exchange.id)),
   names,
   dataDir: config.dataDir,
@@ -78,7 +97,7 @@ const watchlist = new WatchlistsStore(config.dataDir, warn('data'));
 const flags = new FlagStore(config.dataDir, warn('data'));
 
 const logos = new LogoService({
-  client: new CoinGeckoClient(),
+  client: coingecko,
   secrets,
   dataDir: config.dataDir,
 });
@@ -87,6 +106,7 @@ const app = await buildServer(config, { market, catalog, watchlist, flags, logos
 app.addHook('onClose', async () => {
   catalog.close();
   await market.close();
+  await coingeckoUsage.flush();
 });
 await app.listen({ host: config.host, port: config.port });
 console.log(`tradingNerd gateway listening on http://${config.host}:${config.port}`);
@@ -94,6 +114,7 @@ void logos.refreshIfStale(); // the weekly logo refresh, in the background
 void catalog.start(); // the saved pair lists, then fresh ones in the background
 void usListings.start(); // the saved US listings, then a fresh directory daily
 void stocks.prepare(); // with a key: its plan, the calendar, and the listings' ranking
+void cryptocap.prepare(); // the saved coins and their history; nothing is fetched until it's used
 // Each exchange's pair list, so the first symbol picked on it needn't wait for the download.
 for (const exchange of exchanges) void exchange.prepare?.();
 

@@ -146,9 +146,85 @@ export const MOCK_CATALOG: CatalogEntry[] = [
   ),
 ];
 
+/**
+ * CRYPTOCAP's symbols in the mock, with the values of the user's screenshots 20–22: TOTAL
+ * 2.65T (−36.71B), TOTAL2 1,041,724,313,303 (−18.03B, −1.70%), BTC.D 60.73 (0.13, 0.21%).
+ */
+export const CAP_QUOTES: Record<string, { last: number; prevClose: number }> = {
+  'CRYPTOCAP:TOTAL': { last: 2.6529e12, prevClose: 2.6529e12 + 36.71e9 },
+  'CRYPTOCAP:TOTAL2': { last: 1_041_724_313_303, prevClose: 1_041_724_313_303 + 18.03e9 },
+  'CRYPTOCAP:BTC.D': { last: 60.734, prevClose: 60.604 },
+};
+
+const capEntry = (ticker: string, base: string, description: string): CatalogEntry => ({
+  exchange: 'CRYPTOCAP',
+  ticker,
+  base,
+  quote: ticker.endsWith('.D') ? '%' : 'USD',
+  description,
+  volumeUsd: 0,
+  live: true,
+  kind: 'index',
+});
+
+/** CRYPTOCAP in the mock's symbol search. */
+export const MOCK_CRYPTOCAP: CatalogEntry[] = [
+  capEntry('TOTAL', 'CRYPTOCAP', 'Crypto Total Market Cap, $'),
+  capEntry('TOTAL2', 'CRYPTOCAP', 'Crypto Total Market Cap Excluding BTC, $'),
+  capEntry('TOTAL3', 'CRYPTOCAP', 'Crypto Total Market Cap Excluding BTC and ETH, $'),
+  capEntry('OTHERS', 'CRYPTOCAP', 'Crypto Total Market Cap Excluding Top 10, $'),
+  capEntry('BTC.D', 'BTC', 'Market Cap BTC Dominance, %'),
+];
+
+/** SymbolInfo for a CRYPTOCAP symbol the mock knows. */
+export function capInfoFor(symbol: string): SymbolInfo | null {
+  const listed = MOCK_CRYPTOCAP.find((entry) => `CRYPTOCAP:${entry.ticker}` === symbol);
+  if (!listed) return null;
+  const cap = listed.quote === 'USD';
+  return {
+    id: symbol,
+    exchange: 'CRYPTOCAP',
+    exchangeName: 'CRYPTOCAP',
+    ticker: listed.ticker,
+    base: listed.base,
+    quote: listed.quote,
+    description: listed.description,
+    type: 'index',
+    tickSize: cap ? 1 : 0.01,
+    pricePrecision: cap ? 0 : 2,
+    format: cap ? 'volume' : 'price',
+    resolutions: ['1', '5', '15', '30', '60', '240', '1D'],
+    timezone: 'Etc/UTC',
+    delayMs: 0,
+    hasBook: true,
+  };
+}
+
+/**
+ * How much a CRYPTOCAP symbol's bars are the mock's usual ones scaled up: so the latest daily
+ * close is its value (1.2955 becomes TOTAL2's 1.04T). 1 for everything else.
+ */
+export function capScale(symbol: string): number {
+  const quote = CAP_QUOTES[symbol];
+  return quote ? quote.last / 1.2955 : 1;
+}
+
+const scaled = (bar: Bar, factor: number): Bar =>
+  factor === 1
+    ? bar
+    : {
+        ...bar,
+        open: bar.open * factor,
+        high: bar.high * factor,
+        low: bar.low * factor,
+        close: bar.close * factor,
+      };
+
 /** SymbolInfo for any pair in the mock catalog, or any BINANCE:…USDT but the unlisted. */
 export function infoFor(symbol: string): SymbolInfo | null {
   if (symbol === XRP_INFO.id) return XRP_INFO;
+  const cap = capInfoFor(symbol);
+  if (cap) return cap;
   const listed = MOCK_CATALOG.find((entry) => `${entry.exchange}:${entry.ticker}` === symbol);
   const match = /^BINANCE:([A-Z0-9]+)USDT$/.exec(symbol);
   const base = listed?.base ?? match?.[1];
@@ -175,6 +251,8 @@ export function infoFor(symbol: string): SymbolInfo | null {
  * the rest are made up from the symbol's name.
  */
 export function quoteFor(symbol: string): { last: number; prevClose: number } {
+  const cap = CAP_QUOTES[symbol];
+  if (cap) return cap;
   if (symbol === 'BINANCE:LINKUSDT') return { last: 11.947, prevClose: 12.35 };
   if (symbol === 'BINANCE:VETUSDT') return { last: 0.006731, prevClose: 0.006979 };
   if (symbol === XRP_INFO.id) return { last: 1.2955, prevClose: 1.3115 };
@@ -563,6 +641,7 @@ class MockGateway implements MockMarket {
               live: this.liveExchanges.has(entry.exchange),
             })),
             ...MOCK_STOCKS,
+            ...MOCK_CRYPTOCAP,
           ],
           {
             query: params.get('query') ?? '',
@@ -584,6 +663,7 @@ class MockGateway implements MockMarket {
               market: 'crypto' as const,
             })),
             ...MOCK_STOCK_EXCHANGES,
+            { id: 'CRYPTOCAP', name: 'CRYPTOCAP', live: true, market: 'crypto' as const },
           ],
         },
       }),
@@ -678,9 +758,10 @@ class MockGateway implements MockMarket {
       const symbol = params.get('symbol') ?? '';
       const resolution = params.get('resolution') ?? '1D';
       const session = params.get('session') === 'extended' ? 'extended' : 'regular';
+      const factor = capScale(symbol);
       const bars = stockInfoFor(symbol)
         ? this.stockBarsFor(resolution, session)
-        : this.barsFor(resolution);
+        : this.barsFor(resolution).map((bar) => scaled(bar, factor));
       const eligible = bars.filter((bar) => to === null || bar.time < Number(to));
       return route.fulfill({
         json: { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack },
@@ -897,9 +978,8 @@ class MockGateway implements MockMarket {
           isStock ? this.stockBarsFor(resolution, message.session) : this.barsFor(resolution)
         ).at(-1);
         if (message.channel === 'bars' && last) {
-          socket.send(
-            JSON.stringify({ type: 'bar', id: message.id, bar: last, historical: false }),
-          );
+          const bar = scaled(last, capScale(message.symbol));
+          socket.send(JSON.stringify({ type: 'bar', id: message.id, bar, historical: false }));
         }
       } else if (message.type === 'unsubscribe') {
         this.subscriptions.delete(message.id);
@@ -987,6 +1067,7 @@ interface DebugChart {
   scrollBars(bars: number): void;
   gestureTuning(): GestureTuning;
   timeLabel(time: number): string;
+  priceLabel(price: number): string;
 }
 
 type DebugWindow = { __tradingNerd?: { chart: DebugChart | null } };
@@ -1015,6 +1096,15 @@ export async function chartTimeLabel(page: Page, time: number): Promise<string> 
     if (!chart) throw new Error('The chart is not mounted');
     return chart.timeLabel(value);
   }, time);
+}
+
+/** A price as the chart's price scale labels it. */
+export async function chartPriceLabel(page: Page, price: number): Promise<string> {
+  return page.evaluate((value) => {
+    const chart = (window as unknown as DebugWindow).__tradingNerd?.chart;
+    if (!chart) throw new Error('The chart is not mounted');
+    return chart.priceLabel(value);
+  }, price);
 }
 
 /** Waits until the chart shows data, then returns its state. */

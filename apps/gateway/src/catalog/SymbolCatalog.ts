@@ -68,7 +68,7 @@ const toPair = ([ticker, base, quote, quoteVolume, last]: StoredPair): CatalogPa
   last,
 });
 
-/** Listings from elsewhere that search alongside the pairs (US stocks and funds). */
+/** Listings from elsewhere that search alongside the pairs (US stocks and funds, CRYPTOCAP). */
 export interface ExtraListings {
   entries(): readonly CatalogEntry[];
   exchanges(): ExchangeSummary[];
@@ -78,8 +78,8 @@ export interface ExtraListings {
 
 export interface SymbolCatalogOptions {
   sources: readonly CatalogSource[];
-  /** US stocks and funds, searched with the pairs. */
-  extra?: ExtraListings;
+  /** US stocks and funds, and CRYPTOCAP's market caps, searched with the pairs. */
+  extra?: ExtraListings | readonly ExtraListings[];
   /** Exchanges the gateway has live data from; the others are listed only. */
   live: ReadonlySet<string>;
   dataDir: string;
@@ -99,11 +99,11 @@ export interface SymbolCatalogOptions {
  */
 export class SymbolCatalog {
   private readonly sources: readonly CatalogSource[];
-  private readonly extra: ExtraListings | undefined;
-  /** The pairs and the extra listings together, rebuilt when either changes. */
+  private readonly extras: readonly ExtraListings[];
+  /** The pairs and the extra listings together, rebuilt when any of them changes. */
   private combined: {
     pairs: readonly CatalogEntry[];
-    extra: readonly CatalogEntry[];
+    extras: readonly (readonly CatalogEntry[])[];
     all: readonly CatalogEntry[];
   } | null = null;
   private readonly live: ReadonlySet<string>;
@@ -126,7 +126,9 @@ export class SymbolCatalog {
 
   constructor(options: SymbolCatalogOptions) {
     this.sources = options.sources;
-    this.extra = options.extra;
+    const extra = options.extra;
+    this.extras =
+      extra === undefined ? [] : Array.isArray(extra) ? extra : [extra as ExtraListings];
     this.live = options.live;
     this.names = options.names;
     this.file = new JsonFile(join(options.dataDir, 'catalog.json'), parseStored, { indent: 0 });
@@ -163,7 +165,7 @@ export class SymbolCatalog {
     });
     await Promise.all([
       Promise.race([this.filled, this.firstRound, timeout]),
-      this.extra?.ready(timeoutMs),
+      ...this.extras.map((extra) => extra.ready(timeoutMs)),
     ]);
     clearTimeout(timer);
   }
@@ -180,18 +182,28 @@ export class SymbolCatalog {
         live: this.live.has(source.id),
         market: 'crypto' as const,
       })),
-      ...(this.extra?.exchanges() ?? []),
+      ...this.extras.flatMap((extra) => extra.exchanges()),
     ];
   }
 
+  /** Every exchange's pairs (without the extra listings): where coins' prices are traded. */
+  pairs(): readonly CatalogEntry[] {
+    return this.entries;
+  }
+
   private allEntries(): readonly CatalogEntry[] {
-    if (!this.extra) return this.entries;
-    const extra = this.extra.entries();
+    if (this.extras.length === 0) return this.entries;
+    const extras = this.extras.map((extra) => extra.entries());
     const combined = this.combined;
-    if (combined && combined.pairs === this.entries && combined.extra === extra)
+    if (
+      combined &&
+      combined.pairs === this.entries &&
+      combined.extras.every((entries, i) => entries === extras[i])
+    ) {
       return combined.all;
-    const all = [...this.entries, ...extra];
-    this.combined = { pairs: this.entries, extra, all };
+    }
+    const all = [...this.entries, ...extras.flat()];
+    this.combined = { pairs: this.entries, extras, all };
     return all;
   }
 

@@ -223,6 +223,24 @@ describe('parseSymbolInfo', () => {
     expect(parseSymbolInfo(JSON.parse(JSON.stringify(stock)))).toEqual(stock);
   });
 
+  it("accepts a CRYPTOCAP index's, written in thousands to trillions", () => {
+    const total = {
+      ...info,
+      id: 'CRYPTOCAP:TOTAL',
+      exchange: 'CRYPTOCAP',
+      exchangeName: 'CRYPTOCAP',
+      ticker: 'TOTAL',
+      base: 'CRYPTOCAP',
+      quote: 'USD',
+      description: 'Crypto Total Market Cap, $',
+      type: 'index',
+      tickSize: 1,
+      pricePrecision: 0,
+      format: 'volume',
+    };
+    expect(parseSymbolInfo(total)).toEqual(total);
+  });
+
   it.each([
     ['a missing description', { ...info, description: undefined }],
     ['a zero tick size', { ...info, tickSize: 0 }],
@@ -233,6 +251,7 @@ describe('parseSymbolInfo', () => {
     ['a negative delay', { ...info, delayMs: -1 }],
     ['no book flag', { ...info, hasBook: undefined }],
     ['a broken schedule', { ...stock, schedule: { ...NYSE_2026, regular: [960, 570] } }],
+    ['an unknown price format', { ...info, format: 'percent' }],
   ])('rejects %s', (_label, value) => {
     expect(parseSymbolInfo(value)).toBeNull();
   });

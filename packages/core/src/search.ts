@@ -4,9 +4,12 @@ import { isSymbolKind, type SymbolId, type SymbolKind } from './market.ts';
 export const SEARCH_CATEGORIES = ['stocks', 'funds', 'crypto'] as const;
 export type SearchCategory = (typeof SEARCH_CATEGORIES)[number];
 
-/** Which tab a kind of symbol shows under: ETFs are funds, the other securities stocks. */
+/**
+ * Which tab a kind of symbol shows under: ETFs are funds, the other securities stocks, and
+ * CRYPTOCAP's market caps crypto.
+ */
 export function categoryOf(kind: SymbolKind): SearchCategory {
-  if (kind === 'spot') return 'crypto';
+  if (kind === 'spot' || kind === 'index') return 'crypto';
   return kind === 'etf' ? 'funds' : 'stocks';
 }
 
@@ -131,6 +134,9 @@ const compactTicker = (ticker: string) =>
 function tierOf(entry: CatalogEntry, compact: string, words: readonly string[]): number | null {
   if (compact === '') return EXACT; // nothing typed: everything, most traded first
   const ticker = compactTicker(entry.ticker);
+  // A coin's market cap and dominance (CRYPTOCAP:XRP, XRP.D) come after its pairs when just the
+  // coin is typed; "XRP.D" typed in full still finds its own first.
+  if (entry.kind === 'index' && entry.base === compact && ticker.startsWith(compact)) return BASE;
   if (ticker === compact) return EXACT;
   if (ticker.startsWith(compact)) return PREFIX;
   if (entry.base === compact) return BASE;
@@ -171,7 +177,7 @@ export function searchCatalog(
     if (category && categoryOf(entry.kind) !== category) continue;
     const tier = tierOf(entry, compact, words);
     if (tier === null) continue;
-    const key = `${entry.kind === 'spot' ? 'crypto' : 'us'}:${entry.ticker}`;
+    const key = `${entry.kind === 'spot' ? 'crypto' : entry.kind === 'index' ? 'index' : 'us'}:${entry.ticker}`;
     const group = groups.get(key);
     if (group) {
       group.tier = Math.min(group.tier, tier);

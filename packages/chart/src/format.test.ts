@@ -6,7 +6,10 @@ import {
   formatPrice,
   formatSignedPercent,
   formatSignedPrice,
+  formatSignedValue,
   formatTickMark,
+  formatValue,
+  formatVolume,
 } from './format';
 
 const MINUS = '−';
@@ -40,6 +43,43 @@ describe('price formatting', () => {
     expect(formatSignedPercent(2.7612)).toBe('+2.76%');
     expect(formatSignedPercent(-1.2345)).toBe(`${MINUS}1.23%`);
     expect(formatSignedPercent(0)).toBe('0.00%');
+  });
+});
+
+describe('market caps in thousands to trillions', () => {
+  it("writes TradingView's units with up to two decimals, trailing zeros dropped", () => {
+    // From the user's screenshots 20–22.
+    expect(formatVolume(2.652e12)).toBe('2.65T');
+    expect(formatVolume(758.92e9)).toBe('758.92B');
+    expect(formatVolume(213.6e9)).toBe('213.6B');
+    expect(formatVolume(1.8e12)).toBe('1.8T');
+    expect(formatVolume(3.8e9)).toBe('3.8B');
+    expect(formatVolume(245.77e6)).toBe('245.77M');
+    expect(formatVolume(142e6)).toBe('142M');
+    expect(formatVolume(12_345)).toBe('12.35K');
+    expect(formatVolume(523)).toBe('523');
+    expect(formatVolume(0)).toBe('0');
+  });
+
+  it('moves to the next unit when rounding reaches a thousand', () => {
+    expect(formatVolume(999.999e6)).toBe('1B');
+    expect(formatVolume(999.996e9)).toBe('1T');
+    expect(formatVolume(999.999)).toBe('1K');
+  });
+
+  it('signs a change with a true minus, and a plus in the legend', () => {
+    expect(formatVolume(-36.71e9)).toBe(`${MINUS}36.71B`);
+    expect(formatVolume(-0.001)).toBe('0');
+    expect(formatSignedValue(-18.03e9, 0, 'volume')).toBe(`${MINUS}18.03B`);
+    expect(formatSignedValue(2.11e9, 0, 'volume')).toBe('+2.11B');
+    expect(formatSignedValue(0, 0, 'volume')).toBe('0');
+  });
+
+  it("follows the symbol's format, decimals otherwise", () => {
+    expect(formatValue(2.652e12, 0, 'volume')).toBe('2.65T');
+    expect(formatValue(1.2955, 4)).toBe('1.2955');
+    expect(formatValue(60.734, 2, 'price')).toBe('60.73');
+    expect(formatSignedValue(0.0106, 4)).toBe('+0.0106');
   });
 });
 

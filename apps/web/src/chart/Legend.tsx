@@ -1,7 +1,13 @@
-import { formatPrice, formatSignedPercent, formatSignedPrice } from '@tradingnerd/chart';
-import { type MarketStatus, resolutionLabel } from '@tradingnerd/core';
+import {
+  formatPrice,
+  formatSignedPercent,
+  formatSignedValue,
+  formatValue,
+} from '@tradingnerd/chart';
+import { type MarketStatus, type PriceFormat, resolutionLabel } from '@tradingnerd/core';
 import { type Ref, useImperativeHandle, useRef, useState } from 'react';
 import { CoinLogo } from '../logos/CoinLogo';
+import { groupThousands } from '../watchlist/numbers';
 import type { LegendView } from './ChartSession';
 import styles from './Legend.module.css';
 import { MoonIcon, SunriseIcon } from './marketIcons';
@@ -34,12 +40,15 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
   const market = useRef<HTMLSpanElement>(null);
   const delayed = useRef<HTMLSpanElement>(null);
   const precision = useRef(2);
+  const format = useRef<PriceFormat | undefined>(undefined);
 
   useImperativeHandle(
     ref,
     (): LegendView => ({
       setInstrument(info, resolution) {
         precision.current = info.pricePrecision;
+        format.current = info.format;
+        if (root.current) root.current.dataset.format = info.format ?? 'price';
         setCoin((current) =>
           current?.id === info.id ? current : { id: info.id, base: info.base },
         );
@@ -66,16 +75,17 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
       },
       showBar(bar, previous) {
         const digits = precision.current;
-        setText(open.current, formatPrice(bar.open, digits));
-        setText(high.current, formatPrice(bar.high, digits));
-        setText(low.current, formatPrice(bar.low, digits));
-        setText(close.current, formatPrice(bar.close, digits));
+        const style = format.current;
+        setText(open.current, formatValue(bar.open, digits, style));
+        setText(high.current, formatValue(bar.high, digits, style));
+        setText(low.current, formatValue(bar.low, digits, style));
+        setText(close.current, formatValue(bar.close, digits, style));
         if (previous && previous.close !== 0) {
           const delta = bar.close - previous.close;
           const percent = (delta / previous.close) * 100;
           setText(
             change.current,
-            `${formatSignedPrice(delta, digits)} (${formatSignedPercent(percent)})`,
+            `${formatSignedValue(delta, digits, style)} (${formatSignedPercent(percent)})`,
           );
         } else {
           setText(change.current, '');
@@ -84,8 +94,13 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
       },
       setBook(bidPrice, askPrice) {
         const digits = precision.current;
-        setText(bid.current, formatPrice(bidPrice, digits));
-        setText(ask.current, formatPrice(askPrice, digits));
+        // A market cap's Sell and Buy show every digit, grouped: "1,041,724,313,303".
+        const book = (price: number) =>
+          format.current === 'volume'
+            ? groupThousands(formatPrice(price, digits))
+            : formatPrice(price, digits);
+        setText(bid.current, book(bidPrice));
+        setText(ask.current, book(askPrice));
         setText(spread.current, formatPrice(askPrice - bidPrice, digits));
         if (root.current) root.current.dataset.book = 'true';
       },

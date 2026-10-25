@@ -38,8 +38,9 @@ export interface Bar {
 }
 
 /**
- * What a symbol is: a crypto spot pair, or a kind of US-listed security (a depositary receipt
- * is a foreign company's shares, "dr" as TradingView calls it).
+ * What a symbol is: a crypto spot pair, a kind of US-listed security (a depositary receipt
+ * is a foreign company's shares, "dr" as TradingView calls it), or an index computed from
+ * other prices (CRYPTOCAP's market caps and dominance).
  */
 export const SYMBOL_KINDS = [
   'spot',
@@ -51,11 +52,25 @@ export const SYMBOL_KINDS = [
   'right',
   'unit',
   'note',
+  'index',
 ] as const;
 export type SymbolKind = (typeof SYMBOL_KINDS)[number];
 
 export const isSymbolKind = (value: unknown): value is SymbolKind =>
   SYMBOL_KINDS.includes(value as SymbolKind);
+
+/**
+ * TradingView's exchange code for the crypto market caps it computes. It's also the `base` of
+ * its symbols that aren't one coin's (TOTAL, OTHERS.D), whose icon is CRYPTOCAP's badge.
+ */
+export const CRYPTOCAP = 'CRYPTOCAP';
+
+/**
+ * How a symbol's prices are written: with its decimals ("price"), or in thousands, millions,
+ * billions or trillions ("volume": 2.65T), as TradingView's Charting Library `format` field
+ * has it for market caps.
+ */
+export type PriceFormat = 'price' | 'volume';
 
 /** The time zone crypto's bars and time axis follow. */
 export const UTC_ZONE = 'Etc/UTC';
@@ -79,6 +94,8 @@ export interface SymbolInfo {
   tickSize: number;
   /** Decimal places shown for prices, derived from the tick size. */
   pricePrecision: number;
+  /** How prices are written; "price" when absent. */
+  format?: PriceFormat;
   /** Resolutions the exchange serves natively, in TradingView notation. */
   resolutions: string[];
   /** The exchange's time zone, which bars and the time axis follow: UTC for crypto. */

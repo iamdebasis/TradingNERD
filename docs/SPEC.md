@@ -126,6 +126,14 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-24 | **The overlay of a drag of several rows** (M8e), as TradingView's: their tickers in list order, a 29 px row each, 16 px in, near-white on the selection blue, 300 px wide, and the pointer keeps the spot where it grabbed its row. Past ten, "+N more". One row dragged keeps the browser's own image of the row | Your YES; measured from your screenshot (§4.10). |
 | 2026-10-24 | A selected row under the mouse keeps its blue and gains TradingView's rounded gray outline (2 px #929292, 5 px corners) | Your YES to my reading of your screenshot, where the row grabbed has it (provisional). |
 | 2026-10-24 | The overlay is see-through itself, its blue and its text at 55%, as measured in TradingView's: the browser draws a drag image as it's given | Your report that ours looked deep blue, solid as first built; your YES. |
+| 2026-10-25 | **CRYPTOCAP** (M9a): TradingView's market caps and dominance, computed here as TradingView computes its own. A coin's market cap is its price times its circulating supply; TOTAL is the 125 largest coins TradingView counts, TOTAL2 and TOTAL3 leave out Bitcoin and Ethereum, OTHERS the top 10, the ES ones stablecoins; TOTALE50 and TOTALE100 are ranks 51–125 and 101–125, STABLE.C the 100 largest stablecoins; every coin's market cap; `.D` for each but TOTAL; OTHERSBTC and TOTAL3ESBTC | Your YES after the plan (§4.11). |
+| 2026-10-25 | The coins and their supply from **CoinGecko's free plan**, with your key: its 250 largest and its 250 largest stablecoins, every 15 minutes while a CRYPTOCAP symbol is in use, and each counted coin's year of history once. History reaches back a year; the paid plans (2 years at $35 a month, from 2013 at $129) are for later | Your call: the free plan for now. |
+| 2026-10-25 | Prices from **our exchanges**: Binance first, then Bybit, OKX, Coinbase and Kraken, a coin's USDT, USD or USDC pair trading $100,000 a day or more, USDT at Tether's own price. The values move each second, as TradingView's do. A coin none of them trades counts at CoinGecko's own market cap | The plan's design: free, live, and as deep as the exchanges' history. |
+| 2026-10-25 | **31 coins CoinGecko ranks but TradingView doesn't count** are left out everywhere: tokenized funds, loans and stocks, USDS, WhiteBIT, RAIN and others | Found against TradingView's own ranking page (§4.11); provisional. |
+| 2026-10-25 | **OTHERS** as TradingView documents it: TOTAL without its 10 largest coins | TradingView's own OTHERS reads about 6% above what its definition gives (§4.11, §11). |
+| 2026-10-25 | **TradingView's look:** market caps written 2.65T, 758.92B, 245.77M, changes −36.71B; dominance to four significant digits (60.73, 6.876); Sell and Buy show the whole number (1,041,724,313,303) in boxes that grow to fit it; TradingView's names ("Crypto Total Market Cap Excluding BTC, $"); a badge drawn after TradingView's for TOTAL and the like, the coin's logo for a coin's own | Measured from your screenshots 20–22; the names from TradingView's symbol pages. |
+| 2026-10-25 | Typing just a coin's symbol (XRP) lists its pairs before its market cap and dominance; "XRP.D" typed in full finds its own first. CRYPTOCAP shows under the Crypto tab as "index crypto" | TradingView doesn't document its ranking; provisional (§11). |
+| 2026-10-25 | A **monthly count of CoinGecko calls**, the logos' too (`data/coingecko-usage.json`): past 8,000 the coins are fetched hourly, past 9,500 only what keeps them going | The free plan allows 10,000 a month. |
 
 ## 4. Research findings
 
@@ -269,6 +277,22 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **The browser's way to draw it:** an element handed over as the drag image when the drag starts, the pointer at an offset on it (MDN, `setDragImage`). The browser draws it outside the page, so no screenshot of the page shows it.
 - **Settled by the same screenshot:** a row's drag draws the section drag's line with its ring (§11, item 43); several selected rows share the one selection blue (item 45).
 - **Also seen:** the row grabbed keeps its blue and has a rounded gray outline (about 2 px of #929292, 5 px corners, flush with its sides, 1 px in from its top and bottom; over its flag). While dragged, it still shows its trash, with no square, and its gray flag; ours hides both during a drag.
+
+### 4.11 Crypto market caps (researched 2026-10-24)
+
+- **TradingView's own pages** (§12):
+  - "These indices are calculated by TradingView." A coin's market cap is "last price * circulating supply", for the coins of its Crypto Coins Screener.
+  - TOTAL is "the top-125 cryptocurrencies"; TOTAL2 leaves out BTC, TOTAL3 BTC and ETH; OTHERS "BTC and some other top" ones, the coins its dominance page lists (on 24 October: BTC, ETH, USDT, BNB, XRP, USDC, SOL, TRX, ZEC, HYPE). TOTALES, TOTAL2ES and TOTAL3ES leave out stablecoins too (before 19 May 2025, as the difference with USDT, USDC and DAI). TOTALE50 is ranks 51–125, TOTALE100 101–125, TOTALDEFI the top 125 DeFi coins; 18 category indices of up to 100 coins (STABLE.C, MEME.C, AI.C, …) have history from their release only.
+  - Dominance: "symbol.D = symbol / TOTAL * 100%". OTHERSBTC and TOTAL3ESBTC divide by Bitcoin's market cap.
+  - Names, from its symbol pages: "Crypto Total Market Cap, $", "… Excluding BTC, $", "… Excluding Top 10, $", "Crypto Stablecoins Market Cap, $", "Market Cap BTC, $", "Market Cap BTC Dominance, %", "Ratio Total Market Cap Excluding Top 10 to BTC", and so on.
+  - Its Charting Library's `format: 'volume'` "formats decimal numbers in thousands, millions, billions or trillions".
+- **No exchange publishes market caps.** CoinGecko (§4.4) has every coin's price, market cap and circulating supply; its free plan reaches back 365 days (a call a coin, a point a day), and its global market cap chart is for paid plans and counts every coin, not TradingView's 125. DefiLlama has the total of all stablecoins since 2017, free.
+- **Calibrated against your screenshots 20–22** (17:28–17:30 UTC on 24 October, from the price labels' countdowns), with CoinGecko's 5-minute history:
+  - TradingView's TOTAL2 was exactly 1,041,724,313,303 at 17:28:32. With CoinGecko's Bitcoin, TOTAL was 2,652.98B, giving BTC.D 60.734 (TradingView 60.73), ETH.D 10.667 (10.67), USDT.D 6.879 (6.876) and TOTAL3 758.73B (758.78B).
+  - TradingView's ranking page (read at 18:50 UTC) lists its top 100. 31 coins CoinGecko ranks above its 100th aren't there, 78B together: tokenized funds, loans and stocks (Figure Heloc, BUIDL, USYC, …), USDS, WhiteBIT, RAIN, Bitway, HTX, GHO, GRASS and others. Left out, CoinGecko's top 125 gives TradingView's dominance to within a few hundredths.
+  - Some coins' market caps differ between the two (HYPE 19.26B on TradingView against 16.87B on CoinGecko, DOGE 13.22B against 12.01B): their supply figures differ.
+  - **OTHERS doesn't fit its definition:** TradingView showed 213.6B where TOTAL without the dominance page's top 10 is 202.1B. No ten coins make up the difference; a few odd pairs fit one moment but not all three screenshots.
+- **Checked live** (your running app, 24 October, 5-minute bars of 17:25–17:30 UTC built from exchange prices): TOTAL −0.10%, TOTAL2 −0.19%, TOTAL3 −0.26%, BTC.D 60.77 (+0.07%), ETH.D +0.05%, USDT.D +0.10%, XRP.D +0.05%, XRP's and ETH's market caps −0.02% and −0.01%; OTHERS −6.3%.
 
 ## 5. Requirements (v1)
 
@@ -484,6 +508,15 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Symbols we don't chart** are kept and shown red, as a symbol an exchange doesn't list.
 - **Flags** stay with the symbol in every list, as on TradingView.
 
+### 5.10 CRYPTOCAP (M9a)
+
+- **Symbols** (exchange `CRYPTOCAP`, kind `index`): TOTAL, TOTAL2, TOTAL3, OTHERS, TOTALES, TOTAL2ES, TOTAL3ES, TOTALE50, TOTALE100, STABLE.C; every counted coin's market cap by its symbol (CRYPTOCAP:XRP); `.D` for each of those but TOTAL (BTC.D, OTHERS.D, STABLE.C.D); OTHERSBTC and TOTAL3ESBTC.
+- **Everywhere a symbol goes:** the chart (every interval, a year of history), watchlist rows with Last, Chg and Chg% against the day before, the legend, Sell and Buy (both the value), search.
+- **Live:** the values move each second while shown.
+- **Formats and names:** as TradingView's (§3).
+- **Without a CoinGecko key**, the symbols say where to add one.
+- **Done when:** TOTAL, TOTAL2, TOTAL3 and BTC.D are within 0.5% of TradingView at the same moment, a coin's market cap within 0.1%; rows and legend match screenshots 20–22; CoinGecko calls stay under 8,000 a month. Met for all but OTHERS (§4.11).
+
 ## 6. Architecture
 
 ### 6.1 Overview
@@ -528,6 +561,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Symbol search** (M4): `GET /api/symbols/search?query=&exchange=&offset=&limit=` returns `{matches, hasMore}`. Each match is one ticker with its exchanges' `listings`, each saying whether it's `live`. `GET /api/exchanges` lists the exchanges.
 - **Sessions** (protocol v6): `GET /api/bars?…&session=extended` and `{channel: 'bars', …, session: 'extended'}` ask for intraday bars with pre- and post-market hours; `regular` is the default, and markets without extended hours (and day and longer bars) give their regular bars either way.
 - **Watchlists** (protocol v7, M8): `GET /api/watchlists` lists them (`{activeId, lists: [{id, name, favorite, count}]}`); `POST` creates one (`{name, sections?, copyOf?, activate?}`, the name made unique); `GET`/`PUT /api/watchlists/:id` read and save one list's sections; `PATCH` renames or stars it; `DELETE` deletes it (never the last); `POST /api/watchlists/:id/activate` opens it. An unknown list answers `not_found` (404). `GET`/`PUT /api/watchlist` still read and save the open list. A list's symbols may be any TradingView symbol with an exchange prefix (spreads included), kept as written when it isn't one we chart.
+- **CRYPTOCAP** (protocol v8, M9a): symbols of the `index` kind; `SymbolInfo.format` is `volume` for market caps (thousands to trillions) and `price`, or absent, otherwise.
 - **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
@@ -619,6 +653,9 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 | `logos/coins/` | Cached 50 px coin logos |
 | `logos/exchanges/` | Cached exchange logos |
 | `catalog.json` | Every exchange's trading pairs with 24 h volume, and asset names (one compact line, about 230 KB) |
+| `cryptocap/coins.json` | CRYPTOCAP's coins: CoinGecko's 250 largest and its largest stablecoins, with prices, market caps and circulating supply (about 70 KB; fetched every 15 minutes while in use) |
+| `cryptocap/anchors.json` | Each counted coin's market cap and price, a point a day for a year: CoinGecko's history, then each day's latest coins (about 4 MB once loaded) |
+| `coingecko-usage.json` | CoinGecko calls this month |
 | `tradingnerd.db` | Not used: the history cache is in memory (§6.7); a copy on disk would make a restart's first loads instant too |
 
 - **Owner-only:** the folder is created owner-only (0700).
@@ -683,6 +720,18 @@ data/             Local runtime data (gitignored, created at runtime)
 - **Live:** one poll a minute fetches the minutes just released for every subscribed symbol in one request (from 04:00 while a chart wants extended hours); each chart or watchlist bar is its period's minutes in its hours, folded on the clock. After a session, the official daily bar replaces the minute-built one. Two failed polls in a row show the chart as reconnecting.
 - **Stream** (`AlpacaStream.ts`): one connection to Alpaca's `delayed_sip` feed (`sip` on a real-time plan), signed in with the key; trades move the live bars between polls (the polled minutes stay authoritative), quotes give the best bid and ask. At most 30 symbols, a chart's (those with quotes) first, then by age; the rest stay on minute bars. Trades with conditions Alpaca's bars leave out are dropped. Alpaca's 406 (another app on the key) waits 5 minutes; 402 and 409 stop it until the key changes; 405 keeps the symbols Alpaca took.
 - **Requests:** under Alpaca's 200 a minute; the daily ranking runs gently in the background.
+
+### 6.14 CRYPTOCAP (M9a)
+
+In `apps/gateway/src/cryptocap/`:
+
+- **An exchange like the others:** `CryptoCapExchange` is the market service's `CRYPTOCAP` adapter and a listing for search, so charts, history pages, quotes and the interval engine work as for a pair. It serves 1, 5, 15 and 30 minutes, 1 and 4 hours and a day; the others are built from these.
+- **The coins** (`universe.ts`): CoinGecko's top 250 and its stablecoins, minus the 31 left out (`EXCLUDED_COINS`); fetched every 15 minutes while in use (hourly past 8,000 calls a month) and kept. Each counted coin's year of history is fetched once, in the background, a call every 1.2 s, the largest first; a restart carries on where it stopped, within a minute of the next use.
+- **Supply** (`anchors.ts`): a coin's market cap and price a day; its circulating supply at any moment is market cap ÷ price, in a straight line between days. Until a coin's history has loaded, its market cap of now stands in.
+- **Prices** (`pairs.ts`): the first exchange of Binance, Bybit, OKX, Coinbase and Kraken with the coin's USDT, USD or USDC pair trading $100,000 a day. USDT prices become dollars at Tether's own price (Coinbase's USDT-USD). A pair priced more than 30% from CoinGecko's trades another coin of the same symbol and is set aside.
+- **History** (`history.ts`): it waits for the exchanges' pair lists (10 s at most after a start), and what was built without them isn't kept. A coin's market cap over a bar is its pair's bar times its supply then; a coin without a pair, or before its pair's first bar, takes CoinGecko's market cap between its days. The composites (`indices.ts`) rank the coins by close and add up opens, highs, lows and closes each on their own, as TradingView builds spreads, so a composite's high can sit a little above the highest it reached. History is computed 1,000 bars at a time, for every composite at once, from the coins ranked in the top 140 on any of its days; kept in memory (24 chunks), a chunk reaching into the present for a minute.
+- **Live** (`live.ts`): while a symbol is watched, the pairs of the 140 largest coins are followed through their exchanges' 1-minute candles; each second the market caps are added up again and the watched bars move. Sell and Buy are the value. The feed is up while the exchange of Bitcoin's pair is.
+- **Calls:** every CoinGecko call is counted (`logos/usage.ts`); the key stays in the gateway.
 
 ## 7. UI and visual spec
 
@@ -802,6 +851,9 @@ Reference viewport is 1634 px wide.
 | M8c | Moving sections: dragging a section's header (an open one alone, a folded one whole), TradingView's drop line, no trash on folded sections, the 6 px above headers | Your screenshot's drag reproduced on your list: the line under KOSPI, the header blue. **Committed 2026-10-24** |
 | M8d | Selecting several symbols: Shift and ⌘ (Ctrl) clicks, Shift+↓/↑, ⌘A, Escape; Delete, the trash, ⌥↵, the row menu and dragging for all of them; Space and Shift+Space | Every gesture checked on your list, nothing saved. **Committed 2026-10-24** |
 | M8e | The overlay of a drag of several rows, and the outline of a selected row under the mouse, as TradingView's | Measured against your screenshot; the overlay handed to the browser checked on your list. **Built 2026-10-24** |
+| M9a | CRYPTOCAP: market caps (TOTAL, TOTAL2, TOTAL3, OTHERS, the ES ones, TOTALE50 and TOTALE100, STABLE.C, every coin's), dominance and ratios, from exchange prices and CoinGecko's supply, with TradingView's names and formats | TOTAL, TOTAL2, TOTAL3 and dominance within 0.5% of your screenshots' moment. **Built 2026-10-25**: all within 0.26%, but OTHERS (−6%, §4.11) |
+| M9b | Formulas (spreads): + − * /, numbers, parentheses, up to 10 symbols, typed into search; intraday bars from 1-minute ones; in watchlists | Your formulas (BTC.D+ETH.D+USDT.D+USDC.D, TOTAL2/XRPUSD) live. Needs its YES |
+| M9c | Bitstamp | Your Bitstamp symbols live. Needs its YES |
 
 ## 9. Testing strategy
 
@@ -851,6 +903,11 @@ Reference viewport is 1634 px wide.
   - The model (`apps/web/src/watchlist/model.test.ts`): removing several; moving several together in list order, where they were, into a section that isn't there; Shift ranges either way, across sections, never into a folded one. The flags (`flagEdits.test.ts`): flagging and unflagging several, a color for several, the color they share.
   - In the browser (`tests/e2e/watchlist.spec.ts`): ⌘-click and Shift-click across sections with the chart staying, the blue, a plain click; Shift+↓/↑, ⌘A without a folded section's rows, Escape; Space and Shift+Space, and Space folding a header; Delete on several, the row after them selected, flags kept; a selected row's trash and another row's; ⌥↵ both ways; the row menu on several, its colors, and on a row not selected; dragging several together and an unselected row alone; folding taking rows out of the selection; Backspace while typing a section's name.
 - **Dragging several** (M8e, `tests/e2e/watchlist.spec.ts`): what the page hands the browser as the drag image, recorded (the browser draws it outside the page): the tickers in list order, 300 px wide, 29 px rows, the colors, 16 px in, square corners, the pointer's spot; nothing left in the page after; one row on its own keeping the browser's image; past ten, ten and "+N more" in gray. The outline: its size, color, corners and place on a selected row under the mouse, none on a row not selected, and the blue kept.
+- **CRYPTOCAP** (M9a):
+  - The gateway's parts (`apps/gateway/test/cryptocap-parts.test.ts`): tickers and TradingView's names; the composites from 130 coins (the top 125, without Bitcoin and Ethereum, without the top 10, without stablecoins, ranks 51–125 and 101–125, STABLE.C beyond the top 125), opens, highs, lows and closes added on their own; dominance and ratios; decimals; the pair picked; supply between days, and its saving; the monthly call count.
+  - End to end through the market service (`cryptocap.test.ts`, a fake CoinGecko and fake exchanges): TOTAL2's and XRP.D's descriptions, symbols it doesn't have, no key; TOTAL from exchange price × supply with CoinGecko's own market cap for a coin without a pair; TOTAL2, TOTAL3, OTHERS, TOTALES, STABLE.C and a coin's; dominance and ratios; a pair priced like another coin set aside; estimates while the history loads; waiting for the pair lists, and not keeping what was built without them; the history resuming after a restart; weekly bars from daily ones; each coin's history once, never an excluded one's; the live bar moving with a price; Sell and Buy; search's list; every call counted.
+  - Core and chart: the `index` kind and `format` in messages; search (TOTAL by name, a coin's pairs first, BTC.D typed in full first, the Crypto tab, apart from a fund named BTC); the number format (2.65T, 213.6B, 142M, 999.999M as 1B, signs).
+  - In the browser (`tests/e2e/cryptocap.spec.ts`): TOTAL2's legend and price scale, Sell and Buy whole in boxes that grow to fit, BTC.D's decimals and logo, watchlist rows as in your screenshots, search with the badge.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -958,6 +1015,11 @@ Reference viewport is 1634 px wide.
 44. Your recent TradingView screenshots show a pure black panel (#000000) and darker grays (about #1A1A1A) than the #0F0F0F and #2E2E2E our colors follow, from your M6 screenshots. TradingView may have darkened its dark theme; worth checking before changing every color.
 45. Selecting several, provisional: whether ⌘- and Shift-clicks move the chart (ours: no); what Escape does (ours: back to the chart's symbol); whether Shift-click adds the range or replaces the selection (ours: replaces); the menu's wording for several (ours: "Flag/Unflag N symbols"; TradingView's 2018 blog: "Flag All Selected"); ⌥↵ on a mix (ours: the unflagged ones flagged, the others' colors kept); whether ⌘A takes the rows of folded sections (ours: no). Several selected rows share the chart row's blue, as your screenshot of several rows dragged shows (§4.10). A screenshot with the row menu open on several would settle the wording.
 46. Dragging several, provisional: "+N more" past ten (your screenshot has five); one row's drag image (ours: the browser's image of the row); the overlay's 55% (measured from your screenshot; one of ours mid-drag would confirm that your browser adds no fade of its own); whether the outline marks every selected row under the mouse (ours) or only the one grabbed; a selected row's trash with no square, and the grabbed row keeping its trash and gray flag while dragged (ours: the square, and both hidden during a drag).
+47. CRYPTOCAP, provisional: which coins TradingView counts (`EXCLUDED_COINS`: 31 found on 24 October; new ones need adding by hand); whether its history ranks the coins anew at every moment (ours: each bar); a composite's high and low (ours: the coins' highs and lows added up, as TradingView builds spreads; its own index probably has its real high); a coin with no pair of ours (ours: CoinGecko's market cap between its days); a composite's volume (ours: the coins' traded dollars on their exchanges; not shown yet).
+48. **OTHERS reads about 6% below TradingView's** (202B against 213.6B on 24 October): TradingView's leaves out about 11.5B less than its documented top 10. A screenshot of OTHERS together with the dominance page at another moment, or TradingView's own word, would settle it.
+49. Dominance's and ratios' decimals (ours: four significant digits, from your screenshots); where CRYPTOCAP ranks in search (ours: a coin's pairs first); the "index crypto" type words; CRYPTOCAP's icon (ours is drawn after TradingView's, not copied).
+50. A few coins' market caps differ from TradingView's because CoinGecko's supply does (HYPE's about 13% lower); TradingView doesn't say where its supply comes from.
+51. Found while building, older than M9a: a long crypto price (XRPBTC's 0.00001590) overflows the legend's Sell and Buy boxes, as market caps did; TradingView's boxes grow to fit (your screenshot 20). Market caps' boxes now grow; the others' need a YES, since the XRP legend is pixel-checked.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -1000,6 +1062,7 @@ Reference viewport is 1634 px wide.
 - Moving sections (M8c): dividers you can "rename, move, or remove" https://www.tradingview.com/support/solutions/43000745825-mastering-the-tradingview-watchlists/ · "named, moved, and deleted" https://www.tradingview.com/blog/en/new-watchlist-features-21389 · folding https://www.tradingview.com/charting-library-docs/latest/releases/release-notes/ · selecting several https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443/ · the same rules in a clone project https://github.com/deepentropy/opentrader/issues/21 · sections moved like symbols, several dragged together (Japanese) https://tetori.jp/tradingview/watchlist/
 - Selecting several (M8d): the watchlist's keyboard shortcuts https://www.tradingview.com/charting-library-docs/latest/getting_started/Shortcuts/ · Shift and Ctrl (Command), deleting several, "Flag All Selected" https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443/ · Alt (Opt)+Enter https://tradingview.com/blog/en/flagged-lists-improved-9521 · Alt+Enter on a selection (Japanese) https://www.oanda.jp/lab-education/tradingviewstrategy/basic/shortcut/ · several dragged together (Japanese) https://tetori.jp/tradingview/watchlist/ · clicks that leave the chart (clone project) https://github.com/deepentropy/opentrader/issues/21
 - Dragging several (M8e): the drag image handed to the browser https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/setDragImage
+- CRYPTOCAP (M9a): market caps and dominance https://www.tradingview.com/support/solutions/43000550480/ · the coins OTHERS leaves out https://www.tradingview.com/markets/cryptocurrencies/dominance/ · TradingView's ranking https://www.tradingview.com/markets/cryptocurrencies/prices-all/ · names https://www.tradingview.com/symbols/CRYPTOCAP-TOTAL/ (and its TOTAL3, OTHERS, OTHERS.D, BTC, BTC.D, STABLE.C, TOTALES, TOTAL2ES, TOTAL3ES, TOTALE50, TOTALE100, OTHERSBTC and TOTAL3ESBTC pages) · spreads https://www.tradingview.com/support/solutions/43000502298-spread-charts-explained/ · `format: 'volume'` https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.LibrarySymbolInfo/ · CoinGecko's plans https://www.coingecko.com/en/api/pricing · its history https://docs.coingecko.com/reference/coins-id-market-chart-range · its global chart (paid) https://docs.coingecko.com/reference/global-market-cap-chart · DefiLlama's stablecoins https://stablecoins.llama.fi/stablecoincharts/all
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

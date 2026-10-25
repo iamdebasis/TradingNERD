@@ -9,6 +9,17 @@ import {
 } from './numbers';
 
 describe('watchlist numbers', () => {
+  it('writes market caps and their changes in thousands to trillions (screenshots 20–22)', () => {
+    expect(formatLast(2.652e12, 0, 'volume')).toBe('2.65T');
+    expect(formatLast(758.92e9, 0, 'volume')).toBe('758.92B');
+    expect(formatLast(245.77e6, 0, 'volume')).toBe('245.77M');
+    expect(formatChange(-36.71e9, 0, 'volume')).toBe('−36.71B');
+    expect(formatChange(4.2e9, 0, 'volume')).toBe('4.2B');
+    // A dominance keeps its decimals: 60.73, 0.13.
+    expect(formatLast(60.734, 2, 'price')).toBe('60.73');
+    expect(formatChange(0.1309, 2, 'price')).toBe('0.13');
+  });
+
   it('writes changes with a real minus and no plus, as TradingView does', () => {
     expect(formatChange(-0.403, 3)).toBe('−0.403');
     expect(formatChange(0.0101, 4)).toBe('0.0101');

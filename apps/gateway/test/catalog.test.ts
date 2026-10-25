@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ExchangeSummary } from '@tradingnerd/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildEntries, mergeNames, usdRates } from '../src/catalog/entries.ts';
 import {
@@ -109,6 +110,48 @@ describe('SymbolCatalog', () => {
       { id: 'COINBASE', name: 'Coinbase', live: false, market: 'crypto' },
     ]);
     expect(sources.map((source) => source.calls)).toEqual([1, 1, 1]);
+    catalog.close();
+  });
+
+  it('searches several extra listings with the pairs, and gives the pairs alone for prices', async () => {
+    const listing = (exchange: string, ticker: string, kind: 'index' | 'etf') => ({
+      entries: () => [
+        {
+          exchange,
+          ticker,
+          base: ticker,
+          quote: 'USD',
+          description: `${ticker} listing`,
+          volumeUsd: 0,
+          live: true,
+          kind,
+        },
+      ],
+      exchanges: (): ExchangeSummary[] => [
+        { id: exchange, name: exchange, live: true, market: kind === 'etf' ? 'stocks' : 'crypto' },
+      ],
+      ready: async () => {},
+    });
+    const catalog = new SymbolCatalog({
+      sources: [binance()],
+      extra: [listing('AMEX', 'SPY', 'etf'), listing('CRYPTOCAP', 'TOTAL', 'index')],
+      live: new Set(['BINANCE']),
+      dataDir: tempDir(),
+    });
+    await catalog.ready(1_000);
+    expect(catalog.search({ query: 'TOTAL' }).matches.map((m) => m.listings[0]?.id)).toEqual([
+      'CRYPTOCAP:TOTAL',
+    ]);
+    expect(catalog.search({ query: 'SPY' }).matches.map((m) => m.listings[0]?.id)).toEqual([
+      'AMEX:SPY',
+    ]);
+    expect(catalog.exchanges().map((exchange) => exchange.id)).toEqual([
+      'BINANCE',
+      'AMEX',
+      'CRYPTOCAP',
+    ]);
+    expect(catalog.pairs().every((entry) => entry.exchange === 'BINANCE')).toBe(true);
+    expect(catalog.pairs().length).toBeGreaterThan(0);
     catalog.close();
   });
 
