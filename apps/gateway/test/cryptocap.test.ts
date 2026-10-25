@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Bar, type CatalogEntry, parseResolution, type Resolution } from '@tradingnerd/core';
@@ -326,6 +326,37 @@ describe('CRYPTOCAP', () => {
       ).toBe(true),
     );
     expect(second.fake.calls.some((call) => call.url.includes('/coins/markets'))).toBe(false);
+  });
+
+  it("reaches back as far as Bitcoin's kept points, past CoinGecko's free year", async () => {
+    // Days kept from earlier years: every coin's point a day back to 500 days ago, with no
+    // history fetched yet, so this run's backfill fetches its (shorter) history on top of them.
+    const dataDir = join(mkdtempSync(join(tmpdir(), 'tradingnerd-cryptocap-')), 'data');
+    const oldest = TODAY - 500 * DAY_MS;
+    const keptDays = Array.from({ length: 491 }, (_, i) => (oldest + i * DAY_MS) / 1000);
+    mkdirSync(join(dataDir, 'cryptocap'), { recursive: true });
+    writeFileSync(
+      join(dataDir, 'cryptocap', 'anchors.json'),
+      JSON.stringify({
+        version: 1,
+        coins: Object.fromEntries(
+          MARKETS.map((coin) => [coin.id, keptDays.map((sec) => [sec, coin.cap, coin.price])]),
+        ),
+        history: {},
+      }),
+    );
+    const { market, fake } = track(await setup({ dataDir }));
+    expect(fake.calls.some((call) => call.url.includes('/coins/bitcoin/market_chart'))).toBe(true);
+    const { bars, hasMore } = await market.getBars('CRYPTOCAP:TOTAL', '1D', null, 1_000);
+    // From the day after the oldest kept point to today: 500 days, not 365.
+    expect(bars[0]?.time).toBe((oldest + DAY_MS) / 1000);
+    expect(bars).toHaveLength(500);
+    expect(hasMore).toBe(false);
+    // Before the pairs' first bars, each coin counts at its kept market cap.
+    const keptTotal =
+      1.6e12 + 2.4e11 + 1.8e11 + 7.5e10 + 7e10 + 8.1e9 + 6e9 + 5e9 + 4e9 + 3e9 + 2e9 + 1e9;
+    expect((bars[0] as Bar).close).toBeCloseTo(keptTotal, -3);
+    expect((bars.at(-1) as Bar).close).toBeCloseTo(TOTAL_TODAY, -3);
   });
 
   it('weekly bars are built from the daily ones', async () => {

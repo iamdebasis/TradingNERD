@@ -53,7 +53,10 @@ const PER_EXCHANGE = 6;
 export const PRICE_TOLERANCE = 0.3;
 /** Most requests one coin's bars may take for a chunk. */
 const MAX_PAGES = 8;
-/** History reaches back a year: the circulating supply CoinGecko's free plan gives. */
+/**
+ * History reaches back at least a year, the circulating supply CoinGecko's free plan gives, and
+ * as far as Bitcoin's kept points go beyond it: they're all kept, so it grows a day each day.
+ */
 export const HISTORY_DAYS = 365;
 const DAY_SEC = 86_400;
 const DAY_MS = DAY_SEC * 1000;
@@ -114,7 +117,7 @@ export interface CapHistoryOptions {
  * circulating supply"); coins none of our exchanges trades, and times before a pair's first
  * bar, take CoinGecko's own market cap. The composites add up the coins of each bar (see
  * compositeBars). History is computed 1,000 bars at a time, for every composite at once, and
- * kept in memory; it reaches back a year.
+ * kept in memory; it reaches back a year, and as far as Bitcoin's kept points go beyond that.
  */
 export class CapHistory {
   private readonly universe: CoinUniverse;
@@ -147,10 +150,16 @@ export class CapHistory {
     this.coinSeries.clear();
   }
 
-  /** The first bar's open time (ms) at `resolution`: a year back. */
+  /**
+   * The first bar's open time (ms) at `resolution`: a year back, or further where Bitcoin's kept
+   * points reach, the first whole bar after.
+   */
   firstBarMs(resolution: Resolution): number {
     const period = durationOf(resolution);
-    return barOpenTime(resolution, this.now() - HISTORY_DAYS * DAY_MS) + period;
+    const kept = this.anchors.firstSec(BITCOIN);
+    const yearBack = this.now() - HISTORY_DAYS * DAY_MS;
+    const start = kept === null ? yearBack : Math.min(yearBack, kept * 1000);
+    return barOpenTime(resolution, start) + period;
   }
 
   /** The bars of `source` opening in [startMs, endMs), ascending. */

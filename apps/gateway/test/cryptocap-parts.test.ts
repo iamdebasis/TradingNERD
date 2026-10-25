@@ -235,6 +235,49 @@ describe('AnchorBook', () => {
     expect(book.capAt('coin', day0 + DAY + 3_600)).toBe(620);
   });
 
+  it('keeps every day however old, so its history grows a day each day', () => {
+    const book = new AnchorBook(tempDir('anchors'));
+    book.setHistory('coin', chart, 0);
+    const snapshot = (cap: number) => [
+      { id: 'coin', symbol: 'C', name: 'C', rank: 1, price: 2, cap, supply: cap / 2, volume: 0 },
+    ];
+    for (let day = 2; day <= 500; day++)
+      book.record(snapshot(600 + day), (day0 + day * DAY) * 1000);
+    // 500 days on, the first day is still there (CoinGecko's free plan gives a year).
+    expect(book.firstSec('coin')).toBe(day0);
+    expect(book.capAt('coin', day0)).toBe(100);
+    expect(book.capAt('coin', day0 + 500 * DAY)).toBe(1100);
+    expect(book.firstSec('other')).toBeNull();
+  });
+
+  it("fetching a coin's history again only replaces its span: older days and snapshots stay", () => {
+    const book = new AnchorBook(tempDir('anchors'));
+    book.setHistory('coin', chart, 0);
+    const snapshot = [
+      { id: 'coin', symbol: 'C', name: 'C', rank: 1, price: 2, cap: 640, supply: 320, volume: 0 },
+    ];
+    book.record(snapshot, (day0 + 20 * DAY) * 1000);
+    book.setHistory(
+      'coin',
+      {
+        prices: [
+          [(day0 + 10 * DAY) * 1000, 3],
+          [(day0 + 11 * DAY) * 1000, 3],
+        ],
+        caps: [
+          [(day0 + 10 * DAY) * 1000, 900],
+          [(day0 + 11 * DAY) * 1000, 900],
+        ],
+        volumes: [],
+      },
+      1,
+    );
+    expect(book.firstSec('coin')).toBe(day0);
+    expect(book.capAt('coin', day0)).toBe(100);
+    expect(book.capAt('coin', day0 + 10 * DAY)).toBe(900);
+    expect(book.capAt('coin', day0 + 20 * DAY)).toBe(640);
+  });
+
   it('saves its points and reads them back', async () => {
     const dir = tempDir('anchors');
     const book = new AnchorBook(dir);

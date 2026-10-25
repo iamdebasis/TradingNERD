@@ -3,8 +3,6 @@ import type { MarketChart, MarketCoin } from '../logos/coingecko.ts';
 import { JsonFile } from '../storage/jsonFile.ts';
 
 const DAY_SEC = 86_400;
-/** Points older than this are dropped: history reaches back a year (CoinGecko's free plan). */
-const KEEP_SEC = 400 * DAY_SEC;
 /** Changes wait this long before they're written, so a round of updates is one write. */
 const SAVE_DELAY_MS = 10_000;
 
@@ -80,10 +78,11 @@ function interpolate(
 const supplyOf = (point: Anchor) => point[1] / point[2];
 
 /**
- * Each coin's market cap and price over the past year, a point a day: CoinGecko's history,
- * fetched once per coin, then each day's latest snapshot. Market caps are built from exchange
- * prices times the circulating supply these points give for that moment (market cap ÷ price),
- * and coins no exchange of ours trades are taken from the points themselves. Kept in
+ * Each coin's market cap and price, a point a day: CoinGecko's history, fetched once per coin
+ * (a year on its free plan), then each day's latest snapshot, every one kept, so the history
+ * grows a day each day (about 6 MB a year). Market caps are built from exchange prices times the
+ * circulating supply these points give for that moment (market cap ÷ price), and coins no
+ * exchange of ours trades are taken from the points themselves. Kept in
  * data/cryptocap/anchors.json.
  */
 export class AnchorBook {
@@ -123,7 +122,10 @@ export class AnchorBook {
     return this.history.has(id);
   }
 
-  /** Replaces a coin's points with CoinGecko's history (`chart`), keeping newer ones. */
+  /**
+   * CoinGecko's history (`chart`) for a coin, in place of its points over the same span; the
+   * days kept from before it and the snapshots since stay, so fetching again never shortens it.
+   */
   setHistory(id: string, chart: MarketChart, fetchedAt: number): void {
     const prices = new Map(chart.prices.map(([ms, price]) => [Math.floor(ms / 1000), price]));
     const fetched: Anchor[] = [];
@@ -132,9 +134,12 @@ export class AnchorBook {
       const price = prices.get(sec);
       if (price !== undefined) fetched.push([sec, compact(cap), compact(price)]);
     }
+    const first = fetched[0]?.[0] ?? Number.POSITIVE_INFINITY;
     const last = fetched.at(-1)?.[0] ?? Number.NEGATIVE_INFINITY;
-    const newer = (this.points.get(id) ?? []).filter(([sec]) => sec > last);
-    this.points.set(id, [...fetched, ...newer]);
+    const kept = this.points.get(id) ?? [];
+    const older = kept.filter(([sec]) => sec < first);
+    const newer = kept.filter(([sec]) => sec > last);
+    this.points.set(id, [...older, ...fetched, ...newer]);
     this.history.set(id, fetchedAt);
     this.scheduleSave();
   }
@@ -156,7 +161,6 @@ export class AnchorBook {
       } else {
         points.push(point);
       }
-      while (points.length > 0 && (points[0] as Anchor)[0] < sec - KEEP_SEC) points.shift();
       this.points.set(coin.id, points);
     }
     this.scheduleSave();
@@ -171,6 +175,11 @@ export class AnchorBook {
     const points = this.points.get(id);
     if (!points?.length) return null;
     return interpolate(points, sec, supplyOf) ?? supplyOf(points[0] as Anchor);
+  }
+
+  /** When a coin's first kept point is (UTC s): how far back its supply is known. */
+  firstSec(id: string): number | null {
+    return this.points.get(id)?.[0]?.[0] ?? null;
   }
 
   /** A coin's market cap at `sec`, straight-line between its points; null before the first. */
