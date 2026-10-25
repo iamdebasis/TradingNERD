@@ -123,6 +123,34 @@ test('Sell and Buy show the best bid and ask with the spread', async ({ page, ma
   await expect(field(page, 'ask')).toHaveText('1.2956');
   await expect(field(page, 'spread')).toHaveText('0.0001');
   await expect(legend(page)).toHaveAttribute('data-book', 'true');
+  // The reference's boxes: 65.5 px each, 51 px apart.
+  const width = async (name: string) => (await field(page, name).boundingBox())?.width ?? 0;
+  expect(await width('sell')).toBeCloseTo(65.5, 1);
+  expect(await width('buy')).toBeCloseTo(65.5, 1);
+  expect(await width('spread')).toBeCloseTo(51, 1);
+});
+
+test('a long price widens Sell and Buy to fit, as TradingView does (XRPBTC in screenshot 20)', async ({
+  page,
+  market,
+}) => {
+  await openChart(page, '/?symbol=BINANCE:SHIBUSDT&interval=1D');
+  await market.sendBook(0.0000159, 0.00001591);
+  await expect(field(page, 'bid')).toHaveText('0.00001590');
+  await expect(field(page, 'spread')).toHaveText('0.00000001');
+  const box = async (name: string) => (await field(page, name).boundingBox()) ?? { x: 0, width: 0 };
+  const [sell, spread, buy] = [await box('sell'), await box('spread'), await box('buy')];
+  // TradingView's: 97 px boxes, 78 px apart; the price stays inside its box.
+  expect(sell.width).toBeGreaterThan(92);
+  expect(sell.width).toBeLessThan(102);
+  expect(buy.width).toBeCloseTo(sell.width, 0);
+  expect(spread.width).toBeGreaterThan(74);
+  expect(spread.width).toBeLessThan(82);
+  expect(spread.x).toBeGreaterThanOrEqual(sell.x + sell.width - 0.5);
+  expect(buy.x).toBeGreaterThanOrEqual(spread.x + spread.width - 0.5);
+  const price = (await field(page, 'bid').boundingBox()) ?? { x: 0, width: 0 };
+  expect(price.x).toBeGreaterThan(sell.x);
+  expect(price.x + price.width).toBeLessThan(sell.x + sell.width);
 });
 
 test('scrolling back loads older history, page by page, until the listing', async ({

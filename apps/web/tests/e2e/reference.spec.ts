@@ -202,8 +202,11 @@ test.describe('matches the TradingView reference pixels', () => {
   });
 });
 
-test('the legend sits where TradingView puts it', async ({ page }) => {
+test('the legend sits where TradingView puts it', async ({ page, market }) => {
   await openChart(page);
+  // The reference shows Sell 1.2955, the spread 0.0001 and Buy 1.2956; the boxes fit them.
+  await market.sendBook(1.2955, 1.2956);
+  await expect(page.locator('[data-field="spread"]')).toHaveText('0.0001');
   const box = async (name: string) => {
     const found = await page.locator(`[data-field="${name}"]`).boundingBox();
     if (!found) throw new Error(`${name} not visible`);

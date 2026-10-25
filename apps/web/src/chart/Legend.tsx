@@ -48,7 +48,6 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
       setInstrument(info, resolution) {
         precision.current = info.pricePrecision;
         format.current = info.format;
-        if (root.current) root.current.dataset.format = info.format ?? 'price';
         setCoin((current) =>
           current?.id === info.id ? current : { id: info.id, base: info.base },
         );

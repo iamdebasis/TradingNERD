@@ -134,6 +134,7 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-25 | **TradingView's look:** market caps written 2.65T, 758.92B, 245.77M, changes −36.71B; dominance to four significant digits (60.73, 6.876); Sell and Buy show the whole number (1,041,724,313,303) in boxes that grow to fit it; TradingView's names ("Crypto Total Market Cap Excluding BTC, $"); a badge drawn after TradingView's for TOTAL and the like, the coin's logo for a coin's own | Measured from your screenshots 20–22; the names from TradingView's symbol pages. |
 | 2026-10-25 | Typing just a coin's symbol (XRP) lists its pairs before its market cap and dominance; "XRP.D" typed in full finds its own first. CRYPTOCAP shows under the Crypto tab as "index crypto" | TradingView doesn't document its ranking; provisional (§11). |
 | 2026-10-25 | A **monthly count of CoinGecko calls**, the logos' too (`data/coingecko-usage.json`): past 8,000 the coins are fetched hourly, past 9,500 only what keeps them going | The free plan allows 10,000 a month. |
+| 2026-10-25 | **Sell and Buy fit their price** for every symbol, as TradingView's do: both boxes as wide as the wider price needs, with 10 px either side and never under the reference's 65.5 px; the spread its own width with 7.69 px either side. XRP's legend is unchanged to the pixel; XRPBTC's boxes are 95.9 px (TradingView's 97) | Your YES. Measured from your screenshots 20–22 and the reference; your screenshot 20 shows TradingView's two boxes equal although their prices differ. |
 
 ## 4. Research findings
 
@@ -783,7 +784,7 @@ Reference viewport is 1634 px wide.
 - **Legend** (built in M1):
   - Title 16 px. Status dot 18 px with a 10 px center.
   - OHLC at 14 px, colored by the bar's direction (close ≥ open). Change against the previous close.
-  - Sell/Buy boxes 65.5 × 34 px with a 6 px radius: price 13 px medium, caption 11 px. Spread 11 px.
+  - Sell/Buy boxes 34 px tall with a 6 px radius, as wide as the wider price needs with 10 px either side and at least 65.5 px (XRP's), both the same width: price 13 px medium, caption 11 px. Spread 11 px, its own width with 7.69 px either side (51 px for XRP's 0.0001).
 - **Toolbar** (measured at 2×, built in M2; every label lands where the reference's does):
   - Symbol pill: 128 × 28, fully rounded, `#3D3D3D`, 4 px from the window's edge. The ticker is 14 px semibold, 12 px in.
   - Inside the pill, a 28 × 24 capsule in `#0F0F0F` (inset 2 px) holds a two-candle icon.
@@ -908,6 +909,7 @@ Reference viewport is 1634 px wide.
   - End to end through the market service (`cryptocap.test.ts`, a fake CoinGecko and fake exchanges): TOTAL2's and XRP.D's descriptions, symbols it doesn't have, no key; TOTAL from exchange price × supply with CoinGecko's own market cap for a coin without a pair; TOTAL2, TOTAL3, OTHERS, TOTALES, STABLE.C and a coin's; dominance and ratios; a pair priced like another coin set aside; estimates while the history loads; waiting for the pair lists, and not keeping what was built without them; the history resuming after a restart; weekly bars from daily ones; each coin's history once, never an excluded one's; the live bar moving with a price; Sell and Buy; search's list; every call counted.
   - Core and chart: the `index` kind and `format` in messages; search (TOTAL by name, a coin's pairs first, BTC.D typed in full first, the Crypto tab, apart from a fund named BTC); the number format (2.65T, 213.6B, 142M, 999.999M as 1B, signs).
   - In the browser (`tests/e2e/cryptocap.spec.ts`): TOTAL2's legend and price scale, Sell and Buy whole in boxes that grow to fit, BTC.D's decimals and logo, watchlist rows as in your screenshots, search with the badge.
+- **Sell and Buy** (`tests/e2e/chart.spec.ts`, `reference.spec.ts`): XRP's boxes 65.5 px and the spread 51 px, at the reference's place with its prices shown; a long price (0.00001590) widening both boxes alike, the price inside, the three side by side.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
@@ -1019,7 +1021,7 @@ Reference viewport is 1634 px wide.
 48. **OTHERS reads about 6% below TradingView's** (202B against 213.6B on 24 October): TradingView's leaves out about 11.5B less than its documented top 10. A screenshot of OTHERS together with the dominance page at another moment, or TradingView's own word, would settle it.
 49. Dominance's and ratios' decimals (ours: four significant digits, from your screenshots); where CRYPTOCAP ranks in search (ours: a coin's pairs first); the "index crypto" type words; CRYPTOCAP's icon (ours is drawn after TradingView's, not copied).
 50. A few coins' market caps differ from TradingView's because CoinGecko's supply does (HYPE's about 13% lower); TradingView doesn't say where its supply comes from.
-51. Found while building, older than M9a: a long crypto price (XRPBTC's 0.00001590) overflows the legend's Sell and Buy boxes, as market caps did; TradingView's boxes grow to fit (your screenshot 20). Market caps' boxes now grow; the others' need a YES, since the XRP legend is pixel-checked.
+51. ~~A long crypto price (XRPBTC's 0.00001590) overflowed the legend's Sell and Buy boxes.~~ Fixed with your YES on 25 October: every symbol's boxes fit their price (§3). How TradingView sizes them below 65.5 px, for a short price, isn't known; ours keep 65.5.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 

@@ -183,9 +183,17 @@
   display: none;
 }
 
+/*
+ * Sell, the spread and Buy. The two boxes are always as wide as each other, each as wide as
+ * the wider price needs: TradingView's are 97 px for XRPBTC's 0.00001590 and 0.00001591 (the
+ * user's screenshot 20), where our digits differ in width. Its columns of equal fractions in
+ * a row sized to its content do that.
+ */
 .tradeRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
+  width: max-content;
   margin-top: 7px;
 }
 
@@ -193,13 +201,19 @@
   visibility: hidden;
 }
 
+/*
+ * A box fits its price with 10 px either side (9.6–12.5 px measured in the user's screenshots
+ * 20–22), and is never narrower than the reference's 65.5 px (docs/reference/01-chart-layout.png),
+ * which XRP's prices keep.
+ */
 .trade {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 65.5px;
+  min-width: 65.5px;
   height: 34px;
+  padding: 0 10px;
   border: 1px solid;
   border-radius: 6px;
 }
@@ -226,27 +240,12 @@
   letter-spacing: 0.4px;
 }
 
+/* The spread takes its own width and 7.69 px either side: 51 px for XRP's 0.0001, as measured. */
 .spread {
-  width: 51px;
+  padding: 0 7.69px;
   color: var(--color-text);
   font-size: 11px;
   text-align: center;
-}
-
-/*
- * A market cap's Sell and Buy are long ("1,041,724,313,303"): the boxes grow to fit it with
- * 12 px either side, and the spread between them takes only its own width, as TradingView's do
- * (measured in the user's screenshots 20–22).
- */
-.legend[data-format="volume"] .trade {
-  width: auto;
-  min-width: 65.5px;
-  padding: 0 12px;
-}
-
-.legend[data-format="volume"] .spread {
-  width: auto;
-  padding: 0 9px;
 }
 
 /* The pill's data half: TradingView's "Data is delayed" D, in the delayed sign's orange. */
