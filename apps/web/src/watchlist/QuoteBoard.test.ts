@@ -99,4 +99,14 @@ describe('QuoteBoard', () => {
     board.attach('X:GONE', later.view);
     expect(later.missing()).toBe(true);
   });
+
+  it("quotes a formula of exchanges' symbols, not one of bare tickers", () => {
+    const quotes = new FakeQuotes();
+    const board = new QuoteBoard(quotes);
+    board.setSymbols(['CRYPTOCAP:TOTAL-CRYPTOCAP:TOTAL2', 'BINANCE:XRPUSDT*2', 'TOTAL-TOTAL2']);
+    expect(quotes.subscribed).toEqual(['CRYPTOCAP:TOTAL-CRYPTOCAP:TOTAL2', 'BINANCE:XRPUSDT*2']);
+    const bare = view();
+    board.attach('TOTAL-TOTAL2', bare.view);
+    expect(bare.missing()).toBe(true);
+  });
 });

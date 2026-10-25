@@ -1,3 +1,4 @@
+import { MAX_FORMULA_LENGTH } from './formula.ts';
 import { parseSymbolId, type SymbolId } from './market.ts';
 
 /** One collapsible section of the watchlist, e.g. CRYPTO. */
@@ -19,8 +20,8 @@ export const MAX_WATCHLIST_SECTIONS = 200;
 /** TradingView's own limit for one list. */
 export const MAX_WATCHLIST_SYMBOLS = 1_000;
 export const MAX_SECTION_TITLE = 64;
-/** The longest symbol a list keeps (TradingView's spreads can be long). */
-export const MAX_WATCHLIST_SYMBOL = 128;
+/** The longest symbol a list keeps: a formula's (TradingView's spreads can be long). */
+export const MAX_WATCHLIST_SYMBOL = MAX_FORMULA_LENGTH;
 const MAX_ID = 32;
 
 /**

@@ -328,6 +328,14 @@
   min-width: 87px;
 }
 
+/* A formula's tickers can run long: past half the row, they give way to the formula itself. */
+.row[data-formula] .ticker {
+  flex-shrink: 1;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .description {
   flex: 1;
   min-width: 0;

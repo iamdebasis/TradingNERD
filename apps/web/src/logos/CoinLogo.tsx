@@ -20,8 +20,11 @@ export function CoinLogo({
   className?: string | undefined;
 }) {
   const { version } = useLogos();
+  // A formula has no base, so no logo: its letter shows.
   const src =
-    base !== null && base !== CRYPTOCAP && version !== null ? logoUrl(symbol, base, version) : null;
+    base !== null && base !== '' && base !== CRYPTOCAP && version !== null
+      ? logoUrl(symbol, base, version)
+      : null;
   const [loaded, setLoaded] = useState<string | null>(null);
 
   useEffect(() => {

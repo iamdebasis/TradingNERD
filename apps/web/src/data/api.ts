@@ -31,11 +31,14 @@ import {
 /** A failed gateway call, with the gateway's error code or `network` if it couldn't be reached. */
 export class ApiError extends Error {
   readonly code: ErrorCode | 'network';
+  /** What the gateway suggests using instead (a formula with a symbol it has). */
+  readonly suggestion: string | undefined;
 
-  constructor(code: ErrorCode | 'network', message: string) {
+  constructor(code: ErrorCode | 'network', message: string, suggestion?: string) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
+    this.suggestion = suggestion;
   }
 }
 
@@ -71,6 +74,7 @@ async function getJson(
     throw new ApiError(
       failure?.error ?? 'internal_error',
       failure?.message ?? `Gateway error (HTTP ${response.status})`,
+      failure?.suggestion,
     );
   }
   return body;

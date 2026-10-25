@@ -1,4 +1,10 @@
-import { formatResolution, parseResolution, parseSymbolId } from '@tradingnerd/core';
+import {
+  formatResolution,
+  isComplete,
+  parseFormula,
+  parseResolution,
+  parseSymbolId,
+} from '@tradingnerd/core';
 
 export const DEFAULT_SYMBOL = 'BINANCE:XRPUSDT';
 export const DEFAULT_RESOLUTION = '1D';
@@ -9,9 +15,21 @@ export interface ChartRoute {
 }
 
 /**
+ * A symbol id, or a formula whose symbols all have their exchange, written as the gateway keeps
+ * it; null for anything else.
+ */
+function symbolOf(text: string): string | null {
+  const formula = parseFormula(text);
+  if (formula) return isComplete(formula) ? formula.text : null;
+  const parsed = parseSymbolId(text);
+  return parsed ? `${parsed.exchange}:${parsed.ticker}` : null;
+}
+
+/**
  * Symbol and interval from the page URL, in TradingView's own format:
- * `?symbol=BINANCE:XRPUSDT&interval=1D` (interval accepts D, 60, 1W, …). Whatever the URL
- * lacks (or gets wrong) comes from the last symbol and interval used, then the defaults.
+ * `?symbol=BINANCE:XRPUSDT&interval=1D` (interval accepts D, 60, 1W, …); a formula too
+ * (`?symbol=CRYPTOCAP:BTC.D%2BCRYPTOCAP:ETH.D`). Whatever the URL lacks (or gets wrong) comes
+ * from the last symbol and interval used, then the defaults.
  */
 export function chartRoute(
   search: string,
@@ -20,13 +38,13 @@ export function chartRoute(
 ): ChartRoute {
   const params = new URLSearchParams(search);
   const symbol =
-    parseSymbolId(params.get('symbol') ?? '') ??
-    (typeof lastSymbol === 'string' ? parseSymbolId(lastSymbol) : null);
+    symbolOf(params.get('symbol') ?? '') ??
+    (typeof lastSymbol === 'string' ? symbolOf(lastSymbol) : null);
   const resolution =
     parseResolution(params.get('interval') ?? '') ??
     (typeof lastInterval === 'string' ? parseResolution(lastInterval) : null);
   return {
-    symbol: symbol ? `${symbol.exchange}:${symbol.ticker}` : DEFAULT_SYMBOL,
+    symbol: symbol ?? DEFAULT_SYMBOL,
     resolution: resolution ? formatResolution(resolution) : DEFAULT_RESOLUTION,
   };
 }

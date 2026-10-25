@@ -1,11 +1,18 @@
-import type { FlagColor, SymbolId } from '@tradingnerd/core';
+import { type FlagColor, type SymbolId, symbolName } from '@tradingnerd/core';
 import { type DragEvent, type MouseEvent, type Ref, useEffect, useRef, useState } from 'react';
 import { MARKET_STATUS_NAMES } from '../chart/marketStatusNames';
 import { useMarketStatus } from '../chart/useMarketStatus';
 import { CoinLogo } from '../logos/CoinLogo';
 import { FLAG_NAMES, flagStyle } from './flags';
 import { FlagIcon, RemoveIcon } from './icons';
-import { directionOf, flashSplit, formatChange, formatChangePercent, formatLast } from './numbers';
+import {
+  directionOf,
+  flashSplit,
+  formatChange,
+  formatChangePercent,
+  formatLast,
+  formatSpreadChange,
+} from './numbers';
 import type { QuoteBoard } from './QuoteBoard';
 import type { SymbolDirectory, SymbolLookup } from './SymbolDirectory';
 import styles from './Watchlist.module.css';
@@ -50,7 +57,8 @@ export interface WatchlistRowProps {
  */
 export function WatchlistRow(props: WatchlistRowProps) {
   const { symbol, directory, board } = props;
-  const ticker = symbol.slice(symbol.indexOf(':') + 1);
+  // A formula shows without its exchanges: TOTAL2/XRPUSD.
+  const ticker = symbolName(symbol);
   const [lookup, setLookup] = useState<SymbolLookup | null>(null);
   const [missing, setMissing] = useState(false);
   const same = useRef<HTMLSpanElement>(null);
@@ -76,6 +84,7 @@ export function WatchlistRow(props: WatchlistRowProps) {
 
   const precision = lookup?.state === 'ready' ? lookup.info.pricePrecision : null;
   const format = lookup?.state === 'ready' ? lookup.info.format : undefined;
+  const spread = lookup?.state === 'ready' && lookup.info.type === 'spread';
 
   useEffect(() => {
     if (precision === null) return;
@@ -104,17 +113,27 @@ export function WatchlistRow(props: WatchlistRowProps) {
         }
         const delta = last - prevClose;
         const direction = directionOf(delta, precision);
-        setText(change.current, formatChange(delta, precision, format));
+        if (spread) {
+          // A formula's change is in full digits, as TradingView's: −2,215,826,337, 0.1. Where
+          // our column is too narrow for them, in thousands to trillions (−2.22B), never cut.
+          setText(change.current, formatSpreadChange(delta, precision));
+          if (change.current && change.current.scrollWidth > change.current.clientWidth) {
+            setText(change.current, formatChange(delta, precision, 'volume'));
+          }
+        } else {
+          setText(change.current, formatChange(delta, precision, format));
+        }
         setText(percent.current, formatChangePercent((delta / prevClose) * 100));
         if (change.current) change.current.dataset.direction = direction;
         if (percent.current) percent.current.dataset.direction = direction;
       },
       unavailable: () => setMissing(true),
     });
-  }, [board, symbol, precision, format]);
+  }, [board, symbol, precision, format, spread]);
 
   const unavailable = missing || lookup?.state === 'unavailable';
-  const letter = (lookup?.state === 'ready' ? lookup.info.base : ticker).charAt(0);
+  // A formula's circle has the first letter of its name (TradingView's gray "T", "B").
+  const letter = ((lookup?.state === 'ready' && lookup.info.base) || ticker).charAt(0);
   const info = lookup?.state === 'ready' && !unavailable ? lookup.info : null;
   const status = useMarketStatus(info?.schedule);
   const delayMinutes = info ? Math.round(info.delayMs / 60_000) : 0;
@@ -131,6 +150,7 @@ export function WatchlistRow(props: WatchlistRowProps) {
         data-symbol={symbol}
         data-selected={props.inSelection || undefined}
         data-unavailable={unavailable || undefined}
+        title={lookup?.state === 'unavailable' ? lookup.message : undefined}
         data-drop={props.dropEdge ?? undefined}
         draggable
         onClick={(event) =>

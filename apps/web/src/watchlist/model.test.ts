@@ -17,6 +17,7 @@ import {
   removeSymbol,
   removeSymbols,
   renameSection,
+  replaceSymbol,
   toggleSection,
   visibleItems,
   visibleSymbols,
@@ -376,6 +377,18 @@ describe('watchlist edits', () => {
   it('removes a symbol, and leaves the list alone for one it lacks', () => {
     expect(allSymbols(removeSymbol(LIST, 'X:B'))).toEqual(['X:A', 'X:C', 'X:D', 'X:E']);
     expect(removeSymbol(LIST, 'X:Z')).toBe(LIST);
+  });
+
+  it("swaps a formula for its fix in its place, as a row menu's Use CRYPTOCAP:… does", () => {
+    const list = replaceSymbol(LIST, 'X:D', 'X:Y');
+    expect(list.sections.map((s) => s.symbols)).toEqual([
+      ['X:A', 'X:B', 'X:C'],
+      ['X:Y', 'X:E'],
+    ]);
+    // Listed already, the fix stays where it is and the broken one goes.
+    expect(allSymbols(replaceSymbol(LIST, 'X:D', 'X:A'))).toEqual(['X:A', 'X:B', 'X:C', 'X:E']);
+    expect(replaceSymbol(LIST, 'X:Z', 'X:Y')).toBe(LIST);
+    expect(replaceSymbol(LIST, 'X:D', 'X:D')).toBe(LIST);
   });
 
   it("adds a symbol once, at the end of the selected row's section, else the last", () => {

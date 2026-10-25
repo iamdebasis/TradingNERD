@@ -20,6 +20,22 @@ describe('chartRoute', () => {
     });
   });
 
+  it('takes a formula, as written in the URL or saved last', () => {
+    expect(chartRoute('?symbol=CRYPTOCAP%3ABTC.D%2Bcryptocap%3Aeth.d').symbol).toBe(
+      'CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D',
+    );
+    expect(chartRoute('?symbol=BINANCE:BTCUSDT/2').symbol).toBe('BINANCE:BTCUSDT/2');
+    expect(chartRoute('?symbol=NYSE:JPM/PD').symbol).toBe('NYSE:JPM/PD');
+    expect(chartRoute('', null, 'CRYPTOCAP:TOTAL2/BITSTAMP:XRPUSD').symbol).toBe(
+      'CRYPTOCAP:TOTAL2/BITSTAMP:XRPUSD',
+    );
+    // A symbol without its exchange can't be charted: the last symbol, then the default.
+    expect(chartRoute('?symbol=BTC.D%2BETH.D', null, 'BINANCE:ETHUSDT').symbol).toBe(
+      'BINANCE:ETHUSDT',
+    );
+    expect(chartRoute('?symbol=BTC.D%2BETH.D').symbol).toBe(DEFAULT_SYMBOL);
+  });
+
   it('falls back per parameter when one is invalid', () => {
     expect(chartRoute('?symbol=nonsense&interval=240')).toEqual({
       symbol: DEFAULT_SYMBOL,

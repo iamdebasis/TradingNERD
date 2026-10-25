@@ -35,6 +35,40 @@ describe('SymbolDirectory', () => {
     expect(calls).toBe(1);
   });
 
+  it('asks the gateway about a formula once each of its symbols has its exchange', async () => {
+    const asked: string[] = [];
+    const directory = new SymbolDirectory({
+      resolveSymbol: async (symbol) => {
+        asked.push(symbol);
+        return { ...INFO, id: symbol };
+      },
+    });
+    expect((await directory.lookup('CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D')).state).toBe('ready');
+    expect(await directory.lookup('BTC.D+ETH.D')).toEqual({
+      state: 'unavailable',
+      message: 'Each symbol of BTC.D+ETH.D needs its exchange, like BINANCE:XRPUSDT',
+    });
+    expect(asked).toEqual(['CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D']);
+  });
+
+  it("keeps the gateway's suggestion for a formula it can't show, known at once after", async () => {
+    const fixed = 'CRYPTOCAP:TOTAL3-CRYPTOCAP:USDT-CRYPTOCAP:USDC';
+    const directory = new SymbolDirectory({
+      resolveSymbol: async () => {
+        throw new ApiError('unknown_symbol', "EURONEXT:USDC isn't available here", fixed);
+      },
+    });
+    const symbol = 'CRYPTOCAP:TOTAL3-CRYPTOCAP:USDT-EURONEXT:USDC';
+    expect(directory.known(symbol)).toBeUndefined();
+    const lookup = await directory.lookup(symbol);
+    expect(lookup).toEqual({
+      state: 'unavailable',
+      message: "EURONEXT:USDC isn't available here",
+      suggestion: fixed,
+    });
+    expect(directory.known(symbol)).toEqual(lookup);
+  });
+
   it('tries again after a lookup that merely failed', async () => {
     let calls = 0;
     const directory = new SymbolDirectory({

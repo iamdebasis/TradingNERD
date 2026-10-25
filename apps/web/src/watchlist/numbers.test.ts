@@ -5,6 +5,7 @@ import {
   formatChange,
   formatChangePercent,
   formatLast,
+  formatSpreadChange,
   groupThousands,
 } from './numbers';
 
@@ -18,6 +19,16 @@ describe('watchlist numbers', () => {
     // A dominance keeps its decimals: 60.73, 0.13.
     expect(formatLast(60.734, 2, 'price')).toBe('60.73');
     expect(formatChange(0.1309, 2, 'price')).toBe('0.13');
+  });
+
+  it("writes a formula's change in full, without trailing zeros (screenshot 22)", () => {
+    expect(formatSpreadChange(-2_215_826_337.4, 0)).toBe('−2,215,826,337');
+    expect(formatSpreadChange(-0.2, 2)).toBe('−0.2');
+    expect(formatSpreadChange(-18, 2)).toBe('−18');
+    expect(formatSpreadChange(0.1, 2)).toBe('0.1');
+    expect(formatSpreadChange(0, 2)).toBe('0');
+    // Smaller than its decimals show: its first digit, not a flat 0.
+    expect(formatSpreadChange(-0.000123, 2)).toBe('−0.0001');
   });
 
   it('writes changes with a real minus and no plus, as TradingView does', () => {

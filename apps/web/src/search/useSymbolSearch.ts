@@ -26,9 +26,12 @@ interface Results {
 const describe = (error: unknown) =>
   error instanceof ApiError ? error.message : 'Symbol search failed';
 
-/** A match's identity: its ticker within its market, as the gateway groups them. */
+/**
+ * A match's identity: its ticker within its market, as the gateway groups them (a coin's
+ * CRYPTOCAP market cap apart from a fund of the same ticker: BTC and AMEX's BTC).
+ */
 export const matchKey = (match: SymbolMatch) =>
-  `${match.type === 'spot' ? 'crypto' : 'us'}:${match.ticker}`;
+  `${match.type === 'spot' ? 'crypto' : match.type === 'index' ? 'index' : 'us'}:${match.ticker}`;
 
 /**
  * Search results for what's typed, from the gateway. Each keystroke cancels the request before

@@ -109,6 +109,24 @@ export function insertSymbol(list: Watchlist, symbol: SymbolId, after: SymbolId)
 }
 
 /**
+ * `symbol` swapped for `next` in its place, as a formula's suggested fix is taken; if the list
+ * holds `next` already, `symbol` just goes.
+ */
+export function replaceSymbol(list: Watchlist, symbol: SymbolId, next: SymbolId): Watchlist {
+  const symbols = allSymbols(list);
+  if (symbol === next || !symbols.includes(symbol)) return list;
+  if (symbols.includes(next)) return removeSymbol(list, symbol);
+  return {
+    ...list,
+    sections: list.sections.map((section) =>
+      section.symbols.includes(symbol)
+        ? { ...section, symbols: section.symbols.map((item) => (item === symbol ? next : item)) }
+        : section,
+    ),
+  };
+}
+
+/**
  * A new section above `symbol`, as TradingView's "Add section" makes one: it takes `symbol` and
  * the rows after it in its section, and is named "Section 1", "Section 2"… Returns its id too.
  */

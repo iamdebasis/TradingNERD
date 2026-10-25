@@ -66,6 +66,16 @@ export function sharedFlag(
   return first && symbols.every((symbol) => flagOf(state, symbol) === first) ? first : null;
 }
 
+/**
+ * `from`'s flag on `to` as well, as a formula's suggested fix takes its row's place; `to`'s own
+ * flag stays. `from` keeps its own, as a symbol leaving a list does.
+ */
+export function copyFlag(state: FlagState, from: SymbolId, to: SymbolId): FlagState {
+  const color = state.flags[from];
+  if (!color || state.flags[to]) return state;
+  return { ...state, flags: { ...state.flags, [to]: color } };
+}
+
 export function unflagAll(state: FlagState): FlagState {
   return Object.keys(state.flags).length === 0 ? state : { ...state, flags: {} };
 }

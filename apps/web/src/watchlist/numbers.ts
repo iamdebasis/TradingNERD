@@ -22,6 +22,22 @@ export function formatChange(value: number, precision: number, format?: PriceFor
 }
 
 /**
+ * A formula's change as TradingView's watchlist shows it (the user's screenshot 22): every
+ * digit, grouped, trailing zeros dropped ("−2,215,826,337", "0.1", "−18"); a change too small for
+ * the decimals shows its first digit ("−0.2" beside a Last of "20"). Provisional.
+ */
+export function formatSpreadChange(value: number, precision: number): string {
+  const size = Math.abs(value);
+  let text = size.toFixed(precision);
+  if (Number(text) === 0 && size > 0) {
+    text = size.toFixed(Math.min(12, Math.ceil(-Math.log10(size))));
+  }
+  if (text.includes('.')) text = text.replace(/\.?0+$/, '');
+  const grouped = groupThousands(text);
+  return value < 0 && Number(text) !== 0 ? `${MINUS}${grouped}` : grouped;
+}
+
+/**
  * The last price as the watchlist shows it: the symbol's decimals, thousands grouped; a market
  * cap in thousands to trillions ("2.65T").
  */

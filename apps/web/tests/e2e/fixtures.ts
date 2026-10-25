@@ -3,17 +3,23 @@ import {
   type Bar,
   barOpenTime,
   type CatalogEntry,
+  CRYPTOCAP,
   DEFAULT_FLAG_STATE,
   DEFAULT_WATCHLIST,
   type ExchangeSummary,
+  evaluateFormula,
   type FlagState,
+  isComplete,
   type LogoStatus,
   MarketSchedule,
   PROTOCOL_VERSION,
   parseFlagState,
+  parseFormula,
   parseResolution,
+  parseSymbolId,
   parseWatchlist,
   parseWatchlistName,
+  replaceSymbols,
   SEARCH_PAGE_SIZE,
   type SearchCategory,
   type SessionHours,
@@ -174,6 +180,8 @@ export const MOCK_CRYPTOCAP: CatalogEntry[] = [
   capEntry('TOTAL3', 'CRYPTOCAP', 'Crypto Total Market Cap Excluding BTC and ETH, $'),
   capEntry('OTHERS', 'CRYPTOCAP', 'Crypto Total Market Cap Excluding Top 10, $'),
   capEntry('BTC.D', 'BTC', 'Market Cap BTC Dominance, %'),
+  capEntry('USDT', 'USDT', 'Market Cap USDT, $'),
+  capEntry('USDC', 'USDC', 'Market Cap USDC, $'),
 ];
 
 /** SymbolInfo for a CRYPTOCAP symbol the mock knows. */
@@ -220,11 +228,75 @@ const scaled = (bar: Bar, factor: number): Bar =>
         close: bar.close * factor,
       };
 
+/**
+ * A formula of the mock's symbols, described as the gateway's FormulaExchange describes one: its
+ * tickers for a name, its first symbol's exchange and decimals. Null if it isn't a formula or
+ * the mock lacks one of its symbols.
+ */
+export function formulaInfoFor(symbol: string): SymbolInfo | null {
+  const formula = parseFormula(symbol);
+  if (!formula || !isComplete(formula)) return null;
+  const parts = formula.symbols.map((part) => infoFor(part));
+  const first = parts[0];
+  if (!first || parts.some((part) => part === null)) return null;
+  return {
+    ...first,
+    id: formula.text,
+    ticker: formula.name,
+    base: '',
+    description: formula.name,
+    type: 'spread',
+    hasBook: true,
+  };
+}
+
+/**
+ * Why the mock can't show a formula, as the gateway words it: the symbol it lacks and, next to
+ * market caps, CRYPTOCAP's coin in its place. Null for a formula it can show, or none.
+ */
+export function formulaFailure(symbol: string): { message: string; suggestion?: string } | null {
+  const formula = parseFormula(symbol);
+  const missing = formula?.symbols.find((part) => infoFor(part) === null);
+  if (!formula || !isComplete(formula) || !missing) return null;
+  const ticker = parseSymbolId(missing)?.ticker ?? missing;
+  const instead = `${CRYPTOCAP}:${ticker}`;
+  const caps = formula.symbols.some((part) => part !== missing && part.startsWith(`${CRYPTOCAP}:`));
+  if (!caps || missing.startsWith(`${CRYPTOCAP}:`) || !capInfoFor(instead)) {
+    return { message: `${missing} isn't available here` };
+  }
+  return {
+    message: `${missing} isn't available here; for ${ticker}'s market cap, use ${instead}`,
+    suggestion: replaceSymbols(formula, (part) => (part === missing ? instead : part)).text,
+  };
+}
+
+/**
+ * A formula's bars from its symbols': in the mock they all move as the one series, each scaled
+ * as its own is (capScale), so the formula's bar is worked out bar by bar. Null for no formula.
+ */
+export function formulaBars(symbol: string, bars: readonly Bar[]): Bar[] | null {
+  const formula = parseFormula(symbol);
+  if (!formula) return null;
+  return bars.map((bar) => {
+    const at = (field: 'open' | 'high' | 'low' | 'close') =>
+      evaluateFormula(formula.root, (part) => bar[field] * capScale(part));
+    const values = [at('open'), at('high'), at('low'), at('close')];
+    return {
+      ...bar,
+      open: values[0] as number,
+      high: Math.max(...values),
+      low: Math.min(...values),
+      close: values[3] as number,
+    };
+  });
+}
+
 /** SymbolInfo for any pair in the mock catalog, or any BINANCE:…USDT but the unlisted. */
 export function infoFor(symbol: string): SymbolInfo | null {
   if (symbol === XRP_INFO.id) return XRP_INFO;
   const cap = capInfoFor(symbol);
   if (cap) return cap;
+  if (parseFormula(symbol)) return formulaInfoFor(symbol);
   const listed = MOCK_CATALOG.find((entry) => `${entry.exchange}:${entry.ticker}` === symbol);
   const match = /^BINANCE:([A-Z0-9]+)USDT$/.exec(symbol);
   const base = listed?.base ?? match?.[1];
@@ -253,6 +325,14 @@ export function infoFor(symbol: string): SymbolInfo | null {
 export function quoteFor(symbol: string): { last: number; prevClose: number } {
   const cap = CAP_QUOTES[symbol];
   if (cap) return cap;
+  // A formula's, from its symbols' quotes.
+  const formula = parseFormula(symbol);
+  if (formula) {
+    return {
+      last: evaluateFormula(formula.root, (part) => quoteFor(part).last),
+      prevClose: evaluateFormula(formula.root, (part) => quoteFor(part).prevClose),
+    };
+  }
   if (symbol === 'BINANCE:LINKUSDT') return { last: 11.947, prevClose: 12.35 };
   if (symbol === 'BINANCE:VETUSDT') return { last: 0.006731, prevClose: 0.006979 };
   if (symbol === XRP_INFO.id) return { last: 1.2955, prevClose: 1.3115 };
@@ -622,6 +702,10 @@ class MockGateway implements MockMarket {
         });
       }
       const info = infoFor(symbol) ?? stockInfoFor(symbol);
+      const failure = formulaFailure(symbol);
+      if (failure) {
+        return route.fulfill({ status: 404, json: { error: 'unknown_symbol', ...failure } });
+      }
       return info
         ? route.fulfill({ json: info })
         : route.fulfill({
@@ -761,7 +845,8 @@ class MockGateway implements MockMarket {
       const factor = capScale(symbol);
       const bars = stockInfoFor(symbol)
         ? this.stockBarsFor(resolution, session)
-        : this.barsFor(resolution).map((bar) => scaled(bar, factor));
+        : (formulaBars(symbol, this.barsFor(resolution)) ??
+          this.barsFor(resolution).map((bar) => scaled(bar, factor)));
       const eligible = bars.filter((bar) => to === null || bar.time < Number(to));
       return route.fulfill({
         json: { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack },
@@ -978,7 +1063,8 @@ class MockGateway implements MockMarket {
           isStock ? this.stockBarsFor(resolution, message.session) : this.barsFor(resolution)
         ).at(-1);
         if (message.channel === 'bars' && last) {
-          const bar = scaled(last, capScale(message.symbol));
+          const bar =
+            formulaBars(message.symbol, [last])?.[0] ?? scaled(last, capScale(message.symbol));
           socket.send(JSON.stringify({ type: 'bar', id: message.id, bar, historical: false }));
         }
       } else if (message.type === 'unsubscribe') {

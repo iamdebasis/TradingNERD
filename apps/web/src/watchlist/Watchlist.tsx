@@ -1,8 +1,10 @@
 import {
   fileSymbolCount,
   formatWatchlistFile,
+  parseFormula,
   parseWatchlistFile,
   type SymbolId,
+  symbolName,
   uniqueListName,
   type Watchlist as WatchlistDoc,
   type WatchlistSection,
@@ -28,6 +30,7 @@ import { ChevronDownIcon } from '../toolbar/icons';
 import { FlagDots } from './FlagDots';
 import { FlagPalette } from './FlagPalette';
 import {
+  copyFlag,
   flagOf,
   pickFlag,
   pickFlags,
@@ -65,6 +68,7 @@ import {
   removeSection,
   removeSymbols,
   renameSection,
+  replaceSymbol,
   sameItem,
   toggleSection,
   visibleSymbols,
@@ -134,9 +138,7 @@ const DRAG_OVERLAY_ROW_PX = 29;
 function setDragOverlay(event: DragEvent, symbols: readonly SymbolId[]) {
   const overlay = document.createElement('div');
   overlay.className = styles.dragOverlay ?? '';
-  const lines = symbols
-    .slice(0, DRAG_OVERLAY_ROWS)
-    .map((symbol) => symbol.slice(symbol.indexOf(':') + 1));
+  const lines = symbols.slice(0, DRAG_OVERLAY_ROWS).map((symbol) => symbolName(symbol));
   const more = symbols.length - lines.length;
   const rows = lines.map((text) => [text, styles.dragOverlayRow]);
   if (more > 0) rows.push([`+${more} more`, `${styles.dragOverlayRow} ${styles.dragOverlayMore}`]);
@@ -562,6 +564,33 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
     setMenu({ x: event.clientX, y: event.clientY, symbol: target });
   };
 
+  /** A formula's row swapped for its fixed formula, flag and all, and shown if it was. */
+  const applyFix = (target: SymbolId, fixed: SymbolId) => {
+    edit((current) => replaceSymbol(current, target, fixed));
+    editFlags((current) => copyFlag(current, target, fixed));
+    if (target === symbol) choose(fixed, false);
+    else selectOnly(fixed);
+  };
+
+  /**
+   * Ours, not TradingView's: a formula holding a symbol we don't have, for which the gateway
+   * suggests another (CRYPTOCAP:USDC for EURONEXT:USDC next to market caps), offers it first.
+   */
+  const fixItems = (target: SymbolId): PopupMenuEntry[] => {
+    const known = directory.known(target);
+    const fixed = known?.state === 'unavailable' ? known.suggestion : undefined;
+    if (!fixed) return [];
+    const had = new Set(parseFormula(target)?.symbols);
+    const instead = parseFormula(fixed)?.symbols.filter((item) => !had.has(item)) ?? [];
+    return [
+      {
+        label: `Use ${instead.length > 0 ? instead.join(', ') : symbolName(fixed)}`,
+        onSelect: () => applyFix(target, fixed),
+      },
+      'separator',
+    ];
+  };
+
   /**
    * TradingView's row menu (docs/reference/07-watchlist-row-menu.png), without its items for
    * other lists, compare and notes. For several selected rows, its flag and colors are for all
@@ -569,9 +598,9 @@ export function Watchlist({ symbol, onChoose, quotes, moreItems = [], moreNote }
    */
   const rowMenu = (target: SymbolId): PopupMenuEntry[] => {
     const targets = selection.size > 1 && selection.has(target) ? [...selection] : [target];
-    const name =
-      targets.length > 1 ? `${targets.length} symbols` : target.slice(target.indexOf(':') + 1);
+    const name = targets.length > 1 ? `${targets.length} symbols` : symbolName(target);
     return [
+      ...(targets.length === 1 ? fixItems(target) : []),
       {
         label: `Flag/Unflag ${name}`,
         shortcut: FLAG_SHORTCUT,

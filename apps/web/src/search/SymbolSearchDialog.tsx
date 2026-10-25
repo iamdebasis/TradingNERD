@@ -1,7 +1,10 @@
 import {
   descriptionMatches,
+  MAX_FORMULA_LENGTH,
   MAX_QUERY_LENGTH,
   type MatchRange,
+  parseFormula,
+  parseSymbolId,
   type SymbolId,
   type SymbolKind,
   type SymbolListing,
@@ -23,6 +26,7 @@ import { type SearchApi, searchApi } from '../data/api';
 import { CoinLogo } from '../logos/CoinLogo';
 import { ExchangeLogo } from '../logos/ExchangeLogo';
 import { ChevronDownIcon, PlusIcon } from '../toolbar/icons';
+import { fillOperand, lastOperand, looksLikeFormula, readFormula } from './formulaTyping';
 import {
   CheckIcon,
   ClearIcon,
@@ -41,6 +45,7 @@ import {
   type SearchTab,
   saveSearchTab,
 } from './searchPrefs';
+import { type TypedFormula, useTypedFormula } from './typedFormula';
 import { matchKey, useExchanges, useSymbolSearch } from './useSymbolSearch';
 
 /**
@@ -58,6 +63,7 @@ const KIND_LABELS: Readonly<Record<SymbolKind, string>> = {
   unit: 'unit',
   note: 'note',
   index: 'index crypto',
+  spread: 'spread',
 };
 
 /** `add`: TradingView's "Add symbol" for the watchlist; `search`: the chart's symbol search. */
@@ -103,7 +109,9 @@ const EMPTY_SET: ReadonlySet<SymbolId> = new Set();
  * TradingView's "Add symbol" dialog (docs/reference/04-add-symbol.png), also the chart's symbol
  * search: every listed pair on the five exchanges, ranked by the gateway, one row per pair with
  * the exchanges that list it. Typing stays in the search field: ↑/↓ move, Enter adds (or shows
- * the symbol), Shift+Enter and Shift+click add and close, Escape closes.
+ * the symbol), Shift+Enter and Shift+click add and close, Escape closes. A formula of symbols
+ * (TradingView's spread, docs/SPEC.md §5.11) gets its own row on top, which Enter takes; the
+ * results below are for the symbol being typed, and a pick fills it in.
  */
 export function SymbolSearchDialog({
   mode,
@@ -130,7 +138,22 @@ export function SymbolSearchDialog({
   const list = useRef<HTMLDivElement>(null);
   const rowElements = useRef(new Map<number, HTMLDivElement>());
   const exchanges = useExchanges(api);
-  const search = useSymbolSearch(api, text.trim(), source, tab === 'all' ? null : tab);
+  /** In a formula, the symbol being typed: what's searched for, in place of the whole text. */
+  const operand = useMemo(() => (looksLikeFormula(text) ? lastOperand(text) : null), [text]);
+  const query = (operand ? operand.text : text.trim()).slice(0, MAX_QUERY_LENGTH);
+  const search = useSymbolSearch(api, query, source, tab === 'all' ? null : tab);
+  const parsed = useMemo(() => readFormula(text), [text]);
+  // Plainly a formula, or text that reads as one when no symbol matches it ("NVDA/AMD").
+  const unmatched =
+    search.query === query &&
+    !search.loading &&
+    search.error === null &&
+    search.matches.length === 0 &&
+    query !== '';
+  const typed = useTypedFormula(api, operand || unmatched ? parsed : null);
+  const formulaRow = typed.formula;
+  /** The lines above the results: the formula's. */
+  const top = formulaRow ? 1 : 0;
   /** The tab's exchanges, for the source filter: crypto's, or the US stock exchanges. */
   const tabExchanges = exchanges.filter(
     (exchange) =>
@@ -150,13 +173,30 @@ export function SymbolSearchDialog({
       const [first, ...others] = match.listings;
       if (!first) continue;
       visible.push({ key: matchKey(match), match, listing: first, child: false });
-      if (expanded.has(match.ticker)) {
+      if (expanded.has(matchKey(match))) {
         for (const listing of others)
           visible.push({ key: listing.id, match, listing, child: true });
       }
     }
     return visible;
   }, [search.matches, expanded]);
+  const lineCount = top + rows.length;
+  /** The list's formulas by their written form, for the formula row's own: however it was typed. */
+  const listedFormulas = useMemo(() => {
+    const listed = new Map<string, SymbolId>();
+    for (const symbol of added) {
+      const formula = parseFormula(symbol);
+      if (formula) listed.set(formula.text, symbol);
+    }
+    return listed;
+  }, [added]);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // New results start unhighlighted, scrolled to the top.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the results change
@@ -185,15 +225,26 @@ export function SymbolSearchDialog({
   }, [openFilter, onClose]);
 
   const moveTo = (index: number) => {
-    if (rows.length === 0) return;
-    const next = Math.max(0, Math.min(rows.length - 1, index));
+    if (lineCount === 0) return;
+    const next = Math.max(0, Math.min(lineCount - 1, index));
     setActive(next);
     rowElements.current.get(next)?.scrollIntoView({ block: 'nearest' });
   };
 
-  /** A row's main action: add it (add mode) or show it (search mode); `close` as with Shift. */
+  /**
+   * A row's main action: add it (add mode) or show it (search mode); `close` as with Shift. In a
+   * formula, it fills in the symbol being typed.
+   */
   const activate = (row: Row, close: boolean) => {
     const { listing } = row;
+    if (operand) {
+      if (!listing.live) return;
+      setText(fillOperand(text, operand, listing.id));
+      // The list now answers another symbol: Enter is the formula's again, whenever it comes.
+      setActive(-1);
+      input.current?.focus();
+      return;
+    }
     if (mode === 'search') {
       if (!listing.live) return;
       onChoose?.(listing.id);
@@ -204,21 +255,41 @@ export function SymbolSearchDialog({
     if (close) onClose();
   };
 
+  /**
+   * The formula row's action, for the formula as it's typed now, every symbol with its exchange:
+   * show it (search mode) or add it (add mode).
+   */
+  const activateFormula = async (close: boolean) => {
+    if (!parsed) return;
+    const done = await typed.finder.complete(parsed);
+    if (!mounted.current || done.state !== 'ready') return;
+    const symbol = done.formula.text;
+    if (mode === 'search') {
+      onChoose?.(symbol);
+      onClose();
+      return;
+    }
+    if (!listedFormulas.has(symbol)) onAdd?.(symbol);
+    if (close) onClose();
+  };
+
   const onInputKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       moveTo(active + (event.key === 'ArrowDown' ? 1 : -1));
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const row = rows[active] ?? rows[0];
-      if (row) activate(row, event.shiftKey);
+      const line = Math.max(active, 0);
+      const row = rows[line - top];
+      if (line < top) void activateFormula(event.shiftKey);
+      else if (row) activate(row, event.shiftKey);
     }
   };
 
-  const toggle = (ticker: string) =>
+  const toggle = (key: string) =>
     setExpanded((current) => {
       const next = new Set(current);
-      if (!next.delete(ticker)) next.add(ticker);
+      if (!next.delete(key)) next.add(key);
       return next;
     });
 
@@ -248,7 +319,8 @@ export function SymbolSearchDialog({
       ),
     })),
   ];
-  const activeRow = rows[active];
+  const hasActive = active >= 0 && active < lineCount;
+  const listedFormula = formulaRow ? listedFormulas.get(formulaRow.formula.text) : undefined;
   const title = mode === 'add' ? 'Add symbol' : 'Symbol search';
 
   return createPortal(
@@ -289,14 +361,14 @@ export function SymbolSearchDialog({
             ref={input}
             className={styles.input}
             value={text}
-            maxLength={MAX_QUERY_LENGTH}
+            maxLength={MAX_FORMULA_LENGTH}
             spellCheck={false}
             autoComplete="off"
             role="combobox"
             aria-label="Symbol, e.g. XRP or BINANCE:XRPUSDT"
             aria-expanded="true"
             aria-controls={`${id}-list`}
-            aria-activedescendant={activeRow ? `${id}-row-${active}` : undefined}
+            aria-activedescendant={hasActive ? `${id}-row-${active}` : undefined}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onInputKey}
           />
@@ -379,29 +451,51 @@ export function SymbolSearchDialog({
           aria-label={title}
           onScroll={onScroll}
         >
-          {rows.map((row, index) => (
-            <ResultRow
-              key={row.key}
-              id={`${id}-row-${index}`}
-              row={row}
-              mode={mode}
-              query={search.query}
-              active={index === active}
-              added={added.has(row.listing.id)}
-              expanded={expanded.has(row.match.ticker)}
+          {formulaRow && (
+            <FormulaRow
+              id={`${id}-row-0`}
+              typed={formulaRow}
+              actions={mode === 'add'}
+              active={active === 0}
+              added={listedFormula !== undefined}
               nameOf={nameOf}
               elementRef={(element) => {
-                if (element) rowElements.current.set(index, element);
-                else rowElements.current.delete(index);
+                if (element) rowElements.current.set(0, element);
+                else rowElements.current.delete(0);
               }}
-              onHover={() => setActive(index)}
-              onActivate={(close) => activate(row, close)}
-              onToggle={() => toggle(row.match.ticker)}
-              onRemove={() => onRemove?.(row.listing.id)}
-              onLocate={() => onLocate?.(row.listing.id)}
+              onHover={() => setActive(0)}
+              onActivate={(close) => void activateFormula(close)}
+              onRemove={() => listedFormula && onRemove?.(listedFormula)}
+              onLocate={() => listedFormula && onLocate?.(listedFormula)}
             />
-          ))}
-          {!search.loading && rows.length === 0 && (
+          )}
+          {rows.map((row, i) => {
+            const index = top + i;
+            return (
+              <ResultRow
+                key={row.key}
+                id={`${id}-row-${index}`}
+                row={row}
+                // In a formula, a pick fills in its symbol: nothing to add or remove.
+                actions={mode === 'add' && !operand}
+                query={search.query}
+                active={index === active}
+                added={added.has(row.listing.id)}
+                expanded={expanded.has(matchKey(row.match))}
+                nameOf={nameOf}
+                elementRef={(element) => {
+                  if (element) rowElements.current.set(index, element);
+                  else rowElements.current.delete(index);
+                }}
+                onHover={() => setActive(index)}
+                onActivate={(close) => activate(row, close)}
+                onToggle={() => toggle(matchKey(row.match))}
+                onRemove={() => onRemove?.(row.listing.id)}
+                onLocate={() => onLocate?.(row.listing.id)}
+              />
+            );
+          })}
+          {!search.loading && rows.length === 0 && !formulaRow && (
             <p className={styles.empty} role="status">
               {search.error ?? 'No symbols match your criteria'}
             </p>
@@ -433,7 +527,8 @@ export function SymbolSearchDialog({
 interface ResultRowProps {
   id: string;
   row: Row;
-  mode: SearchMode;
+  /** Add mode's buttons: add, or remove and show in the watchlist. */
+  actions: boolean;
   query: string;
   active: boolean;
   added: boolean;
@@ -453,7 +548,7 @@ const keepFocus = (event: MouseEvent) => event.preventDefault();
 function ResultRow({
   id,
   row,
-  mode,
+  actions,
   query,
   active,
   added,
@@ -549,45 +644,164 @@ function ResultRow({
           </button>
         )}
       </span>
-      {mode === 'add' && (
-        <span className={styles.actions}>
-          {added ? (
-            <>
-              <button
-                type="button"
-                className={styles.action}
-                aria-label="Remove from watchlist"
-                onMouseDown={keepFocus}
-                onClick={stop(onRemove)}
-              >
-                <TrashIcon />
-              </button>
-              <button
-                type="button"
-                className={styles.action}
-                aria-label="Show in watchlist"
-                onMouseDown={keepFocus}
-                onClick={stop(onLocate)}
-              >
-                <LocateIcon />
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className={styles.action}
-              aria-label="Add to watchlist"
-              disabled={!listing.live}
-              onMouseDown={keepFocus}
-              onClick={(event) => {
-                event.stopPropagation();
-                onActivate(event.shiftKey);
-              }}
-            >
-              <PlusIcon />
-            </button>
-          )}
-        </span>
+      {actions && (
+        <RowActions
+          added={added}
+          disabled={!listing.live}
+          onAdd={onActivate}
+          onRemove={onRemove}
+          onLocate={onLocate}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Add mode's buttons on a row: add it, or remove it and show it in the watchlist. */
+function RowActions({
+  added,
+  disabled,
+  onAdd,
+  onRemove,
+  onLocate,
+}: {
+  added: boolean;
+  disabled: boolean;
+  onAdd(close: boolean): void;
+  onRemove(): void;
+  onLocate(): void;
+}) {
+  const stop = (action: () => void) => (event: MouseEvent) => {
+    event.stopPropagation();
+    action();
+  };
+  return (
+    <span className={styles.actions}>
+      {added ? (
+        <>
+          <button
+            type="button"
+            className={styles.action}
+            aria-label="Remove from watchlist"
+            onMouseDown={keepFocus}
+            onClick={stop(onRemove)}
+          >
+            <TrashIcon />
+          </button>
+          <button
+            type="button"
+            className={styles.action}
+            aria-label="Show in watchlist"
+            onMouseDown={keepFocus}
+            onClick={stop(onLocate)}
+          >
+            <LocateIcon />
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          className={styles.action}
+          aria-label="Add to watchlist"
+          disabled={disabled}
+          onMouseDown={keepFocus}
+          onClick={(event) => {
+            event.stopPropagation();
+            onAdd(event.shiftKey);
+          }}
+        >
+          <PlusIcon />
+        </button>
+      )}
+    </span>
+  );
+}
+
+interface FormulaRowProps {
+  id: string;
+  typed: TypedFormula;
+  /** Add mode's buttons. */
+  actions: boolean;
+  active: boolean;
+  /** Whether the watchlist holds the formula, however it was written there. */
+  added: boolean;
+  nameOf(exchange: string): string;
+  elementRef(element: HTMLDivElement | null): void;
+  onHover(): void;
+  onActivate(close: boolean): void;
+  onRemove(): void;
+  onLocate(): void;
+}
+
+/**
+ * The formula typed, above the results: its tickers, as the watchlist and the legend name it,
+ * then the formula with every symbol's exchange, as it's opened or added; "spread", as
+ * TradingView calls it, and its first symbol's exchange. Ours: TradingView documents no such row
+ * (docs/SPEC.md §11).
+ */
+function FormulaRow({
+  id,
+  typed,
+  actions,
+  active,
+  added,
+  nameOf,
+  elementRef,
+  onHover,
+  onActivate,
+  onRemove,
+  onLocate,
+}: FormulaRowProps) {
+  const { formula } = typed;
+  const exchange = parseSymbolId(formula.symbols[0] ?? '')?.exchange;
+  const message = typed.state === 'missing' ? typed.message : undefined;
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: keys reach rows through the search field, as in a combobox
+    <div
+      ref={elementRef}
+      id={id}
+      role="option"
+      tabIndex={-1}
+      aria-selected={active}
+      aria-disabled={message !== undefined || undefined}
+      className={styles.row}
+      data-formula
+      data-symbol={typed.state === 'ready' ? formula.text : undefined}
+      data-active={active || undefined}
+      title={message}
+      onMouseDown={keepFocus}
+      onMouseMove={active ? undefined : onHover}
+      onClick={(event) => onActivate(event.shiftKey)}
+    >
+      <CoinLogo
+        symbol={formula.text}
+        base=""
+        letter={formula.name.charAt(0)}
+        className={styles.logo}
+      />
+      <span className={styles.ticker}>{formula.name}</span>
+      <span className={styles.description}>{message ?? formula.text}</span>
+      <span className={styles.source}>
+        <span className={styles.type}>{KIND_LABELS.spread}</span>
+        {exchange && (
+          <>
+            <span className={styles.exchange}>{nameOf(exchange)}</span>
+            <ExchangeLogo
+              exchange={exchange}
+              name={nameOf(exchange)}
+              className={styles.exchangeLogo}
+            />
+          </>
+        )}
+      </span>
+      {actions && (
+        <RowActions
+          added={added}
+          disabled={typed.state === 'missing'}
+          onAdd={onActivate}
+          onRemove={onRemove}
+          onLocate={onLocate}
+        />
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import type { FlagState } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
 import {
+  copyFlag,
   flagOf,
   pickFlag,
   pickFlags,
@@ -11,6 +12,18 @@ import {
 } from './flagEdits';
 
 const STATE: FlagState = { flags: { 'X:A': 'blue' }, lastColor: 'green' };
+
+describe("a formula's fix taking its row", () => {
+  it('carries the flag over, keeping a flag the fix has and the old one', () => {
+    expect(copyFlag(STATE, 'X:A', 'X:B')).toEqual({
+      flags: { 'X:A': 'blue', 'X:B': 'blue' },
+      lastColor: 'green',
+    });
+    const both: FlagState = { flags: { 'X:A': 'blue', 'X:B': 'red' }, lastColor: 'green' };
+    expect(copyFlag(both, 'X:A', 'X:B')).toBe(both);
+    expect(copyFlag(STATE, 'X:C', 'X:B')).toBe(STATE);
+  });
+});
 
 describe('flag edits on several selected symbols', () => {
   it('toggle: the unflagged ones in the last color, the flagged keeping theirs; all off once all are', () => {

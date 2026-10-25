@@ -25,7 +25,7 @@ const setText = (element: HTMLElement | null, text: string) => {
 export function Legend({ ref }: { ref: Ref<LegendView> }) {
   const root = useRef<HTMLDivElement>(null);
   // The symbol changes rarely, so its logo is rendered by React; everything else is imperative.
-  const [coin, setCoin] = useState<{ id: string; base: string } | null>(null);
+  const [coin, setCoin] = useState<{ id: string; base: string; letter: string } | null>(null);
   const title = useRef<HTMLSpanElement>(null);
   const open = useRef<HTMLSpanElement>(null);
   const high = useRef<HTMLSpanElement>(null);
@@ -48,8 +48,10 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
       setInstrument(info, resolution) {
         precision.current = info.pricePrecision;
         format.current = info.format;
+        // A formula has no base: its circle shows its name's first letter.
+        const letter = (info.base || info.ticker).charAt(0);
         setCoin((current) =>
-          current?.id === info.id ? current : { id: info.id, base: info.base },
+          current?.id === info.id ? current : { id: info.id, base: info.base, letter },
         );
         setText(
           title.current,
@@ -124,7 +126,7 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
           <CoinLogo
             symbol={coin.id}
             base={coin.base}
-            letter={coin.base.charAt(0)}
+            letter={coin.letter}
             className={styles.logo}
           />
         ) : (

@@ -117,6 +117,15 @@ describe('parseClientMessage', () => {
       'quotes subscription',
       { type: 'subscribe', id: 's3', channel: 'quotes', symbol: 'BINANCE:LINKUSDT' },
     ],
+    [
+      "a formula's quotes, over 64 characters (protocol 9)",
+      {
+        type: 'subscribe',
+        id: 's5',
+        channel: 'quotes',
+        symbol: 'CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D+CRYPTOCAP:USDT.D+CRYPTOCAP:USDC.D',
+      },
+    ],
     ['unsubscribe', { type: 'unsubscribe', id: 's1' }],
   ])('accepts %s', (_label, message) => {
     expect(parseClientMessage(json(message))).toEqual(message);
@@ -268,5 +277,18 @@ describe('parseApiError', () => {
   it('rejects anything else', () => {
     expect(parseApiError({ error: 'forbidden_origin' })).toBeNull();
     expect(parseApiError('oops')).toBeNull();
+  });
+
+  it('keeps a suggestion of what to use instead', () => {
+    const body = {
+      error: 'unknown_symbol',
+      message: "EURONEXT:USDC isn't available here",
+      suggestion: 'CRYPTOCAP:TOTAL3-CRYPTOCAP:USDT-CRYPTOCAP:USDC',
+    };
+    expect(parseApiError(body)).toEqual(body);
+    expect(parseApiError({ ...body, suggestion: 7 })).toEqual({
+      error: 'unknown_symbol',
+      message: "EURONEXT:USDC isn't available here",
+    });
   });
 });

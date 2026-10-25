@@ -135,6 +135,11 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-25 | Typing just a coin's symbol (XRP) lists its pairs before its market cap and dominance; "XRP.D" typed in full finds its own first. CRYPTOCAP shows under the Crypto tab as "index crypto" | TradingView doesn't document its ranking; provisional (§11). |
 | 2026-10-25 | A **monthly count of CoinGecko calls**, the logos' too (`data/coingecko-usage.json`): past 8,000 the coins are fetched hourly, past 9,500 only what keeps them going | The free plan allows 10,000 a month. |
 | 2026-10-25 | **Sell and Buy fit their price** for every symbol, as TradingView's do: both boxes as wide as the wider price needs, with 10 px either side and never under the reference's 65.5 px; the spread its own width with 7.69 px either side. XRP's legend is unchanged to the pixel; XRPBTC's boxes are 95.9 px (TradingView's 97) | Your YES. Measured from your screenshots 20–22 and the reference; your screenshot 20 shows TradingView's two boxes equal although their prices differ. |
+| 2026-10-25 | **Formulas** (M9b), TradingView's spreads: symbols combined with + − * / and numbers, in brackets too, up to 10 symbols and 256 characters; typed in the chart's symbol search and in Add symbol, charted at every interval, kept in watchlists | Your YES after the plan (§4.12). |
+| 2026-10-25 | A formula's bars from its symbols' opens, highs, lows and closes, as TradingView builds spreads: up to 5 minutes from 1-minute bars, longer intervals from the symbols' own. A symbol without a bar keeps its last close, there's no bar before every symbol has begun, and a division by zero leaves its bar out | TradingView documents the 1-minute bars; the rest it doesn't: provisional (§11). |
+| 2026-10-25 | **A formula's look**, from your screenshot 22: named by its tickers (TOTAL2/XRPUSD) with a gray letter; Last in its first symbol's format (809.23B, 80.98); Chg in full digits, trailing zeros dropped (−2,215,826,337, 0.1), or in thousands to trillions where our column is too narrow for them; the legend "TOTAL3-USDT-USDC · 1D · CRYPTOCAP", its first symbol's exchange; Sell and Buy its value | Measured from your screenshot 22; the narrow column's fallback is ours (§11). |
+| 2026-10-25 | **Typing one:** "XRP/USDT" stays a pair's search. A formula is plain from + * or brackets, from a / or − with a space beside it (TradingView's "operator followed by a space"), or before a number or an exchange's symbol; text no symbol matches is read as one (NVDA/AMD). The list searches for the symbol being typed and a pick fills it in; the formula's own row tops the list, "spread", and Enter takes it. A symbol typed without its exchange is the search's first listing of that very ticker | TradingView documents typing one and pressing Enter; the row on top and the reading of text without spaces are ours (§11). |
+| 2026-10-25 | **A formula with a symbol we lack names it.** Next to market caps, a coin from another exchange (your EURONEXT:USDC in TOTAL3-USDT-USDC) gets "Use CRYPTOCAP:USDC" first in its row menu: one click puts CRYPTOCAP's in its place, its flag kept | Ours: TradingView has no such item. |
 
 ## 4. Research findings
 
@@ -295,6 +300,16 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **OTHERS doesn't fit its definition:** TradingView showed 213.6B where TOTAL without the dominance page's top 10 is 202.1B. No ten coins make up the difference; a few odd pairs fit one moment but not all three screenshots.
 - **Checked live** (your running app, 24 October, 5-minute bars of 17:25–17:30 UTC built from exchange prices): TOTAL −0.10%, TOTAL2 −0.19%, TOTAL3 −0.26%, BTC.D 60.77 (+0.07%), ETH.D +0.05%, USDT.D +0.10%, XRP.D +0.05%, XRP's and ETH's market caps −0.02% and −0.01%; OTHERS −6.3%.
 
+### 4.12 Formulas (researched 2026-10-25)
+
+- **TradingView's own pages** (§12):
+  - Symbol Search: "combine symbols with +, -, *, and /", then Enter; "add it to your watchlist" keeps "a formula for later". Its examples: NVDA/AMD, US10Y-US02Y, GC1!/SI1!.
+  - Spread charts explained: a formula's variables are "symbol, number etc.", and an operator is "followed by a space"; at most 10 unique symbols. Intraday spreads are built from each symbol's 1-minute open, high, low and close, recompiled, and move live with the ticks, so a refresh can repaint them.
+  - Not documented: brackets, 1/X, missing bars, sessions, volume, how day bars are built.
+- **Third-party** (§12): NexusFi, Pineify and LuxAlgo write the same syntax, with coefficients (AAPL − 1.5*MSFT); Barchart's chart equations follow arithmetic's order, with brackets.
+- **Your screenshot 22** (TradingView, 24 October): rows named without their exchanges (TOTAL2/XRPUSD, BTCUSD/XAUUSD) with a gray letter (T, B); Last in the first symbol's format (817.2B, 20, 1,488, 80.98); Chg in full digits, trailing zeros dropped (−2,215,826,337, −0.2, −18, 0.1); Sell and Buy equal; the legend "TOTAL3-USDT-USDC · 1D · CRYPTOCAP", the first symbol's exchange; a volume shown (how it's worked out is unknown).
+- **Checked live** (your running app, 25 October): BTC.D+ETH.D+USDT.D+USDC.D at 17:28–17:30 UTC on 24 October, from 1-minute bars, read 81.027–81.034 against TradingView's 80.97–80.98 in your screenshot (+0.07%). It equals its four symbols added up, and its 5-minute bar is built from those minutes.
+
 ## 5. Requirements (v1)
 
 ### 5.1 Chart
@@ -429,6 +444,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
   - **Added rows** offer remove (trash) and locate, which shows the row in the watchlist and on the chart. A new symbol goes to the end of the selected row's section (provisional, §11).
   - **Empty search:** the most traded pairs; scrolling down loads 50 more at a time.
   - **Logos:** coins as in the watchlist; exchanges from CoinGecko, cached in `data/logos/exchanges/`.
+  - **Formulas** (M9b): §5.11.
 
 ### 5.5 Logos (CoinGecko) — ships with M3
 
@@ -518,6 +534,17 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Without a CoinGecko key**, the symbols say where to add one.
 - **Done when:** TOTAL, TOTAL2, TOTAL3 and BTC.D are within 0.5% of TradingView at the same moment, a coin's market cap within 0.1%; rows and legend match screenshots 20–22; CoinGecko calls stay under 8,000 a month. Met for all but OTHERS (§4.11).
 
+### 5.11 Formulas (M9b)
+
+- **What:** symbols combined with + − * / and numbers, in brackets too (`CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D`, `BINANCE:BTCUSDT/2`), up to 10 symbols and 256 characters, from any exchange we chart, CRYPTOCAP and US stocks included; kind `spread`.
+- **Typing** (§3), in the chart's symbol search and in Add symbol:
+  - The formula's own row on top: its tickers, the formula with every symbol's exchange, "spread" and its first symbol's exchange. Below it, the matches for the symbol being typed; a pick fills it in.
+  - Enter opens the formula (symbol search) or adds it (Add symbol); Shift+Enter adds and closes.
+  - A symbol typed without its exchange is found as the search finds it. One that isn't found, or a formula past 256 characters once its exchanges are written, is said so on its row, which can't be taken.
+- **Everywhere a symbol goes:** the chart at every interval (its URL too: `?symbol=CRYPTOCAP:BTC.D%2BCRYPTOCAP:ETH.D`), the legend, Sell and Buy (both its value), watchlist rows with live Last, Chg and Chg% (§3).
+- **A symbol we lack:** the row is red and says which; next to market caps, its row menu offers CRYPTOCAP's coin (§3).
+- **Done when:** your BTC.D+ETH.D+USDT.D+USDC.D is within 0.1% of TradingView's 80.97–80.98 at your screenshots' moment, and typing, opening, adding and the fix work end to end. **Met** on 25 October: +0.07% (§4.12). Your TOTAL2/XRPUSD from Bitstamp waits for M9c.
+
 ## 6. Architecture
 
 ### 6.1 Overview
@@ -563,6 +590,7 @@ Source: the Lightweight Charts source (`chart-widget.ts`, `pane-widget.ts`, `tim
 - **Sessions** (protocol v6): `GET /api/bars?…&session=extended` and `{channel: 'bars', …, session: 'extended'}` ask for intraday bars with pre- and post-market hours; `regular` is the default, and markets without extended hours (and day and longer bars) give their regular bars either way.
 - **Watchlists** (protocol v7, M8): `GET /api/watchlists` lists them (`{activeId, lists: [{id, name, favorite, count}]}`); `POST` creates one (`{name, sections?, copyOf?, activate?}`, the name made unique); `GET`/`PUT /api/watchlists/:id` read and save one list's sections; `PATCH` renames or stars it; `DELETE` deletes it (never the last); `POST /api/watchlists/:id/activate` opens it. An unknown list answers `not_found` (404). `GET`/`PUT /api/watchlist` still read and save the open list. A list's symbols may be any TradingView symbol with an exchange prefix (spreads included), kept as written when it isn't one we chart.
 - **CRYPTOCAP** (protocol v8, M9a): symbols of the `index` kind; `SymbolInfo.format` is `volume` for market caps (thousands to trillions) and `price`, or absent, otherwise.
+- **Formulas** (protocol v9, M9b): a symbol may be a formula (`CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D`) of the `spread` kind, up to 256 characters, in REST and WebSocket requests and in lists. An `unknown_symbol` error may carry a `suggestion`: the formula with a symbol we have in place of one we lack.
 - **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
@@ -734,6 +762,17 @@ In `apps/gateway/src/cryptocap/`:
 - **Live** (`live.ts`): while a symbol is watched, the pairs of the 140 largest coins are followed through their exchanges' 1-minute candles; each second the market caps are added up again and the watched bars move. Sell and Buy are the value. The feed is up while the exchange of Bitcoin's pair is.
 - **Calls:** every CoinGecko call is counted (`logos/usage.ts`); the key stays in the gateway.
 
+### 6.15 Formulas (M9b)
+
+In `packages/core/src/formula.ts` and `apps/gateway/src/formula/`:
+
+- **Reading** (`formula.ts`, shared): a formula is parsed into a tree with arithmetic's order and written back one way (upper case, no spaces, only the brackets it needs: `CRYPTOCAP:TOTAL2/BITSTAMP:XRPUSD`), so the same formula typed two ways is one symbol. Its name is its tickers (TOTAL2/XRPUSD). A lone symbol isn't a formula, and neither is one like NYSE:JPM/PD unless a number follows its operator (BINANCE:BTCUSDT/2).
+- **An exchange of its own:** the market service hands a formula to a `FormulaExchange`, one a formula (the last 256 kept). It gets its symbols' bars from the market service itself, so any symbol works in one and each keeps its own feed and cache. Its clock is its symbols' when they share one (US stocks' sessions), UTC otherwise.
+- **Bars:** up to 5 minutes from 1-minute bars, longer intervals from the symbols' own; day, week and month bars line up by UTC date. A bar's open, high, low and close are worked out from the symbols' own, its high and low then the largest and smallest of the four; a symbol without a bar counts at its last close. Volume is the first symbol's.
+- **Live:** it follows its symbols' bars through the market service and moves its own. Sell and Buy are its value from the symbols' latest closes. It's live while all its symbols are.
+- **A symbol it lacks** is named in the error. Next to market caps, `CRYPTOCAP:<ticker>` is tried and, if it exists, suggested.
+- **In the browser:** the watchlist asks the gateway about a formula once each symbol has its exchange; the search dialog reads what's typed (`apps/web/src/search/formulaTyping.ts`) and finds the exchange of symbols typed without one (`typedFormula.ts`).
+
 ## 7. UI and visual spec
 
 ### 7.1 Tokens
@@ -853,7 +892,7 @@ Reference viewport is 1634 px wide.
 | M8d | Selecting several symbols: Shift and ⌘ (Ctrl) clicks, Shift+↓/↑, ⌘A, Escape; Delete, the trash, ⌥↵, the row menu and dragging for all of them; Space and Shift+Space | Every gesture checked on your list, nothing saved. **Committed 2026-10-24** |
 | M8e | The overlay of a drag of several rows, and the outline of a selected row under the mouse, as TradingView's | Measured against your screenshot; the overlay handed to the browser checked on your list. **Built 2026-10-24** |
 | M9a | CRYPTOCAP: market caps (TOTAL, TOTAL2, TOTAL3, OTHERS, the ES ones, TOTALE50 and TOTALE100, STABLE.C, every coin's), dominance and ratios, from exchange prices and CoinGecko's supply, with TradingView's names and formats | TOTAL, TOTAL2, TOTAL3 and dominance within 0.5% of your screenshots' moment. **Built 2026-10-25**: all within 0.26%, but OTHERS (−6%, §4.11) |
-| M9b | Formulas (spreads): + − * /, numbers, parentheses, up to 10 symbols, typed into search; intraday bars from 1-minute ones; in watchlists | Your formulas (BTC.D+ETH.D+USDT.D+USDC.D, TOTAL2/XRPUSD) live. Needs its YES |
+| M9b | Formulas (spreads): + − * /, numbers, brackets, up to 10 symbols, typed into search; intraday bars from 1-minute ones; in watchlists | Your formulas (BTC.D+ETH.D+USDT.D+USDC.D, TOTAL2/XRPUSD) live. **Built 2026-10-25**: +0.07% at your screenshots' moment; TOTAL2/XRPUSD from Bitstamp waits for M9c |
 | M9c | Bitstamp | Your Bitstamp symbols live. Needs its YES |
 
 ## 9. Testing strategy
@@ -909,6 +948,11 @@ Reference viewport is 1634 px wide.
   - End to end through the market service (`cryptocap.test.ts`, a fake CoinGecko and fake exchanges): TOTAL2's and XRP.D's descriptions, symbols it doesn't have, no key; TOTAL from exchange price × supply with CoinGecko's own market cap for a coin without a pair; TOTAL2, TOTAL3, OTHERS, TOTALES, STABLE.C and a coin's; dominance and ratios; a pair priced like another coin set aside; estimates while the history loads; waiting for the pair lists, and not keeping what was built without them; the history resuming after a restart; weekly bars from daily ones; each coin's history once, never an excluded one's; the live bar moving with a price; Sell and Buy; search's list; every call counted.
   - Core and chart: the `index` kind and `format` in messages; search (TOTAL by name, a coin's pairs first, BTC.D typed in full first, the Crypto tab, apart from a fund named BTC); the number format (2.65T, 213.6B, 142M, 999.999M as 1B, signs).
   - In the browser (`tests/e2e/cryptocap.spec.ts`): TOTAL2's legend and price scale, Sell and Buy whole in boxes that grow to fit, BTC.D's decimals and logo, watchlist rows as in your screenshots, search with the badge.
+- **Formulas** (M9b):
+  - Core (`packages/core/src/formula.test.ts`): TradingView's text and names, your formulas, spaces, lower case and numbers; arithmetic's order and brackets, written back with only the brackets needed; ÷0; the 10-symbol and 256-character limits; what isn't a formula (a lone symbol, NYSE:JPM/PD, broken text); symbols without exchanges; what can be charted. The protocol's 256-character symbols and suggestions; lists keeping a 10-symbol formula.
+  - The gateway (`apps/gateway/test/formula.test.ts`): the description from the first symbol; a symbol it lacks, and CRYPTOCAP's suggestion; exchanges required; daily bars from the symbols' opens, highs, lows and closes; a missing bar carried, and the start; ÷0 left out, with numbers; 5 minutes from 1-minute bars; the live bar; Sell and Buy; quotes; one feed for a formula typed two ways.
+  - The browser's parts: reading what's typed, the symbol being typed, a pick filling it in, text read as a formula when nothing matches (`formulaTyping.test.ts`); finding exchanges, once each, and saying what's missing (`typedFormula.test.ts`); the change in full digits (`numbers.test.ts`); the watchlist asking the gateway and keeping its suggestion (`SymbolDirectory.test.ts`); quotes for formulas (`QuoteBoard.test.ts`); the fix in its row's place and its flag (`model.test.ts`, `flagEdits.test.ts`); formulas in the URL (`route.test.ts`).
+  - In the browser (`tests/e2e/formulas.spec.ts`): a formula typed in the chart's search, the symbol being typed searched for, a pick filling it in while the next matches come slowly, Enter charting it; "XRP/USDT" staying a search and BTCUSDT/XRPUSDT read as a formula; Add symbol with tickers alone, added once; a missing symbol; rows as in your screenshot 22, the change in billions where it doesn't fit; the legend, Sell and Buy; the fix from the row menu, flag and all.
 - **Sell and Buy** (`tests/e2e/chart.spec.ts`, `reference.spec.ts`): XRP's boxes 65.5 px and the spread 51 px, at the reference's place with its prices shown; a long price (0.00001590) widening both boxes alike, the price inside, the three side by side.
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
@@ -1022,6 +1066,9 @@ Reference viewport is 1634 px wide.
 49. Dominance's and ratios' decimals (ours: four significant digits, from your screenshots); where CRYPTOCAP ranks in search (ours: a coin's pairs first); the "index crypto" type words; CRYPTOCAP's icon (ours is drawn after TradingView's, not copied).
 50. A few coins' market caps differ from TradingView's because CoinGecko's supply does (HYPE's about 13% lower); TradingView doesn't say where its supply comes from.
 51. ~~A long crypto price (XRPBTC's 0.00001590) overflowed the legend's Sell and Buy boxes.~~ Fixed with your YES on 25 October: every symbol's boxes fit their price (§3). How TradingView sizes them below 65.5 px, for a short price, isn't known; ours keep 65.5.
+52. Formulas, provisional (TradingView doesn't document them): brackets, a minus before a symbol and 1/X (ours: arithmetic's own rules); a symbol typed without its exchange (ours: the search's first listing of that very ticker, else its first match); a symbol without a bar (ours: its last close carries); no bar before every symbol has begun; a division by zero (ours: no bar); a formula's volume (ours: its first symbol's, not shown yet); intervals over 5 minutes (ours: from the symbols' own bars; TradingView builds every intraday spread from 1-minute bars); stocks and crypto lined up by UTC date; the legend's letter; the formula's row on top of search; text without spaces read as a formula when no symbol matches it. Tickers with "/" or "-" (NYSE:JPM/PD) can't be part of a formula.
+53. **A formula's change in full digits needs a wider column than ours** (Chg is 73 px, from the reference): where it doesn't fit, ours writes thousands to trillions (−2.76B) rather than cut it. Your screenshot 22 shows TradingView's −2,215,826,337 whole, so its columns seem to widen to fit; whether and how isn't known. A big formula's Last can still be cut, as can any long name or price today.
+54. The first look at a CRYPTOCAP formula at 1 to 5 minutes takes the gateway about 10 s, building 1-minute market caps; after, it's kept. Meanwhile the chart keeps the previous one, as for any symbol, with the legend already named for the new one.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -1065,6 +1112,7 @@ Reference viewport is 1634 px wide.
 - Selecting several (M8d): the watchlist's keyboard shortcuts https://www.tradingview.com/charting-library-docs/latest/getting_started/Shortcuts/ · Shift and Ctrl (Command), deleting several, "Flag All Selected" https://www.tradingview.com/blog/en/introducing-flagged-symbols-7443/ · Alt (Opt)+Enter https://tradingview.com/blog/en/flagged-lists-improved-9521 · Alt+Enter on a selection (Japanese) https://www.oanda.jp/lab-education/tradingviewstrategy/basic/shortcut/ · several dragged together (Japanese) https://tetori.jp/tradingview/watchlist/ · clicks that leave the chart (clone project) https://github.com/deepentropy/opentrader/issues/21
 - Dragging several (M8e): the drag image handed to the browser https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/setDragImage
 - CRYPTOCAP (M9a): market caps and dominance https://www.tradingview.com/support/solutions/43000550480/ · the coins OTHERS leaves out https://www.tradingview.com/markets/cryptocurrencies/dominance/ · TradingView's ranking https://www.tradingview.com/markets/cryptocurrencies/prices-all/ · names https://www.tradingview.com/symbols/CRYPTOCAP-TOTAL/ (and its TOTAL3, OTHERS, OTHERS.D, BTC, BTC.D, STABLE.C, TOTALES, TOTAL2ES, TOTAL3ES, TOTALE50, TOTALE100, OTHERSBTC and TOTAL3ESBTC pages) · spreads https://www.tradingview.com/support/solutions/43000502298-spread-charts-explained/ · `format: 'volume'` https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.LibrarySymbolInfo/ · CoinGecko's plans https://www.coingecko.com/en/api/pricing · its history https://docs.coingecko.com/reference/coins-id-market-chart-range · its global chart (paid) https://docs.coingecko.com/reference/global-market-cap-chart · DefiLlama's stablecoins https://stablecoins.llama.fi/stablecoincharts/all
+- Formulas (M9b): TradingView's Symbol Search tips https://www.tradingview.com/support/solutions/43000746682-tradingview-symbol-search-tips-for-finding-assets/ · spread charts explained https://www.tradingview.com/support/solutions/43000502298-spread-charts-explained/ · third-party: NexusFi https://nexusfi.com/a/platforms/tradingview-spread-charts · Pineify https://pineify.app/tradingview/workflows/spread-ratio-charts · LuxAlgo https://www.luxalgo.com/library/concept/ratio-spread-charts/ · Barchart's chart equations https://www.barchart.com/trader/help/chart/equations.php
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

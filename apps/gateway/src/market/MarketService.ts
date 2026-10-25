@@ -3,9 +3,12 @@ import {
   type Bar,
   type BarClock,
   type BarsResponse,
+  type Formula,
   formatResolution,
+  isComplete,
   isIntraday,
   maxBasePerBar,
+  parseFormula,
   parseResolution,
   parseSymbolId,
   type Resolution,
@@ -17,6 +20,7 @@ import {
   type SymbolInfo,
   UTC_CLOCK,
 } from '@tradingnerd/core';
+import { FormulaExchange } from '../formula/FormulaExchange.ts';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
 import { Feed } from './feed.ts';
 import { fetchHistory, fetchSlices, pageBack } from './history.ts';
@@ -61,6 +65,8 @@ export interface MarketServiceOptions {
 }
 
 export const MAX_COUNT_BACK = 5_000;
+/** Formulas kept ready, the least recently used dropped first (their feeds keep working). */
+const MAX_FORMULAS = 256;
 /** Requests one history call may make for a resampled interval (~0.5 s at 6 in parallel). */
 export const RESAMPLE_MAX_REQUESTS = 12;
 
@@ -80,6 +86,8 @@ export class MarketService {
   private readonly tickHistory = new TickHistory();
   private readonly bookFeeds = new Map<string, BookFeed>();
   private readonly quoteFeeds = new Map<string, QuoteFeed>();
+  /** Formula text → the adapter that builds its bars from its symbols'. */
+  private readonly formulas = new Map<string, FormulaExchange>();
   private readonly history: HistoryCache | null;
   private readonly emitIntervalMs: number;
   private readonly quoteIntervalMs: number;
@@ -248,10 +256,21 @@ export class MarketService {
   async close(): Promise<void> {
     for (const feed of [...this.quoteFeeds.values()]) feed.close();
     for (const feed of [...this.barFeeds.values(), ...this.bookFeeds.values()]) feed.close();
+    await Promise.all([...this.formulas.values()].map((adapter) => adapter.close()));
     await Promise.all([...this.exchanges.values()].map((adapter) => adapter.close()));
   }
 
   private route(symbolId: string) {
+    const formula = parseFormula(symbolId);
+    if (formula) {
+      if (!isComplete(formula)) {
+        throw new MarketError(
+          'bad_request',
+          `Each symbol of a formula needs its exchange, like BINANCE:XRPUSDT`,
+        );
+      }
+      return { adapter: this.formulaAdapter(formula), ticker: formula.text, id: formula.text };
+    }
     const parsed = parseSymbolId(symbolId);
     if (!parsed) {
       throw new MarketError('bad_request', `"${symbolId}" is not a symbol like BINANCE:XRPUSDT`);
@@ -261,6 +280,34 @@ export class MarketService {
       throw new MarketError('unknown_symbol', `Exchange "${parsed.exchange}" isn't supported yet`);
     }
     return { adapter, ticker: parsed.ticker, id: `${parsed.exchange}:${parsed.ticker}` };
+  }
+
+  /**
+   * A formula's adapter, one a formula. Its bars follow the market clock its symbols share (US
+   * stocks' sessions), or UTC when they don't (crypto, or a mix).
+   */
+  private formulaAdapter(formula: Formula): FormulaExchange {
+    const known = this.formulas.get(formula.text);
+    if (known) {
+      this.formulas.delete(formula.text);
+      this.formulas.set(formula.text, known); // most recently used
+      return known;
+    }
+    const sources = formula.symbols.map((symbol) =>
+      this.exchanges.get(parseSymbolId(symbol)?.exchange ?? ''),
+    );
+    const first = sources[0];
+    const shared =
+      first?.clock !== undefined && sources.every((source) => source?.clock === first.clock)
+        ? first
+        : undefined;
+    const adapter = new FormulaExchange({ market: this, formula, clockSource: shared });
+    this.formulas.set(formula.text, adapter);
+    for (const oldest of this.formulas.keys()) {
+      if (this.formulas.size <= MAX_FORMULAS) break;
+      this.formulas.delete(oldest);
+    }
+    return adapter;
   }
 }
 

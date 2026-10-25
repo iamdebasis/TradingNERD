@@ -62,6 +62,7 @@ export async function buildServer(
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof MarketError) {
       const body: ApiErrorBody = { error: error.code, message: error.message };
+      if (error.suggestion) body.suggestion = error.suggestion;
       return reply.code(error.httpStatus).send(body);
     }
     const status = (error as { statusCode?: unknown }).statusCode;

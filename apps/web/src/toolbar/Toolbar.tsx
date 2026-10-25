@@ -1,3 +1,4 @@
+import { symbolName } from '@tradingnerd/core';
 import { useRef, useState } from 'react';
 import { GesturesPopup } from '../gestures/GesturesPopup';
 import { isChanged, useGestureSettings } from '../gestures/gestureSettings';
@@ -46,7 +47,7 @@ export function Toolbar({
   const arrow = useRef<HTMLButtonElement>(null);
   const gesturesButton = useRef<HTMLButtonElement>(null);
   const gesturesChanged = isChanged(useGestureSettings());
-  const ticker = symbol.slice(symbol.indexOf(':') + 1);
+  const ticker = symbolName(symbol);
 
   const choose = (next: string) => {
     setMenuOpen(false);

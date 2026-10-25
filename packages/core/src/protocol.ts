@@ -1,3 +1,4 @@
+import { MAX_FORMULA_LENGTH } from './formula.ts';
 import { type Bar, type BarsResponse, isSymbolKind, type SymbolInfo } from './market.ts';
 import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedule.ts';
 
@@ -12,8 +13,10 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 6: extended hours: bars of a session (`session` on bar requests and subscriptions).
  * 7: several watchlists (/api/watchlists); `not_found`.
  * 8: CRYPTOCAP market caps: the `index` kind and a symbol's price `format`.
+ * 9: formulas (spreads): the `spread` kind, symbols up to 256 characters, and an unknown
+ *    symbol's `suggestion`.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -43,6 +46,11 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 export interface ApiErrorBody {
   error: ErrorCode;
   message: string;
+  /**
+   * What to use instead, when the gateway can tell: a formula with its symbol we don't have
+   * swapped for one we do (EURONEXT:USDC → CRYPTOCAP:USDC beside market caps).
+   */
+  suggestion?: string;
 }
 
 /** Health of one live subscription: `reconnecting` while the exchange feed is down. */
@@ -172,8 +180,11 @@ export function parseSymbolInfo(value: unknown): SymbolInfo | null {
 /** Validates a REST error body. */
 export function parseApiError(value: unknown): ApiErrorBody | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { error, message } = value as Record<string, unknown>;
-  return isErrorCode(error) && typeof message === 'string' ? { error, message } : null;
+  const { error, message, suggestion } = value as Record<string, unknown>;
+  if (!isErrorCode(error) || typeof message !== 'string') return null;
+  return typeof suggestion === 'string' && suggestion.length <= MAX_FORMULA_LENGTH
+    ? { error, message, suggestion }
+    : { error, message };
 }
 
 /** Parses a gateway → UI message. Returns null for anything malformed or unknown. */
@@ -228,7 +239,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'unsubscribe':
       return isShortString(msg.id) ? { type: 'unsubscribe', id: msg.id } : null;
     case 'subscribe': {
-      if (!isShortString(msg.id) || !isShortString(msg.symbol)) return null;
+      if (!isShortString(msg.id) || !isShortString(msg.symbol, MAX_FORMULA_LENGTH)) return null;
       if (msg.channel === 'bars') {
         if (!isShortString(msg.resolution, 16)) return null;
         if (msg.session !== undefined && !isSessionHours(msg.session)) return null;

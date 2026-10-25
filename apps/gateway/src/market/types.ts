@@ -134,11 +134,14 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
 /** An error with a protocol error code, safe to show to the UI. */
 export class MarketError extends Error {
   readonly code: ErrorCode;
+  /** What to use instead, when known (a formula with a symbol we have in place of one we don't). */
+  readonly suggestion: string | undefined;
 
-  constructor(code: ErrorCode, message: string) {
+  constructor(code: ErrorCode, message: string, suggestion?: string) {
     super(message);
     this.name = 'MarketError';
     this.code = code;
+    this.suggestion = suggestion;
   }
 
   get httpStatus(): number {

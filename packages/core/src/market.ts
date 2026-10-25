@@ -39,8 +39,9 @@ export interface Bar {
 
 /**
  * What a symbol is: a crypto spot pair, a kind of US-listed security (a depositary receipt
- * is a foreign company's shares, "dr" as TradingView calls it), or an index computed from
- * other prices (CRYPTOCAP's market caps and dominance).
+ * is a foreign company's shares, "dr" as TradingView calls it), an index computed from
+ * other prices (CRYPTOCAP's market caps and dominance), or a formula of other symbols (a
+ * spread, as TradingView calls them).
  */
 export const SYMBOL_KINDS = [
   'spot',
@@ -53,6 +54,7 @@ export const SYMBOL_KINDS = [
   'unit',
   'note',
   'index',
+  'spread',
 ] as const;
 export type SymbolKind = (typeof SYMBOL_KINDS)[number];
 

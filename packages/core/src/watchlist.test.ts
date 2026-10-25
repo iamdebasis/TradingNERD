@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_WATCHLIST,
+  MAX_WATCHLIST_SYMBOL,
   MAX_WATCHLIST_SYMBOLS,
   parseWatchlist,
   parseWatchlistSymbol,
@@ -38,13 +39,19 @@ describe('a watchlist symbol', () => {
     expect(parseWatchlistSymbol('CME_MINI:ES1!')).toBe('CME_MINI:ES1!');
   });
 
+  it("keeps a formula of TradingView's 10 symbols", () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `CRYPTOCAP:COIN${i}.D`).join('+');
+    expect(ten.length).toBeGreaterThan(128);
+    expect(parseWatchlistSymbol(ten)).toBe(ten);
+  });
+
   it.each([
     ['no exchange prefix', 'XRPUSDT'],
     ['an empty symbol', 'BINANCE:'],
     ['a comma', 'A:B,C'],
     ['a line break', 'A:B\nC'],
     ['a section marker', '###A:B'],
-    ['too long', `X:${'Y'.repeat(127)}`],
+    ['too long', `X:${'Y'.repeat(MAX_WATCHLIST_SYMBOL - 1)}`],
   ])('refuses %s', (_label, value) => {
     expect(parseWatchlistSymbol(value)).toBeNull();
   });

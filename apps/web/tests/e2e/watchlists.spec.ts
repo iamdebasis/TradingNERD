@@ -174,10 +174,12 @@ test("Upload list reads TradingView's .txt into a new list, and it downloads bac
     'USA SECTOR WISE 🇺🇸',
     'USA PRIVATE CREDIT',
   ]);
-  // Kept, in red: the ones we can't chart; GBTC charts.
+  // Kept, in red: the ones we can't chart (Bitstamp's XRPUSD, until M9c); GBTC charts. A formula
+  // is named by its tickers, as TradingView names it (screenshot 22).
   const spread = panel(page).locator('[data-symbol="CRYPTOCAP:TOTAL2/BITSTAMP:XRPUSD"]');
   await expect(spread).toHaveAttribute('data-unavailable', 'true');
-  await expect(spread.locator('[data-field="ticker"]')).toHaveText('TOTAL2/BITSTAMP:XRPUSD');
+  await expect(spread.locator('[data-field="ticker"]')).toHaveText('TOTAL2/XRPUSD');
+  await expect(spread).toHaveAttribute('title', "BITSTAMP:XRPUSD isn't available here");
   await expect(panel(page).locator('[data-symbol="AMEX:GBTC"]')).not.toHaveAttribute(
     'data-unavailable',
   );
