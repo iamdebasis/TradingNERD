@@ -110,9 +110,13 @@ The user gave these during the work; they bind as the core values do.
 
 - **Work comes as pull requests.** Each task is done on a `claude/…` branch, pushed, and opened as a pull request into `main`; the user merges it on GitHub. `main` is protected by a ruleset, so nothing is pushed to it directly. `m7-us-stocks` is kept as a historical branch; no new work happens there.
 - **Commit only on a YES, and push and open the pull request only on their own YES.** The repository's home is https://github.com/iamdebasis/TradingNERD, and it's public: anything pushed is published.
-- **Commit as the project's identity only:** `Debasis <30506767+iamdebasis@users.noreply.github.com>`, GitHub's private address, set in this repository's `.git/config` on the user's Mac. A fresh clone (a cloud session) has none. Never use a personal email, and never set an identity without asking.
+- **Commit as the project's identity only:** `Debasis <30506767+iamdebasis@users.noreply.github.com>`, GitHub's private address. Never use a personal email, and never set an identity without asking.
+  - **On the Mac,** it's set in this repository's `.git/config`.
+  - **In a cloud session,** the tradingNerd environment sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL` and `TZ=UTC`, which take priority over any git config (checked 26 October 2026). `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` show what a commit will carry.
+  - **If those variables are missing,** commit with `TZ=UTC git -c user.name=Debasis -c user.email=30506767+iamdebasis@users.noreply.github.com commit …`.
+  - **Watch out:** the cloud container's own `~/.gitconfig` sets `Claude <noreply@anthropic.com>`. Without the variables or `-c`, a plain `git commit` carries that identity.
 - **Commit times in UTC:** commit with `TZ=UTC` (`TZ=UTC git commit …`), so no commit carries the local time zone.
-- **Before any push,** check that `git log --all --format='%an <%ae> %ad|%cd' --date=format:%z | sort -u` shows only that identity and +0000.
+- **Before every push,** on the Mac or in a cloud session, check that `git log --all --format='%an <%ae> %ad|%cd' --date=format:%z | sort -u` shows only that identity and +0000.
 - **Commit messages:** a subject naming the milestones ("M9e, A2, A6: older market caps back, OTHERS as TradingView's, formula weeks from days"), a blank line, then dash bullets of what changed and why, then your tool's co-author trailer, if it uses one.
 
 ### The user's running app
