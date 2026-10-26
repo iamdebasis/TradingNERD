@@ -70,8 +70,8 @@ stat -f '%Sp %N' data data/secrets.json
 git log --all --oneline -- data/ | wc -l     # 0
 git remote -v                                # only origin, https://github.com/iamdebasis/TradingNERD
 
-# Only the project's identity, in UTC, before any push.
-git log --all --format='%an <%ae> %ad|%cd' --date=format:%z | sort -u
+# Only the project's identity, as author and committer, in UTC, before any push.
+git log --all --format='%an <%ae> %ad|%cn <%ce> %cd' --date=format:%z | sort -u
 ```
 
 Also:

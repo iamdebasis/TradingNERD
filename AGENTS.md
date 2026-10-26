@@ -116,7 +116,7 @@ The user gave these during the work; they bind as the core values do.
   - **If those variables are missing,** commit with `TZ=UTC git -c user.name=Debasis -c user.email=30506767+iamdebasis@users.noreply.github.com commit …`.
   - **Watch out:** the cloud container's own `~/.gitconfig` sets `Claude <noreply@anthropic.com>`. Without the variables or `-c`, a plain `git commit` carries that identity.
 - **Commit times in UTC:** commit with `TZ=UTC` (`TZ=UTC git commit …`), so no commit carries the local time zone.
-- **Before every push,** on the Mac or in a cloud session, check that `git log --all --format='%an <%ae> %ad|%cd' --date=format:%z | sort -u` shows only that identity and +0000.
+- **Before every push,** on the Mac or in a cloud session, check that `git log --all --format='%an <%ae> %ad|%cn <%ce> %cd' --date=format:%z | sort -u` shows only that identity and +0000, as author and as committer.
 - **Commit messages:** a subject naming the milestones ("M9e, A2, A6: older market caps back, OTHERS as TradingView's, formula weeks from days"), a blank line, then dash bullets of what changed and why, then your tool's co-author trailer, if it uses one.
 
 ### The user's running app
