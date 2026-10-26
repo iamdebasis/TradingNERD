@@ -172,9 +172,25 @@ describe('parseBarsResponse', () => {
   const later = { ...bar, time: bar.time + 86_400 };
 
   it('accepts ascending bars', () => {
-    expect(parseBarsResponse({ bars: [bar, later], hasMore: true })).toEqual({
+    expect(parseBarsResponse({ bars: [bar, later], hasMore: true, fromListing: false })).toEqual({
       bars: [bar, later],
       hasMore: true,
+      fromListing: false,
+    });
+  });
+
+  it('reads whether the oldest page starts at the listing', () => {
+    expect(parseBarsResponse({ bars: [bar], hasMore: false, fromListing: true })).toMatchObject({
+      fromListing: true,
+    });
+  });
+
+  it("doesn't vouch for a listing on a page from before protocol 10, or with more to come", () => {
+    expect(parseBarsResponse({ bars: [bar], hasMore: false })).toMatchObject({
+      fromListing: false,
+    });
+    expect(parseBarsResponse({ bars: [bar], hasMore: true, fromListing: true })).toMatchObject({
+      fromListing: false,
     });
   });
 
@@ -184,6 +200,10 @@ describe('parseBarsResponse', () => {
     ['a malformed bar', { bars: [{ time: 1 }], hasMore: false }],
     ['a missing hasMore', { bars: [bar] }],
     ['no bars array', { hasMore: false }],
+    [
+      'a fromListing that is neither true nor false',
+      { bars: [bar], hasMore: false, fromListing: 1 },
+    ],
   ])('rejects %s', (_label, value) => {
     expect(parseBarsResponse(value)).toBeNull();
   });

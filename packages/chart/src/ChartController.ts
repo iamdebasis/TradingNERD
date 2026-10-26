@@ -7,6 +7,7 @@ import {
   timeZone,
   UTC_CLOCK,
 } from '@tradingnerd/core';
+import type { BarChange } from '@tradingnerd/indicators';
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -19,14 +20,21 @@ import {
   type Logical,
   type LogicalRange,
   type MouseEventParams,
+  type SeriesType,
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { formatCountdown, formatCrosshairTime, formatTickMark, formatValue } from './format';
+import {
+  type IndicatorDebugState,
+  IndicatorLayer,
+  type IndicatorValues,
+} from './indicators/IndicatorLayer';
+import { type ChartIndicator, paneAt } from './indicators/model';
 import { installKeyboard } from './interaction/keyboard';
 import { installVerticalDrag } from './interaction/verticalDrag';
 import { TimeViewport } from './interaction/viewport';
-import { installWheel, spacingLimits } from './interaction/wheel';
+import { installWheel, isOverPriceAxis, spacingLimits } from './interaction/wheel';
 import {
   AXIS_LABEL,
   axisLabelBox,
@@ -51,6 +59,10 @@ export const DEFAULT_BAR_SPACING = 6;
 export const DEFAULT_RIGHT_OFFSET = 10;
 /** TradingView's default price margins: 10% above the highest bar, 8% below the lowest. */
 const SCALE_MARGINS = { top: 0.1, bottom: 0.08 };
+/** A pane separator under the mouse: the library's own highlight (provisional, §11). */
+const PANE_SEPARATOR_HOVER = 'rgba(178, 181, 189, 0.2)';
+/** The library's separator between panes, in CSS px. */
+const PANE_SEPARATOR = 1;
 
 export interface ChartInstrument {
   pricePrecision: number;
@@ -64,6 +76,10 @@ export interface ChartInstrument {
   clock?: BarClock;
   /** How far behind real time its data runs, ms. */
   delayMs?: number;
+  /** Its base asset, for Volume's legend ("Vol · XRP"). */
+  base?: string;
+  /** Whether its bars carry real traded volume: CRYPTOCAP's and formulas' don't (§6.16). */
+  hasVolume?: boolean;
 }
 
 /** The pre/post-market price line: the price, its "Pre"/"Post" tag and color. */
@@ -73,6 +89,8 @@ export interface HoverInfo {
   bar: Bar;
   /** The bar before it, for the change figures; null for the very first bar. */
   previous: Bar | null;
+  /** Its place in the chart's bars, for the indicators' values (indicatorValues). */
+  index: number;
 }
 
 export interface ChartControllerOptions {
@@ -83,6 +101,13 @@ export interface ChartControllerOptions {
   onNeedHistory?: () => void;
   /** Each gesture setting a wheel or trackpad gesture used (see WheelOptions.onGesture). */
   onGesture?: (setting: TuningNumber) => void;
+  /**
+   * After a pane separator is dragged: each indicator pane's height as a share of the price
+   * pane's, by its indicator's id, to keep.
+   */
+  onPaneHeights?: (heights: Record<string, number>) => void;
+  /** The panes moved or resized (see paneLayout), e.g. so their legends follow. */
+  onLayout?: () => void;
 }
 
 /** A snapshot of the chart's state for tests and diagnostics. */
@@ -104,6 +129,10 @@ export interface ChartDebugState {
   /** The pre/post market background bands drawn last (pane x, CSS px). */
   sessionBands: readonly { left: number; right: number; color: string }[];
   priceAxisWidth: number;
+  /** The indicators drawn, in the legend's order. */
+  indicators: IndicatorDebugState[];
+  /** Every pane, the price pane first: its height in CSS px, stretch factor and auto-scale. */
+  panes: { height: number; stretch: number; autoScale: boolean }[];
 }
 
 const toCandle = (bar: Bar, time: number): CandlestickData<Time> => ({
@@ -149,7 +178,13 @@ export class ChartController {
   private readonly crosshair: CrosshairPrimitive;
   private readonly cleanups: (() => void)[] = [];
   private readonly viewport: TimeViewport;
+  private readonly indicators: IndicatorLayer;
   private bars: Bar[] = [];
+  /** The first bar is the pair's listing, where TradingView's history starts too. */
+  private fromListing = false;
+  /** The indicator panes' heights last applied or told, to tell only a change. */
+  private paneHeights: Record<string, number> = {};
+  private layoutFrame = 0;
   /** The chart's time for each bar: its UTC time shifted to the exchange's local clock. */
   private displayTimes: number[] = [];
   private instrument: ChartInstrument | null = null;
@@ -176,6 +211,11 @@ export class ChartController {
         fontFamily: theme.fontFamily,
         fontSize: theme.fontSize,
         attributionLogo: true,
+        panes: {
+          separatorColor: theme.paneSeparator,
+          separatorHoverColor: PANE_SEPARATOR_HOVER,
+          enableResize: true,
+        },
       },
       grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
       crosshair: {
@@ -249,22 +289,59 @@ export class ChartController {
     this.series.attachPrimitive(this.extendedPrice);
     this.series.attachPrimitive(this.lastPrice);
     this.series.attachPrimitive(this.crosshair);
+    this.indicators = new IndicatorLayer(this.chart, theme, this.font);
 
     const onCrosshairMove = (param: MouseEventParams<Time>) => this.onCrosshairMove(param);
     this.chart.subscribeCrosshairMove(onCrosshairMove);
     const onRangeChange = (range: LogicalRange | null) => this.checkHistory(range);
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange);
+    // The library resizes panes itself: while a separator is dragged, the panes' legends
+    // follow it, and its new heights are told when the pointer is let go.
+    let resizing = false;
+    let frame = 0;
+    const element = this.chart.chartElement();
+    const onPointerDown = (event: PointerEvent) => {
+      resizing = event.target instanceof HTMLElement && event.target.style.cursor === 'row-resize';
+    };
+    const onPointerMove = () => {
+      if (!resizing || frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        this.options.onLayout?.();
+      });
+    };
+    const onPointerUp = () => {
+      if (!resizing) return;
+      resizing = false;
+      this.tellPaneHeights();
+      this.options.onLayout?.();
+    };
+    element.addEventListener('pointerdown', onPointerDown, { capture: true });
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    const sizes = new ResizeObserver(() => this.options.onLayout?.());
+    sizes.observe(element);
 
     this.cleanups.push(
       () => this.chart.unsubscribeCrosshairMove(onCrosshairMove),
       () => this.chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange),
-      installWheel(this.chart, this.series, this.viewport, {
+      () => element.removeEventListener('pointerdown', onPointerDown, { capture: true }),
+      () => window.removeEventListener('pointermove', onPointerMove),
+      () => window.removeEventListener('pointerup', onPointerUp),
+      () => cancelAnimationFrame(frame),
+      () => sizes.disconnect(),
+      installWheel(this.chart, this.viewport, {
         tuning: () => this.tuning,
         lastPrice: () => this.bars.at(-1)?.close ?? null,
+        priceAxisAt: (x, y) => {
+          const pane = this.paneAtPoint(y);
+          const size = { width: this.chart.paneSize(0).width, height: pane?.height ?? 0 };
+          return pane && isOverPriceAxis(x, pane.y, size) ? pane : null;
+        },
         ...(options.onGesture ? { onGesture: options.onGesture } : {}),
       }),
       () => this.viewport.clear(),
-      installVerticalDrag(this.chart, this.series),
+      installVerticalDrag(this.chart, (y) => this.paneAtPoint(y)),
       installKeyboard({
         reset: () => this.resetView(),
         zoom: (notches) => this.zoom(notches),
@@ -284,16 +361,26 @@ export class ChartController {
         ? timeZone(instrument.timezone)
         : null;
     this.shift = zone ? (seconds) => seconds + zone.offset(seconds * 1000) / 1000 : null;
-    this.series.applyOptions({ priceFormat: { type: 'price', precision, minMove: tickSize } });
-    this.chart.applyOptions({
-      localization: {
-        locale: 'en-US',
-        priceFormatter: (price: number) => formatValue(price, precision, format),
+    // The candles' own format, not the chart's: each indicator pane's scale writes its own.
+    this.series.applyOptions({
+      priceFormat: {
+        type: 'custom',
+        minMove: tickSize,
+        formatter: (price: number) => formatValue(price, precision, format),
         // Also records where the tick labels are, so our labels can hide the ones they hit.
-        tickmarksPriceFormatter: (prices: readonly number[]) => {
+        tickmarksFormatter: (prices: readonly number[]) => {
           this.tickPrices = [...prices];
           return prices.map((price) => formatValue(price, precision, format));
         },
+      },
+    });
+    this.indicators.setSymbol({
+      base: instrument.base ?? '',
+      hasVolume: instrument.hasVolume ?? true,
+    });
+    this.chart.applyOptions({
+      localization: {
+        locale: 'en-US',
         timeFormatter: (time: Time) => {
           // A tick bar's `time` is its number; show when its first trade happened.
           const start = resolution.unit === 'tick' ? this.tickStart(time as number) : undefined;
@@ -309,19 +396,24 @@ export class ChartController {
     this.refreshLastPrice();
   }
 
-  /** Replaces all data. */
-  setBars(bars: readonly Bar[]): void {
+  /**
+   * Replaces all data. `fromListing`: the first bar is the pair's listing, where TradingView's
+   * history starts too, so indicators start where TradingView's do (BarsResponse.fromListing).
+   */
+  setBars(bars: readonly Bar[], fromListing = false): void {
     this.bars = [...bars];
+    this.fromListing = fromListing;
     this.setSeriesData();
     this.refreshLastPrice();
   }
 
-  /** Adds older history on the left; the view stays where it is. */
-  prependBars(older: readonly Bar[]): void {
+  /** Adds older history on the left; the view stays where it is. `fromListing` as for setBars. */
+  prependBars(older: readonly Bar[], fromListing = false): void {
     const first = this.bars[0]?.time ?? Number.POSITIVE_INFINITY;
     const fresh = older.filter((bar) => bar.time < first);
-    if (fresh.length === 0) return;
+    if (fresh.length === 0 && fromListing === this.fromListing) return;
     this.bars = [...fresh, ...this.bars];
+    this.fromListing = fromListing;
     this.setSeriesData();
   }
 
@@ -335,25 +427,67 @@ export class ChartController {
   }
 
   /**
+   * The indicators to draw, in the legend's order (docs/SPEC.md §6.16): added, changed and
+   * removed ones are brought in line, each computed over the chart's bars.
+   */
+  setIndicators(indicators: readonly ChartIndicator[]): void {
+    this.indicators.set(indicators);
+    this.paneHeights = this.indicators.paneHeights();
+    // A new indicator may wait on older bars than the chart has.
+    this.checkHistory(this.chart.timeScale().getVisibleLogicalRange());
+    // The library lays a new pane out on its next frame: tell of the layout then, too.
+    this.options.onLayout?.();
+    cancelAnimationFrame(this.layoutFrame);
+    this.layoutFrame = requestAnimationFrame(() => this.options.onLayout?.());
+  }
+
+  /**
+   * Each pane's place in the chart (CSS px from its top), the price pane first, and the
+   * indicator in it (none for the price pane), for the panes' legends.
+   */
+  paneLayout(): { top: number; height: number; indicator: string | null }[] {
+    const owners = this.indicators.paneOwners();
+    let top = 0;
+    return this.chart.panes().map((pane, index) => {
+      const height = pane.getHeight();
+      const box = { top, height, indicator: owners.get(index) ?? null };
+      top += height + PANE_SEPARATOR;
+      return box;
+    });
+  }
+
+  /** Each indicator's values on bar `index` (HoverInfo.index), NaN where none shows. */
+  indicatorValues(index: number): IndicatorValues[] {
+    return this.indicators.valuesAt(index);
+  }
+
+  /**
    * Applies a live update to the current bar or opens a new one. A `historical` update corrects
    * an earlier bar (the exchange's final word on it); other stale updates are ignored.
    */
   updateBar(bar: Bar, historical = false): void {
     const last = this.bars.at(-1);
+    let change: BarChange;
+    let index = this.bars.length - 1;
     if (!last || bar.time > last.time) {
       const time = this.displayTime(bar.time, this.displayTimes.at(-1));
       this.bars.push(bar);
       this.displayTimes.push(time);
       this.series.update(toCandle(bar, time));
+      change = 'new';
+      index = this.bars.length - 1;
     } else if (bar.time === last.time) {
       this.bars[this.bars.length - 1] = bar;
       this.series.update(toCandle(bar, this.displayTimes.at(-1) ?? bar.time));
+      change = 'tick';
     } else {
-      const index = historical ? indexOfTime(this.bars, bar.time) : -1;
+      index = historical ? indexOfTime(this.bars, bar.time) : -1;
       if (index < 0) return;
       this.bars[index] = bar;
       this.series.update(toCandle(bar, this.displayTimes[index] ?? bar.time), true);
+      change = 'correction';
     }
+    this.indicators.update(this.bars, this.displayTimes, change, index);
     this.refreshLastPrice();
   }
 
@@ -375,15 +509,16 @@ export class ChartController {
   }
 
   /** The latest bar and the one before it, for the legend when nothing is hovered. */
-  latest(): { bar: Bar; previous: Bar | null } | null {
+  latest(): { bar: Bar; previous: Bar | null; index: number } | null {
     const bar = this.bars.at(-1);
-    return bar ? { bar, previous: this.bars.at(-2) ?? null } : null;
+    return bar ? { bar, previous: this.bars.at(-2) ?? null, index: this.bars.length - 1 } : null;
   }
 
   /** Auto-scale on, default zoom, scrolled to the latest bar (TradingView's Alt + R). */
   resetView(): void {
     this.viewport.clear();
     this.series.priceScale().setAutoScale(true);
+    this.indicators.autoScale();
     this.chart.timeScale().resetTimeScale();
   }
 
@@ -394,6 +529,7 @@ export class ChartController {
   showLatest(): void {
     this.viewport.clear();
     this.series.priceScale().setAutoScale(true);
+    this.indicators.autoScale();
     this.chart.timeScale().scrollToPosition(DEFAULT_RIGHT_OFFSET, false);
   }
 
@@ -444,6 +580,15 @@ export class ChartController {
       extendedPriceLabel: extendedLabel(this.extendedPrice.current()),
       sessionBands: this.sessionShade.drawnBands(),
       priceAxisWidth: this.chart.priceScale('right').width(),
+      indicators: this.indicators.debug(),
+      panes: this.chart.panes().map((pane, index) => {
+        const series = index === 0 ? this.series : this.indicators.scaleSeries(index);
+        return {
+          height: pane.getHeight(),
+          stretch: pane.getStretchFactor(),
+          autoScale: series ? series.priceScale().options().autoScale : true,
+        };
+      }),
     };
   }
 
@@ -476,7 +621,9 @@ export class ChartController {
 
   destroy(): void {
     clearTimeout(this.countdownTimer);
+    cancelAnimationFrame(this.layoutFrame);
     for (const cleanup of this.cleanups.splice(0)) cleanup();
+    this.indicators.destroy();
     this.chart.remove();
   }
 
@@ -484,20 +631,55 @@ export class ChartController {
     const { point, logical } = param;
     if (!point || logical === undefined || this.bars.length === 0) {
       this.crosshair.update(null);
+      this.indicators.crosshairAt(null, null);
       this.options.onHover?.(null);
       return;
     }
-    const price = this.series.coordinateToPrice(point.y);
-    this.crosshair.update(price === null ? null : { y: point.y, text: this.format(price) });
+    // The price label shows in the pane the pointer is in, with that pane's value.
+    const pane = param.paneIndex ?? 0;
+    if (pane === 0) {
+      const price = this.series.coordinateToPrice(point.y);
+      this.crosshair.update(price === null ? null : { y: point.y, text: this.format(price) });
+    } else {
+      this.crosshair.update(null);
+    }
+    this.indicators.crosshairAt(pane, point.y);
     // Past either end of the data, the legend shows the nearest bar, as TradingView does.
     const index = Math.min(Math.max(Math.round(logical), 0), this.bars.length - 1);
     const bar = this.bars[index];
-    if (bar) this.options.onHover?.({ bar, previous: this.bars[index - 1] ?? null });
+    if (bar) this.options.onHover?.({ bar, previous: this.bars[index - 1] ?? null, index });
   }
 
   private checkHistory(range: LogicalRange | null): void {
     if (!range || this.bars.length === 0) return;
-    if (range.from < (range.to - range.from) * 2) this.options.onNeedHistory?.();
+    // Bars an indicator still waits on count as history not loaded yet (the warm-up rule).
+    const loaded = range.from - this.indicators.waitingBars();
+    if (loaded < (range.to - range.from) * 2) this.options.onNeedHistory?.();
+  }
+
+  /** The pane at a chart y (CSS px from the chart's top): its scale's series and the y in it. */
+  private paneAtPoint(
+    y: number,
+  ): { series: ISeriesApi<SeriesType>; y: number; height: number; main: boolean } | null {
+    const heights = this.chart.panes().map((pane) => pane.getHeight());
+    const hit = paneAt(y, heights);
+    if (!hit) return null;
+    const series = hit.index === 0 ? this.series : this.indicators.scaleSeries(hit.index);
+    if (!series) return null;
+    return { series, y: hit.y, height: heights[hit.index] ?? 0, main: hit.index === 0 };
+  }
+
+  /** Tells the app of indicator panes resized by dragging a separator. */
+  private tellPaneHeights(): void {
+    if (!this.options.onPaneHeights) return;
+    const heights = this.indicators.paneHeights();
+    const ids = Object.keys(heights);
+    const changed =
+      ids.length !== Object.keys(this.paneHeights).length ||
+      ids.some((id) => Math.abs((heights[id] ?? 0) - (this.paneHeights[id] ?? 0)) > 1e-6);
+    if (!changed) return;
+    this.paneHeights = heights;
+    this.options.onPaneHeights(heights);
   }
 
   private tickYs(): number[] {
@@ -552,6 +734,7 @@ export class ChartController {
     }
     this.displayTimes = times;
     this.series.setData(candles);
+    this.indicators.setBars(this.bars, this.displayTimes, this.fromListing);
   }
 
   /**

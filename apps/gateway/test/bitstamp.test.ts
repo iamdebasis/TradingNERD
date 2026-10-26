@@ -269,14 +269,20 @@ describe('BitstampExchange', () => {
     const { bitstamp } = await setup();
     const market = new MarketService([bitstamp]);
     const compare = async (toMs: number, count: number) => {
-      const sideBySide = await market.getBars('BITSTAMP:XRPUSD', '1', toMs / 1000, count);
+      const { fromListing, ...sideBySide } = await market.getBars(
+        'BITSTAMP:XRPUSD',
+        '1',
+        toMs / 1000,
+        count,
+      );
       expect(sideBySide).toEqual(await pageBack(bitstamp, 'XRPUSD', r('1'), toMs, count));
-      return sideBySide;
+      return { ...sideBySide, fromListing };
     };
     expect(await compare(NOW_BAR - 100 * MIN, 1_500)).toMatchObject({ hasMore: true });
     const first = await compare(FIRST + 1_000 * MIN, 1_500);
     expect(first.hasMore).toBe(false);
     expect(first.bars).toHaveLength(1_000);
+    expect(first.fromListing).toBe(true); // Bitstamp's bars reach back to each pair's listing
   }, 20_000);
 
   it('builds 3-day bars from its days, on the same boundaries as every exchange', async () => {

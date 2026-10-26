@@ -18,6 +18,13 @@ export {
   formatValue,
   formatVolume,
 } from './format';
+export type { IndicatorDebugState, IndicatorValues } from './indicators/IndicatorLayer';
+export {
+  type ChartIndicator,
+  formatIndicatorValue,
+  NEW_PANE_STRETCH,
+  NO_VALUE,
+} from './indicators/model';
 export type { SessionPart, SessionShading } from './plugins/SessionShadePrimitive';
 export type { ChartTheme } from './theme';
 export {

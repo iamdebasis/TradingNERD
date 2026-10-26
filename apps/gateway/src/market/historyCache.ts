@@ -72,6 +72,7 @@ export class HistoryCache {
       const response = {
         bars: trimmed ? bars.slice(-count) : bars,
         hasMore: page.response.hasMore || trimmed,
+        fromListing: page.response.fromListing && !trimmed,
       };
       return this.put(key, response, now);
     });

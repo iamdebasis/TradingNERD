@@ -15,11 +15,24 @@ const windowsChromium =
   /Windows/.test(navigator.userAgent) &&
   /Chrome\//.test(navigator.userAgent);
 
+/** The pane whose price scale the wheel stretches: its scale's series and the pointer's y in it. */
+export interface PriceAxisTarget {
+  series: ISeriesApi<SeriesType>;
+  y: number;
+  /** The price pane, whose `lastPrice` anchor is the latest price. */
+  main: boolean;
+}
+
 export interface WheelOptions {
   /** The gesture constants, read on every event so a change applies at once. */
   tuning(): GestureTuning;
   /** The latest price, for the `lastPrice` anchor. */
   lastPrice(): number | null;
+  /**
+   * The pane whose price axis is at a point (px from the chart's top-left), or null when the
+   * point isn't over a price axis.
+   */
+  priceAxisAt(x: number, y: number): PriceAxisTarget | null;
   /** Each setting a wheel event used, e.g. so a settings panel can show which one is in play. */
   onGesture?(setting: TuningNumber): void;
 }
@@ -37,8 +50,9 @@ export function isOverPriceAxis(
  * Mouse wheel and trackpad, TradingView style:
  * - Over the chart and the time axis, a vertical wheel zooms with the right edge fixed; Ctrl/⌘ +
  *   wheel and trackpad pinch (which browsers report as Ctrl + wheel) zoom around the cursor.
- * - Over the price axis, a vertical wheel stretches the price scale instead (the way that zooms
- *   the chart in makes the candles taller) and turns auto-scale off, as dragging the axis does.
+ * - Over a pane's price axis, a vertical wheel stretches that pane's price scale instead (the
+ *   way that zooms the chart in makes the candles taller) and turns its auto-scale off, as
+ *   dragging the axis does.
  * - A horizontal swipe or Shift + wheel pans, anywhere.
  * The OS supplies the momentum, so a flick keeps gliding.
  *
@@ -47,28 +61,28 @@ export function isOverPriceAxis(
  */
 export function installWheel(
   chart: IChartApi,
-  series: ISeriesApi<SeriesType>,
   viewport: TimeViewport,
   options: WheelOptions,
 ): () => void {
   const element = chart.chartElement();
 
-  const anchorPrice = (tuning: GestureTuning, range: PriceRange, y: number): number => {
+  const anchorPrice = (tuning: GestureTuning, range: PriceRange, target: PriceAxisTarget) => {
     const center = (range.from + range.to) / 2;
-    if (tuning.priceAnchor === 'pointer') return series.coordinateToPrice(y) ?? center;
-    if (tuning.priceAnchor === 'lastPrice') return options.lastPrice() ?? center;
+    if (tuning.priceAnchor === 'pointer')
+      return target.series.coordinateToPrice(target.y) ?? center;
+    if (tuning.priceAnchor === 'lastPrice' && target.main) return options.lastPrice() ?? center;
     return center;
   };
 
   // Unlike the time scale, the price scale applies a new range at once, so every event in a
   // frame builds on the previous one without help.
-  const scalePrice = (tuning: GestureTuning, dy: number, y: number) => {
-    const scale = series.priceScale();
+  const scalePrice = (tuning: GestureTuning, dy: number, target: PriceAxisTarget) => {
+    const scale = target.series.priceScale();
     const range = scale.getVisibleRange();
     if (!range || !(range.to > range.from)) return;
     const notches = wheelZoomScale(tuning.priceReversed ? -dy : dy);
     const factor = 1 + notches * tuning.priceStep;
-    scale.setVisibleRange(scalePriceRange(range, factor, anchorPrice(tuning, range, y)));
+    scale.setVisibleRange(scalePriceRange(range, factor, anchorPrice(tuning, range, target)));
   };
 
   const onWheel = (event: WheelEvent) => {
@@ -80,8 +94,9 @@ export function installWheel(
     const y = event.clientY - box.top;
 
     let zoomTime = dy !== 0;
-    if (zoomTime && isOverPriceAxis(x, y, chart.paneSize())) {
-      scalePrice(tuning, dy, y);
+    const axis = zoomTime ? options.priceAxisAt(x, y) : null;
+    if (axis) {
+      scalePrice(tuning, dy, axis);
       options.onGesture?.('priceStep');
       zoomTime = false;
     }

@@ -42,9 +42,15 @@ describe.runIf(LIVE)('Binance, live', () => {
     expect(bars.at(-1)?.time).toBe(today);
   });
 
-  it('pages all the way back to the 2018 listing', async () => {
-    const { bars, hasMore } = await market.getBars('BINANCE:XRPUSDT', '1D', null, 5_000);
+  it('pages all the way back to the 2018 listing, and says so', async () => {
+    const { bars, hasMore, fromListing } = await market.getBars(
+      'BINANCE:XRPUSDT',
+      '1D',
+      null,
+      5_000,
+    );
     expect(hasMore).toBe(false);
+    expect(fromListing).toBe(true);
     expect(new Date((bars[0]?.time ?? 0) * 1000).toISOString().slice(0, 10)).toBe('2018-05-04');
     const gaps = bars.slice(1).filter((bar, i) => bar.time - (bars[i]?.time ?? 0) !== 86_400);
     expect(gaps).toEqual([]);

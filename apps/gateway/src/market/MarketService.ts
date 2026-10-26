@@ -23,7 +23,7 @@ import {
 import { FormulaExchange } from '../formula/FormulaExchange.ts';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
 import { Feed } from './feed.ts';
-import { fetchHistory, fetchSlices, pageBack } from './history.ts';
+import { fetchHistory, fetchSlices, type History, pageBack } from './history.ts';
 import { HistoryCache, type MarketTime } from './historyCache.ts';
 import type { BarChange } from './liveBar.ts';
 import { QuoteFeed, type QuoteListener } from './quotes.ts';
@@ -132,17 +132,14 @@ export class MarketService {
       case 'native':
       case 'resampled': {
         const hours = sessionOf(adapter, plan.target, session);
-        const load = (to: number | null, count: number) =>
-          plan.kind === 'native'
-            ? fetchHistory(
-                adapter,
-                ticker,
-                plan.target,
-                to === null ? null : to * 1000,
-                count,
-                hours,
-              )
-            : getResampledBars(adapter, ticker, plan.target, plan.base, to, count, hours);
+        const load = async (to: number | null, count: number): Promise<BarsResponse> => {
+          if (plan.kind === 'resampled') {
+            return getResampledBars(adapter, ticker, plan.target, plan.base, to, count, hours);
+          }
+          const toMs = to === null ? null : to * 1000;
+          const history = await fetchHistory(adapter, ticker, plan.target, toMs, count, hours);
+          return { ...history, fromListing: startsAtListing(adapter, plan.target, history, to) };
+        };
         if (!this.history) return load(toSec, countBack);
         const page = `${id}|${formatResolution(plan.target)}|${hours}|${countBack}`;
         const time = marketTime(adapter, hours);
@@ -357,6 +354,23 @@ function intervalPlan(adapter: ExchangeAdapter, text: string): IntervalPlan {
 }
 
 /**
+ * Whether history that has run out begins at the pair's listing (BarsResponse.fromListing), as
+ * the exchange vouches for its first bar: the oldest fetched, or, when nothing is older than the
+ * bar the page was asked for bars before, that bar. Later than the first bar can only make an
+ * exchange vouch less (Kraken's 720 bars, Alpaca's 2016).
+ */
+function startsAtListing(
+  adapter: ExchangeAdapter,
+  resolution: Resolution,
+  history: History,
+  toSec: number | null,
+): boolean {
+  if (history.hasMore) return false;
+  const firstSec = history.bars[0]?.time ?? toSec;
+  return firstSec !== null && adapter.historyFromListing?.(resolution, firstSec * 1000) === true;
+}
+
+/**
  * History for a resampled interval: enough base bars for `countBack` bars plus one, folded.
  * The oldest bar is dropped if the base bars may not reach back to its start, unless they begin
  * at the pair's listing (`historyFromListing`): a bar made of part of its period would be wrong.
@@ -383,16 +397,15 @@ async function getResampledBars(
   let bars = resampleBars(history.bars, target, clock);
   const firstBase = history.bars[0];
   const partial = firstBase && bars[0] && firstBase.time > bars[0].time;
-  if (partial && (history.hasMore || !adapter.historyFromListing?.(base, firstBase.time * 1000))) {
-    bars = bars.slice(1);
-  }
+  const fromListing = startsAtListing(adapter, base, history, toSec);
+  if (partial && !fromListing) bars = bars.slice(1);
   if (toSec !== null) bars = bars.filter((bar) => bar.time < toSec);
   let hasMore = history.hasMore;
   if (bars.length > countBack) {
     bars = bars.slice(-countBack);
     hasMore = true;
   }
-  return { bars, hasMore };
+  return { bars, hasMore, fromListing: fromListing && !hasMore };
 }
 
 /** The end of the bar that contains `ms`, or `ms` itself when a bar opens there. */

@@ -12,6 +12,8 @@ export function toChartTheme(theme: Theme): ChartTheme {
     labelText: theme.color.labelText,
     up: theme.color.up,
     down: theme.color.down,
+    // The gutter between panels, until TradingView's separator is measured (provisional, §11).
+    paneSeparator: theme.color.gutter,
     fontFamily: theme.font.family,
     fontSize: theme.font.sizeAxis,
   };

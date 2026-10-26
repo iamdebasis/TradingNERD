@@ -7,8 +7,9 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 ```
  Browser: React web app (Vite, 127.0.0.1:5173)
  ┌──────────┬───────────────────────────────┬──────────────────────┐
- │ Top bar  │ Chart: Lightweight Charts     │ Watchlists, flags,   │
- │          │ + our gestures and plugins    │ symbol search, logos │
+ │ Top bar, │ Chart: Lightweight Charts     │ Watchlists, flags,   │
+ │ Indica-  │ + our gestures and plugins,   │ symbol search, logos │
+ │ tors     │ indicators and their panes    │                      │
  └──────────┴───────────────┬───────────────┴──────────────────────┘
    REST (history /api/bars, search, lists, keys) + one WebSocket (live bars, quotes, book)
  Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only)
@@ -30,8 +31,9 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 | Package | What it holds |
 |---|---|
 | `packages/core` | Shared by both sides: the protocol (`protocol.ts`, `market.ts`), resolutions and intervals, the resampler (`resample.ts`), the market clock and status (`clock.ts`, `schedule.ts`, `marketStatus.ts`, `timezone.ts`), formulas (`formula.ts`), watchlists and their TradingView `.txt` files, flags, logos, stocks and older-caps status types |
-| `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels), `tuning.ts` for the feel's constants |
-| `apps/web` | The screen: `layout/AppShell.tsx`, `chart/` (pane, legend, interval prompt, chart settings), `toolbar/` (intervals), `watchlist/` (lists, sections, flags, row menus, drag), `search/` (symbol search and typed formulas), `logos/`, `stocks/` (the Alpaca key dialog), `olderCaps/` (the Live Coin Watch dialog), `gestures/` (the tuning popup), `theme/` (tokens), `data/` (the gateway connection and REST client) |
+| `packages/indicators` | TradingView's built-in indicators as Pine computes them (I1: Volume and RSI): the `ta.*` kernels (`kernels.ts`), the definitions (`volume.ts`, `rsi.ts`: inputs, plots, levels, fills, defaults), `IndicatorRun` (`run.ts`: closed bars committed, the live bar tentative, a correction redone), the warm-up rule (`warmup.ts`), settings and the registry. No DOM |
+| `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels, fills, value labels), `indicators/` (`IndicatorLayer.ts`: the indicators' series, panes, levels and labels), `tuning.ts` for the feel's constants |
+| `apps/web` | The screen: `layout/AppShell.tsx`, `chart/` (pane, legend, interval prompt, chart settings), `toolbar/` (intervals), `indicators/` (the store, the Indicators button and dialog, legend rows, the settings dialog), `watchlist/` (lists, sections, flags, row menus, drag), `search/` (symbol search and typed formulas), `logos/`, `stocks/` (the Alpaca key dialog), `olderCaps/` (the Live Coin Watch dialog), `gestures/` (the tuning popup), `theme/` (tokens), `data/` (the gateway connection and REST client) |
 | `apps/gateway` | The local server (below) |
 
 ## The gateway
@@ -60,6 +62,12 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   4. Scrolling back asks for the next page the same way.
 - **Live:** once history is on the chart, the tab subscribes over the WebSocket (`ws/session.ts`: bars, book and quotes). The adapter's candles and trades stream in, `liveBar.ts` merges them into the forming candle, and the session pushes it to the tab.
 - **Quotes** (the watchlist's Last, Chg and Chg%) come from the same feeds, throttled.
+- **Indicators** (I1) are computed in the browser from the chart's own bars:
+  1. The app's indicator store (`apps/web/src/indicators/indicatorStore.ts`, kept in this browser) hands its list to `ChartController.setIndicators`.
+  2. `IndicatorLayer` runs each one over the chart's bars (`IndicatorRun`) and draws it: Volume at the bottom of the price pane, the others in panes below.
+  3. Every change to the bars reaches it: a page of history (computed afresh), a live tick (the last bar again), a new bar, an exchange's correction.
+  4. The legend reads the values on the bar it shows (`indicatorValues`).
+  5. The warm-up rule: a value that still depends on bars not loaded isn't drawn; the chart asks for older pages until it's settled, or the gateway says the history starts at the listing (`fromListing` on a page, protocol v10).
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 
 ## CRYPTOCAP (`apps/gateway/src/cryptocap/`)
@@ -110,6 +118,8 @@ SPEC §6.8 lists every file. The ones to protect:
   - Live Coin Watch allows about 0.4 requests a second after a burst, and 10,000 a day; a 429 means "slow down" unless `/credits` says 0.
 - **The user's `pnpm dev` restarts the gateway on every edit** of its files (`node --watch`).
 - **Visual baselines** (`apps/web/tests/e2e/visual.spec.ts-snapshots/`) change only after looking at the new image.
+- **Each price scale formats its own numbers.** The symbol's format is the candle series' own (`priceFormat: custom`), not the chart's localization, which would override every pane's. Indicator panes format theirs.
+- **The library lays out a new pane a frame later:** read a pane's height from the pane (`getHeight()`), not `chart.paneSize(i)`, which throws until then.
 
 ## Adding things
 
@@ -120,3 +130,8 @@ SPEC §6.8 lists every file. The ones to protect:
   4. Measure its history depth and limits first (SPEC §4.3, core value 5).
 - **A CRYPTOCAP symbol:** add it to `symbols.ts` and `indices.ts`, with TradingView's definition from its help center (SPEC §4.11), and check it against the user's screenshots.
 - **A chart integration of any kind:** go through core value 5 (compare providers on depth and accuracy) before building.
+- **A built-in indicator:**
+  1. Research it first (core value 3): TradingView's formula and defaults, from its Help Center, Pine's reference and the built-in's source.
+  2. Add its definition to `packages/indicators` (inputs, plots, levels, fills, format, title, `settledFrom`) with any new kernels, and register it.
+  3. Test it against published values and hand-built cases, bar by bar against one pass (`run.test.ts`).
+  4. Hand-check it against TradingView on the user's screenshots (SPEC §9).

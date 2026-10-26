@@ -145,7 +145,9 @@ test.describe('matches the TradingView reference pixels', () => {
   });
 
   test('surfaces have the reference colors', async ({ page }) => {
-    expect(isGray(ours, 1500, 30 + CROP_TOP, SURFACE)).toBe(true); // toolbar
+    // The toolbar, between the Gestures and Settings buttons (TradingView's Indicators button
+    // now sits further left, where this was sampled before).
+    expect(isGray(ours, 2200, 30 + CROP_TOP, SURFACE)).toBe(true); // toolbar
     expect(isGray(ours, 2900, 1500 + CROP_TOP, SURFACE)).toBe(true); // watchlist
     expect(isGray(ours, 2625, 1000 + CROP_TOP, GUTTER)).toBe(true); // splitter
     // The chart canvas: the empty top-right corner of the pane holds only background or grid.

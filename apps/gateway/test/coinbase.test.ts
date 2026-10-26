@@ -194,15 +194,21 @@ describe('CoinbaseExchange', () => {
     const { coinbase } = await setup();
     const market = new MarketService([coinbase]);
     const compare = async (toMs: number, count: number) => {
-      const sideBySide = await market.getBars('COINBASE:XRPUSD', '1', toMs / 1000, count);
+      const { fromListing, ...sideBySide } = await market.getBars(
+        'COINBASE:XRPUSD',
+        '1',
+        toMs / 1000,
+        count,
+      );
       expect(sideBySide).toEqual(await pageBack(coinbase, 'XRPUSD', r('1'), toMs, count));
-      return sideBySide;
+      return { ...sideBySide, fromListing };
     };
     // Through the long quiet stretch, and back to the first trade.
     expect(await compare(QUIET.to + 100 * MIN, 1_000)).toMatchObject({ hasMore: true });
     const first = await compare(FIRST + 1_000 * MIN, 1_500);
     expect(first.hasMore).toBe(false);
     expect(first.bars).toHaveLength(1_000);
+    expect(first.fromListing).toBe(true); // Coinbase's bars reach back to each pair's listing
   }, 20_000);
 
   it('asks for each past window once, though the look-backs from its neighbours ask too', async () => {

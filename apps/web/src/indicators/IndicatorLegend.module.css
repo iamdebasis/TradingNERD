@@ -1,0 +1,121 @@
+/*
+ * Measured from docs/reference/01-chart-layout.png at 2× (CSS px): rows 24 px apart from the
+ * legend's left edge, 14 px text; a hidden indicator's title #575757 with the 16 × 12 crossed-out
+ * eye (#DBDBDB) 10 px after it; under the rows a 27 × 21 fold button, 1 px #3D3D3D outline, its
+ * 8 × 5 chevron centered. Visible rows, values and the hover buttons are provisional
+ * (docs/SPEC.md §11).
+ */
+.rows {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.title {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+
+.row[data-hidden] .title {
+  color: #575757;
+}
+
+.value {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hiddenEye {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* Hide, Settings and Remove, on the row under the mouse (or with focus in it). */
+.buttons {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.row:hover .buttons,
+.row:focus-within .buttons {
+  display: flex;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--color-gutter);
+}
+
+.button:focus-visible,
+.hiddenEye:focus-visible,
+.fold:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.fold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 21px;
+  margin-top: 2px;
+  padding: 0;
+  border: 1px solid var(--color-chip);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.fold:hover {
+  background: var(--color-gutter);
+}
+
+/* An indicator pane's own legend, at its top-left (the main legend's 9 px inset). */
+.paneLegend {
+  position: absolute;
+  z-index: 2;
+  left: 9px;
+  margin-top: 3px;
+  pointer-events: none;
+}

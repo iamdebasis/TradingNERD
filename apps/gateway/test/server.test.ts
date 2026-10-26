@@ -167,6 +167,7 @@ describe('gateway HTTP', () => {
     const res = await get(`/api/bars?symbol=${SYMBOL}&resolution=1D`);
     expect(res.json().bars.at(-1).time).toBe(LAST);
     expect(res.json().hasMore).toBe(false); // only 10 fake bars exist
+    expect(res.json().fromListing).toBe(false); // and the fake exchange doesn't vouch for a listing
   });
 
   it('gives a market without extended hours its regular bars for either session', async () => {

@@ -57,7 +57,11 @@ function start(recent: Promise<BarsResponse>) {
 describe('QuoteFeed', () => {
   it("quotes the live price against yesterday's close", async () => {
     const { events, state, bar } = start(
-      Promise.resolve({ bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.3)], hasMore: true }),
+      Promise.resolve({
+        bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.3)],
+        hasMore: true,
+        fromListing: false,
+      }),
     );
     state('live');
     bar(day(TODAY, 1.2955));
@@ -68,7 +72,11 @@ describe('QuoteFeed', () => {
 
   it('sends nothing for trades that change neither the price nor the previous close', async () => {
     const { events, bar } = start(
-      Promise.resolve({ bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.3)], hasMore: true }),
+      Promise.resolve({
+        bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.3)],
+        hasMore: true,
+        fromListing: false,
+      }),
     );
     bar(day(TODAY, 1.29));
     await vi.waitFor(() => expect(events).toEqual(['quote 1.29 1.3115']));
@@ -80,7 +88,11 @@ describe('QuoteFeed', () => {
 
   it("rolls over at midnight: the old day's last price becomes the previous close", async () => {
     const { events, bar } = start(
-      Promise.resolve({ bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.3)], hasMore: true }),
+      Promise.resolve({
+        bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.3)],
+        hasMore: true,
+        fromListing: false,
+      }),
     );
     bar(day(TODAY, 1.29));
     await vi.waitFor(() => expect(events.at(-1)).toBe('quote 1.29 1.3115'));
@@ -99,7 +111,11 @@ describe('QuoteFeed', () => {
     const { events, bar } = start(new Promise((resolve) => (answer = resolve)));
     bar(day(TODAY, 1.29));
     bar(day(TODAY + DAY, 1.31));
-    answer({ bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.29)], hasMore: true });
+    answer({
+      bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.29)],
+      hasMore: true,
+      fromListing: false,
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(events.at(-1)).toBe('quote 1.31 1.29');
   });
@@ -109,7 +125,11 @@ describe('QuoteFeed', () => {
     const { events, bar } = start(new Promise((resolve) => (answer = resolve)));
     bar(day(TODAY, 1.29));
     expect(events).toEqual([]);
-    answer({ bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.29)], hasMore: true });
+    answer({
+      bars: [day(TODAY - DAY, 1.3115), day(TODAY, 1.29)],
+      hasMore: true,
+      fromListing: false,
+    });
     await vi.waitFor(() => expect(events).toEqual(['quote 1.29 1.3115']));
   });
 

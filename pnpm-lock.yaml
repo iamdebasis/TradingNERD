@@ -206,6 +206,9 @@ importers:
       '@tradingnerd/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@tradingnerd/indicators':
+        specifier: workspace:*
+        version: link:../../packages/indicators
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -240,11 +243,20 @@ importers:
       '@tradingnerd/core':
         specifier: workspace:*
         version: link:../core
+      '@tradingnerd/indicators':
+        specifier: workspace:*
+        version: link:../indicators
       lightweight-charts:
         specifier: ^5.2.1
         version: 5.2.1
 
   packages/core: {}
+
+  packages/indicators:
+    dependencies:
+      '@tradingnerd/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 
