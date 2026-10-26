@@ -6,12 +6,14 @@ import {
   type FlagState,
   type LogoStatus,
   type NamedWatchlist,
+  type OlderCapsStatus,
   parseApiError,
   parseBarsResponse,
   parseExchangeList,
   parseFlagState,
   parseLogoStatus,
   parseNamedWatchlist,
+  parseOlderCapsStatus,
   parseStockKeyStatus,
   parseSymbolInfo,
   parseSymbolSearchResponse,
@@ -247,3 +249,28 @@ export const stocksApi = {
 };
 
 export type StocksApi = typeof stocksApi;
+
+async function olderCaps(path: string, init: RequestInit = {}): Promise<OlderCapsStatus> {
+  const status = parseOlderCapsStatus(
+    await getJson(`${API_PREFIX}/older-caps${path}`, undefined, init),
+  );
+  if (!status) throw new ApiError('internal_error', 'The gateway sent a malformed status');
+  return status;
+}
+
+/**
+ * CRYPTOCAP's older market caps: their download's progress, and the Live Coin Watch key it
+ * needs, which lives in the gateway; the browser only ever sees it masked.
+ */
+export const olderCapsApi = {
+  status: () => olderCaps(''),
+  saveKey: (key: string) =>
+    olderCaps('/key', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key }),
+    }),
+  removeKey: () => olderCaps('/key', { method: 'DELETE' }),
+};
+
+export type OlderCapsApi = typeof olderCapsApi;

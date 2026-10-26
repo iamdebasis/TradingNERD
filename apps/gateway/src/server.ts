@@ -9,12 +9,14 @@ import {
 import Fastify, { type FastifyInstance, LogController } from 'fastify';
 import type { SymbolCatalog } from './catalog/SymbolCatalog.ts';
 import type { GatewayConfig } from './config.ts';
+import type { OlderCaps } from './cryptocap/older.ts';
 import type { LogoService } from './logos/LogoService.ts';
 import type { MarketService } from './market/MarketService.ts';
 import { MarketError } from './market/types.ts';
 import { registerFlagRoutes } from './routes/flags.ts';
 import { registerLogoRoutes } from './routes/logos.ts';
 import { registerMarketRoutes } from './routes/market.ts';
+import { registerOlderCapsRoutes } from './routes/olderCaps.ts';
 import { registerStockRoutes } from './routes/stocks.ts';
 import { registerSymbolRoutes } from './routes/symbols.ts';
 import { registerWatchlistRoutes } from './routes/watchlist.ts';
@@ -32,6 +34,8 @@ export interface GatewayDeps {
   logos: LogoService;
   /** US stocks' Alpaca key routes (absent in tests that don't need them). */
   stocks?: UsStocksMarket;
+  /** Older market caps' Live Coin Watch key routes (absent in tests that don't need them). */
+  olderCaps?: OlderCaps;
 }
 
 export async function buildServer(
@@ -91,6 +95,7 @@ export async function buildServer(
   registerFlagRoutes(app, deps.flags);
   registerLogoRoutes(app, deps.logos);
   if (deps.stocks) registerStockRoutes(app, deps.stocks);
+  if (deps.olderCaps) registerOlderCapsRoutes(app, deps.olderCaps);
 
   app.get(WS_PATH, { websocket: true }, (socket) => attachSession(socket, deps.market));
 

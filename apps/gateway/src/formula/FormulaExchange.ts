@@ -29,8 +29,9 @@ import {
 } from '../market/types.ts';
 
 /**
- * The intervals a formula is served in: every one of the chart's menu, built from its symbols'
- * own bars of that interval. Seconds and ticks aren't (TradingView's spreads start at minutes).
+ * The intervals a formula is served in: every one of the chart's menu. Up to a day they're built
+ * from its symbols' own bars; longer ones from the formula's own days (`nativeResolutions`).
+ * Seconds and ticks aren't (TradingView's spreads start at minutes).
  */
 export const FORMULA_RESOLUTIONS = [
   '1',
@@ -83,25 +84,18 @@ const still = (time: number, price: number): Bar => ({
 });
 
 /**
- * Where bars of the same period meet, whatever each symbol's clock: day, week and month bars by
- * their UTC date (a stock's day opens at 13:30 UTC, a coin's at midnight), shorter ones by time.
+ * Where bars of the same period meet, whatever each symbol's clock: day bars by their UTC date
+ * (a stock's day opens at 13:30 UTC, a coin's at midnight), shorter ones by time.
  */
 function periodKey(time: number, resolution: Resolution): number {
-  const day = Math.floor(time / 86_400);
-  switch (resolution.unit) {
-    case 'day':
-      return Math.floor(day / resolution.count);
-    case 'week':
-      // Weeks from Monday: 1 January 1970 was a Thursday.
-      return Math.floor((day + 3) / 7 / resolution.count);
-    case 'month': {
-      const date = new Date(time * 1000);
-      return Math.floor((date.getUTCFullYear() * 12 + date.getUTCMonth()) / resolution.count);
-    }
-    default:
-      return time;
-  }
+  return resolution.unit === 'day' ? Math.floor(time / 86_400 / resolution.count) : time;
 }
+
+/** Longer than a day: built by the market service from the formula's own days. */
+const fromDays = (resolution: Resolution) =>
+  resolution.unit === 'week' ||
+  resolution.unit === 'month' ||
+  (resolution.unit === 'day' && resolution.count > 1);
 
 /**
  * The bars intraday formulas of up to 5 minutes are built from: 1-minute ones, as TradingView
@@ -125,9 +119,14 @@ export class FormulaExchange implements ExchangeAdapter {
   readonly id = 'FORMULA';
   readonly name = 'Formula';
   readonly maxBarsPerRequest = 1_000;
+  /**
+   * Up to a day. The market service builds longer bars from the formula's own days, as
+   * TradingView builds a spread's: a symbol's dip on one day shows in its week, where each
+   * symbol's weekly bar would hide it (docs/SPEC.md §6.15).
+   */
   readonly nativeResolutions: readonly Resolution[] = FORMULA_RESOLUTIONS.map(
     (text) => parseResolution(text) as Resolution,
-  );
+  ).filter((resolution) => !fromDays(resolution));
   readonly gapless: boolean;
 
   private readonly market: MarketService;

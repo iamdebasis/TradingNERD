@@ -24,6 +24,8 @@ import { AnchorBook } from './anchors.ts';
 import { CapHistory, type CapSource, CHUNK_BARS } from './history.ts';
 import { BITCOIN, type CoinCapBar, compositeBars } from './indices.ts';
 import { LiveCaps } from './live.ts';
+import { LiveCoinWatchClient } from './livecoinwatch.ts';
+import { OlderCaps, type OlderSeries } from './older.ts';
 import { PairBook } from './pairs.ts';
 import {
   type CapTicker,
@@ -44,6 +46,9 @@ import { CoinUniverse } from './universe.ts';
  */
 export const CRYPTOCAP_RESOLUTIONS = ['1', '5', '15', '30', '60', '240', '1D'] as const;
 
+const D1 = parseResolution('1D') as Resolution;
+const DAY_MS = 86_400_000;
+
 export interface CryptoCapOptions {
   client: CoinGeckoClient;
   secrets: SecretStore;
@@ -60,6 +65,10 @@ export interface CryptoCapOptions {
   sleep?: (ms: number) => Promise<void>;
   /** How often live values are worked out again (ms). */
   tickMs?: number;
+  /** Live Coin Watch, for older market caps: where it is (tests point it elsewhere). */
+  livecoinwatch?: { url?: string | undefined; fetch?: typeof fetch };
+  /** Where older market caps start downloading from (tests start later). */
+  olderOriginMs?: number;
   onWarning?: (message: string) => void;
 }
 
@@ -90,6 +99,8 @@ export class CryptoCapExchange implements ExchangeAdapter {
   private readonly anchors: AnchorBook;
   private readonly history: CapHistory;
   private readonly live: LiveCaps;
+  /** TOTAL, TOTAL2, TOTAL3 and BTC.D before our own history, from Live Coin Watch. */
+  readonly older: OlderCaps;
   private readonly now: () => number;
   private readonly waitForPairs: () => Promise<void>;
   /** Tickers resolved so far → what they're made of, for subscribing without waiting. */
@@ -129,6 +140,20 @@ export class CryptoCapExchange implements ExchangeAdapter {
       history: this.history,
       now: this.now,
       ...(options.tickMs ? { tickMs: options.tickMs } : {}),
+      onWarning: warn,
+    });
+    this.older = new OlderCaps({
+      secrets: options.secrets,
+      dataDir: options.dataDir,
+      joinMs: () => this.history.firstBarMs(D1),
+      ours: (series, joinMs) => this.oursOn(series, joinMs),
+      client: new LiveCoinWatchClient({
+        ...(options.livecoinwatch?.url ? { url: options.livecoinwatch.url } : {}),
+        ...(options.livecoinwatch?.fetch ? { fetch: options.livecoinwatch.fetch } : {}),
+      }),
+      ...(options.olderOriginMs !== undefined ? { originMs: options.olderOriginMs } : {}),
+      ...(options.sleep ? { sleep: options.sleep, gapMs: 0 } : {}),
+      now: this.now,
       onWarning: warn,
     });
     // History that finishes loading replaces the estimates made while it loaded.
@@ -174,7 +199,7 @@ export class CryptoCapExchange implements ExchangeAdapter {
     const source = await this.source(ticker);
     const period = periodOf(resolution);
     const end = endTimeMs ?? barOpenTime(resolution, this.now()) + period;
-    const bars = await this.history.bars(source, resolution, end - limit * period, end);
+    const bars = await this.barsOf(source, resolution, end - limit * period, end);
     return bars.slice(-limit);
   }
 
@@ -185,7 +210,7 @@ export class CryptoCapExchange implements ExchangeAdapter {
     endMs: number,
   ): Promise<Bar[]> {
     const source = await this.source(ticker);
-    const bars = await this.history.bars(source, resolution, startMs, endMs);
+    const bars = await this.barsOf(source, resolution, startMs, endMs);
     return bars.slice(0, this.maxBarsPerRequest);
   }
 
@@ -221,14 +246,19 @@ export class CryptoCapExchange implements ExchangeAdapter {
     return this.universe.historyIdle();
   }
 
-  /** The saved coins and history, so the first lookup needn't wait for the disk. */
+  /**
+   * The saved coins and history, so the first lookup needn't wait for the disk; then the older
+   * market caps' download carries on, if there's a key and something left to fetch.
+   */
   async prepare(): Promise<void> {
     await this.universe.load();
+    void this.older.start();
   }
 
   async close(): Promise<void> {
     this.live.close();
     this.universe.close();
+    await this.older.close();
     await this.anchors.flush();
   }
 
@@ -344,6 +374,35 @@ export class CryptoCapExchange implements ExchangeAdapter {
     };
   }
 
+  /**
+   * `source`'s bars opening in [startMs, endMs): ours, and for the daily bars of TOTAL, TOTAL2,
+   * TOTAL3 and BTC.D before ours begin, Live Coin Watch's (OlderCaps).
+   */
+  private async barsOf(
+    source: CapSource,
+    resolution: Resolution,
+    startMs: number,
+    endMs: number,
+  ): Promise<Bar[]> {
+    const ours = await this.history.bars(source, resolution, startMs, endMs);
+    const series = olderSeriesOf(source);
+    if (!series || resolution.unit !== 'day' || resolution.count !== 1) return ours;
+    const join = this.history.firstBarMs(resolution);
+    if (startMs >= join) return ours;
+    const older = await this.older.bars(series, startMs, Math.min(endMs, join));
+    return [...older, ...ours];
+  }
+
+  /** Our own close of an older series on the join day, for the older bars to blend toward. */
+  private async oursOn(series: OlderSeries, joinMs: number): Promise<number | null> {
+    const source: CapSource =
+      series === 'BTC.D'
+        ? { kind: 'dominance', of: { kind: 'coin', id: BITCOIN } }
+        : { kind: 'composite', name: series };
+    const [bar] = await this.history.bars(source, D1, joinMs, joinMs + DAY_MS);
+    return bar && bar.time * 1000 === joinMs ? bar.close : null;
+  }
+
   /** A ticker's value from CoinGecko's latest market caps: for its decimals. */
   private valueNow(source: CapSource): number | null {
     const coins: CoinCapBar[] = this.coinsByCap().map((coin) => ({
@@ -375,6 +434,19 @@ export class CryptoCapExchange implements ExchangeAdapter {
     };
     return valueFor(source);
   }
+}
+
+/** The older series a source has, if any: TOTAL, TOTAL2, TOTAL3 and Bitcoin's dominance. */
+function olderSeriesOf(source: CapSource): OlderSeries | null {
+  if (source.kind === 'composite') {
+    return source.name === 'TOTAL' || source.name === 'TOTAL2' || source.name === 'TOTAL3'
+      ? source.name
+      : null;
+  }
+  if (source.kind === 'dominance' && source.of.kind === 'coin' && source.of.id === BITCOIN) {
+    return 'BTC.D';
+  }
+  return null;
 }
 
 function periodOf(resolution: Resolution): number {

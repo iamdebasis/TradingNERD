@@ -5,6 +5,7 @@ import { JsonFile } from './jsonFile.ts';
 interface SecretsDoc {
   coingecko?: { key: string; plan: CoinGeckoPlan };
   alpaca?: { keyId: string; secret: string; sip: SipAccess };
+  livecoinwatch?: { key: string };
 }
 
 const isPlan = (value: unknown): value is CoinGeckoPlan => value === 'demo' || value === 'pro';
@@ -12,7 +13,7 @@ const isText = (value: unknown): value is string => typeof value === 'string' &&
 
 function parseSecrets(value: unknown): SecretsDoc | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { coingecko, alpaca } = value as Record<string, unknown>;
+  const { coingecko, alpaca, livecoinwatch } = value as Record<string, unknown>;
   const doc: SecretsDoc = {};
   if (coingecko !== undefined) {
     if (typeof coingecko !== 'object' || coingecko === null) return null;
@@ -26,6 +27,12 @@ function parseSecrets(value: unknown): SecretsDoc | null {
     if (!isText(keyId) || !isText(secret) || !isSipAccess(sip)) return null;
     doc.alpaca = { keyId, secret, sip };
   }
+  if (livecoinwatch !== undefined) {
+    if (typeof livecoinwatch !== 'object' || livecoinwatch === null) return null;
+    const { key } = livecoinwatch as Record<string, unknown>;
+    if (!isText(key)) return null;
+    doc.livecoinwatch = { key };
+  }
   return doc;
 }
 
@@ -33,6 +40,11 @@ export interface StoredKey {
   key: string;
   /** Null for an environment key that hasn't been checked yet. */
   plan: CoinGeckoPlan | null;
+  source: 'file' | 'env';
+}
+
+export interface StoredLiveCoinWatchKey {
+  key: string;
   source: 'file' | 'env';
 }
 
@@ -46,10 +58,10 @@ export interface StoredAlpacaKey {
 
 /**
  * Secrets the gateway keeps, in `data/secrets.json` readable by the owner only: the CoinGecko
- * key and the Alpaca key pair. Environment variables override the file (COINGECKO_API_KEY;
- * APCA_API_KEY_ID with APCA_API_SECRET_KEY, Alpaca's own names). Each is saved and removed on
- * its own, one change at a time, and the file goes once nothing is left in it. Nothing here
- * is ever logged or sent to the browser.
+ * key, the Alpaca key pair and the Live Coin Watch key. Environment variables override the file
+ * (COINGECKO_API_KEY; APCA_API_KEY_ID with APCA_API_SECRET_KEY, Alpaca's own names;
+ * LIVECOINWATCH_API_KEY). Each is saved and removed on its own, one change at a time, and the
+ * file goes once nothing is left in it. Nothing here is ever logged or sent to the browser.
  */
 export class SecretStore {
   private readonly file: JsonFile<SecretsDoc>;
@@ -57,6 +69,7 @@ export class SecretStore {
   private envPlan: CoinGeckoPlan | null;
   private readonly envAlpaca: { keyId: string; secret: string } | undefined;
   private envSip: SipAccess | null = null;
+  private readonly envLiveCoinWatch: string | undefined;
   private changes: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string, env: NodeJS.ProcessEnv = process.env) {
@@ -66,6 +79,7 @@ export class SecretStore {
     const keyId = env.APCA_API_KEY_ID?.trim();
     const secret = env.APCA_API_SECRET_KEY?.trim();
     this.envAlpaca = keyId && secret ? { keyId, secret } : undefined;
+    this.envLiveCoinWatch = env.LIVECOINWATCH_API_KEY?.trim() || undefined;
   }
 
   async coingecko(): Promise<StoredKey | null> {
@@ -106,6 +120,20 @@ export class SecretStore {
     return this.change(({ alpaca: _removed, ...rest }) => rest);
   }
 
+  async livecoinwatch(): Promise<StoredLiveCoinWatchKey | null> {
+    if (this.envLiveCoinWatch) return { key: this.envLiveCoinWatch, source: 'env' };
+    const stored = (await this.read())?.livecoinwatch;
+    return stored ? { ...stored, source: 'file' } : null;
+  }
+
+  saveLiveCoinWatch(key: string): Promise<void> {
+    return this.change((doc) => ({ ...doc, livecoinwatch: { key } }));
+  }
+
+  removeLiveCoinWatch(): Promise<void> {
+    return this.change(({ livecoinwatch: _removed, ...rest }) => rest);
+  }
+
   /** The file's contents, once any change under way has been written. */
   private async read(): Promise<SecretsDoc | null> {
     await this.changes;
@@ -116,7 +144,7 @@ export class SecretStore {
   private change(apply: (doc: SecretsDoc) => SecretsDoc): Promise<void> {
     const run = this.changes.then(async () => {
       const next = apply((await this.file.read()) ?? {});
-      if (next.coingecko || next.alpaca) await this.file.write(next);
+      if (next.coingecko || next.alpaca || next.livecoinwatch) await this.file.write(next);
       else await this.file.remove();
     });
     this.changes = run.catch(() => {});

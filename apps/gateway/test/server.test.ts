@@ -50,6 +50,7 @@ const config: GatewayConfig = {
   bitstamp: { restUrl: undefined, streamUrl: undefined },
   alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
+  livecoinwatchUrl: undefined,
   dataDir: '', // each server gets its own temporary directory
 };
 

@@ -1,14 +1,16 @@
-import type { SymbolInfo } from '@tradingnerd/core';
+import type { OlderCapsStatus, SymbolInfo } from '@tradingnerd/core';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChartPane } from '../chart/ChartPane';
 import { ChartSettingsDialog } from '../chart/ChartSettingsDialog';
 import { IntervalPrompt, promptKey } from '../chart/IntervalPrompt';
 import { type ChartRoute, withInterval, withSymbol } from '../chart/route';
+import { olderCapsApi } from '../data/api';
 import { useGateway, useGatewayStatus } from '../data/GatewayContext';
 import { isEditable } from '../lib/dom';
 import { writeJson } from '../lib/storage';
 import { useLogos } from '../logos/LogoContext';
 import { LogoDialog } from '../logos/LogoDialog';
+import { OlderCapsDialog } from '../olderCaps/OlderCapsDialog';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { searchKey } from '../search/searchPrefs';
 import { useStockKeys } from '../stocks/stockKeys';
@@ -34,6 +36,9 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const [searching, setSearching] = useState<string | null>(null);
   const logos = useLogos();
   const [logoDialog, setLogoDialog] = useState<'first-launch' | 'menu' | null>(null);
+  const [olderCapsOpen, setOlderCapsOpen] = useState(false);
+  /** Older market caps' download: whether Live Coin Watch's data is in, for the credit. */
+  const [olderCaps, setOlderCaps] = useState<OlderCapsStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** The chart's symbol as resolved, for Chart settings' fields. */
   const [chartInfo, setChartInfo] = useState<SymbolInfo | null>(null);
@@ -47,11 +52,27 @@ export function AppShell({ route }: { route: ChartRoute }) {
     if (!status.key && !status.promptDismissed) setLogoDialog('first-launch');
   }, [logos.status]);
 
+  useEffect(() => {
+    let alive = true;
+    olderCapsApi.status().then(
+      (loaded) => {
+        if (alive) setOlderCaps(loaded);
+      },
+      () => {
+        // Without it, only CoinGecko is credited.
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const stockKeys = useStockKeys();
   const watchlistMenu = useMemo(
     () => [
       { label: 'Coin logos (CoinGecko)…', onSelect: () => setLogoDialog('menu') },
       { label: 'US stock data (Alpaca)…', onSelect: stockKeys.prompt },
+      { label: 'Older market caps (Live Coin Watch)…', onSelect: () => setOlderCapsOpen(true) },
     ],
     [stockKeys.prompt],
   );
@@ -147,13 +168,20 @@ export function AppShell({ route }: { route: ChartRoute }) {
             onClose={() => setLogoDialog(null)}
           />
         )}
+        {olderCapsOpen && (
+          <OlderCapsDialog onStatus={setOlderCaps} onClose={() => setOlderCapsOpen(false)} />
+        )}
         <aside className={`${styles.panel} ${styles.watchlist}`} aria-label="Watchlist">
           <Watchlist
             symbol={symbol}
             onChoose={changeSymbol}
             quotes={gateway}
             moreItems={watchlistMenu}
-            moreNote="Data provided by CoinGecko"
+            moreNote={
+              olderCaps?.from
+                ? 'Data provided by CoinGecko and Live Coin Watch'
+                : 'Data provided by CoinGecko'
+            }
           />
         </aside>
       </div>

@@ -37,6 +37,8 @@ export interface GatewayConfig {
     streamUrl: string | undefined;
   };
   usListingsUrl: string | undefined;
+  /** LIVECOINWATCH_URL instead of Live Coin Watch's API, for older market caps. */
+  livecoinwatchUrl: string | undefined;
   /** Where local data lives (watchlist, secrets, logo cache): DATA_DIR, or the repo's data/. */
   dataDir: string;
 }
@@ -74,6 +76,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
       streamUrl: env.ALPACA_STREAM_URL || undefined,
     },
     usListingsUrl: env.US_LISTINGS_URL || undefined,
+    livecoinwatchUrl: env.LIVECOINWATCH_URL || undefined,
     dataDir: env.DATA_DIR || REPO_DATA_DIR,
   };
 }

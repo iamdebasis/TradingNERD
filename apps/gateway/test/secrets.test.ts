@@ -73,4 +73,24 @@ describe('the secret store', () => {
     // Half a pair is no key at all.
     expect(await setup({ APCA_API_KEY_ID: KEY_ID }).store.alpaca()).toBeNull();
   });
+
+  it('keeps the Live Coin Watch key on its own too, and reads the files saved before it', async () => {
+    const { store, file } = setup();
+    await store.saveLiveCoinWatch('lcw-key-0000-1111');
+    // Alone, it keeps the file.
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
+      livecoinwatch: { key: 'lcw-key-0000-1111' },
+    });
+    await store.saveCoingecko('CG-key-1234', 'demo');
+    await store.removeLiveCoinWatch();
+    expect(await store.livecoinwatch()).toBeNull();
+    expect((await store.coingecko())?.key).toBe('CG-key-1234');
+    await store.removeCoingecko();
+    expect(existsSync(file)).toBe(false);
+    // LIVECOINWATCH_API_KEY overrides the file.
+    expect(await setup({ LIVECOINWATCH_API_KEY: ' lcw-env ' }).store.livecoinwatch()).toEqual({
+      key: 'lcw-env',
+      source: 'env',
+    });
+  });
 });

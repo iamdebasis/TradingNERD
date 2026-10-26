@@ -23,6 +23,8 @@ offlineExchanges.ALPACA_DATA_URL = nowhere.rest;
 offlineExchanges.ALPACA_TRADING_URL = nowhere.rest;
 offlineExchanges.ALPACA_STREAM_URL = nowhere.stream;
 offlineExchanges.US_LISTINGS_URL = `${nowhere.rest}/`;
+// Older market caps: Live Coin Watch, unreachable too.
+offlineExchanges.LIVECOINWATCH_URL = nowhere.rest;
 
 /**
  * Not devices['Desktop Chrome']: its Windows user agent would switch on the Windows wheel

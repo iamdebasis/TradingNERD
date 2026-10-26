@@ -1,7 +1,13 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Bar, type CatalogEntry, parseResolution, type Resolution } from '@tradingnerd/core';
+import {
+  type Bar,
+  barOpenTime,
+  type CatalogEntry,
+  parseResolution,
+  type Resolution,
+} from '@tradingnerd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CryptoCapExchange } from '../src/cryptocap/CryptoCapExchange.ts';
 import { CoinGeckoClient } from '../src/logos/coingecko.ts';
@@ -10,9 +16,11 @@ import { type BarListener, type BookListener, MarketService } from '../src/marke
 import { MarketError } from '../src/market/types.ts';
 import { SecretStore } from '../src/storage/secrets.ts';
 import { type FakeMarketRow, fakeCoinGecko } from './helpers/FakeCoinGecko.ts';
+import { fakeLiveCoinWatch } from './helpers/FakeLiveCoinWatch.ts';
 import { FakePairsExchange } from './helpers/FakePairsExchange.ts';
 
 const KEY = 'CG-demo-key-3f9a';
+const LCW_KEY = 'lcw-key-0000-1111';
 const DAY_MS = 86_400_000;
 /** Tuesday 2026-10-20, noon UTC. */
 const NOW = Date.UTC(2026, 9, 20, 12);
@@ -113,6 +121,8 @@ interface SetupOptions {
   /** The exchanges' pair lists, as they stand (all of them by default). */
   pairs?: () => readonly CatalogEntry[];
   waitForPairs?: () => Promise<void>;
+  /** Live Coin Watch, with a key for it: older market caps download back to `originMs`. */
+  older?: { fake: ReturnType<typeof fakeLiveCoinWatch>; originMs: number };
 }
 
 async function setup({
@@ -122,6 +132,7 @@ async function setup({
   dataDir = join(mkdtempSync(join(tmpdir(), 'tradingnerd-cryptocap-')), 'data'),
   pairs = () => PAIRS,
   waitForPairs,
+  older,
 }: SetupOptions = {}) {
   const fake = fakeCoinGecko({
     markets: MARKETS,
@@ -130,6 +141,7 @@ async function setup({
   });
   const secrets = new SecretStore(dataDir, {});
   if (key) await secrets.saveCoingecko(KEY, 'demo');
+  if (older) await secrets.saveLiveCoinWatch(LCW_KEY);
   const usage = new CoinGeckoUsage(dataDir);
   const binance = new FakePairsExchange('BINANCE');
   binance.setBars('BTCUSDT', '1D', dailies(80_000, 84_000));
@@ -147,6 +159,12 @@ async function setup({
     adapters: [binance, coinbase],
     pairs,
     ...(waitForPairs ? { waitForPairs } : {}),
+    ...(older
+      ? {
+          livecoinwatch: { url: 'http://lcw.test', fetch: older.fake.fetch },
+          olderOriginMs: older.originMs,
+        }
+      : {}),
     // Without history, the backfill stops after its first coin, as if it were still loading.
     sleep: history ? async () => {} : () => new Promise<void>(() => {}),
     tickMs: 5,
@@ -184,10 +202,16 @@ function keptSince(oldest: number): string {
   return dataDir;
 }
 
+/** The kept points' TOTAL: every coin at its market cap, the excluded one left out. */
+const KEPT_TOTAL =
+  1.6e12 + 2.4e11 + 1.8e11 + 7.5e10 + 7e10 + 8.1e9 + 6e9 + 5e9 + 4e9 + 3e9 + 2e9 + 1e9;
+
 /** TOTAL today: Bitcoin at 84,000, the rest at their prices, the excluded coin left out. */
 const BTC_TODAY = 84_000 * supplyOf('bitcoin');
 const TOTAL_TODAY =
   BTC_TODAY + 2.4e11 + 1.8e11 + 7.5e10 + 7e10 + 8.1e9 + 6e9 + 5e9 + 4e9 + 3e9 + 2e9 + 1e9;
+/** OTHERS today: TOTAL without TradingView's ten that are here (BTC, ETH, USDT, XRP, USDC). */
+const OTHERS_TODAY = 8.1e9 + 6e9 + 5e9 + 4e9 + 3e9 + 2e9 + 1e9;
 
 describe('CRYPTOCAP', () => {
   let open: { market: MarketService }[] = [];
@@ -264,14 +288,15 @@ describe('CRYPTOCAP', () => {
     expect(hasMore).toBe(true);
   });
 
-  it('leaves Bitcoin out of TOTAL2, the top 10 out of OTHERS, and stablecoins out of TOTALES', async () => {
+  it("leaves Bitcoin out of TOTAL2, TradingView's ten out of OTHERS, and stablecoins out of TOTALES", async () => {
     const { market } = track(await setup());
     const close = async (ticker: string) =>
       ((await market.getBars(`CRYPTOCAP:${ticker}`, '1D', null, 1)).bars[0] as Bar).close;
     expect(await close('TOTAL2')).toBeCloseTo(TOTAL_TODAY - BTC_TODAY, -3);
     expect(await close('TOTAL3')).toBeCloseTo(TOTAL_TODAY - BTC_TODAY - 2.4e11, -3);
-    // The 11th and 12th largest eligible coins: EPS and ZET.
-    expect(await close('OTHERS')).toBeCloseTo(3e9, -3);
+    // Of TradingView's ten, these five are here (BTC, ETH, USDT, XRP, USDC): LEO and the small
+    // coins stay in.
+    expect(await close('OTHERS')).toBeCloseTo(OTHERS_TODAY, -3);
     expect(await close('TOTALES')).toBeCloseTo(TOTAL_TODAY - 1.8e11 - 7e10, -3);
     expect(await close('STABLE.C')).toBeCloseTo(1.8e11 + 7e10, -3);
     expect(await close('XRP')).toBeCloseTo(7.5e10, -3);
@@ -283,8 +308,30 @@ describe('CRYPTOCAP', () => {
     const close = async (ticker: string) =>
       ((await market.getBars(`CRYPTOCAP:${ticker}`, '1D', null, 1)).bars[0] as Bar).close;
     expect(await close('BTC.D')).toBeCloseTo((BTC_TODAY / TOTAL_TODAY) * 100, 9);
-    expect(await close('OTHERS.D')).toBeCloseTo((3e9 / TOTAL_TODAY) * 100, 9);
-    expect(await close('OTHERSBTC')).toBeCloseTo(3e9 / BTC_TODAY, 12);
+    expect(await close('OTHERS.D')).toBeCloseTo((OTHERS_TODAY / TOTAL_TODAY) * 100, 9);
+    expect(await close('OTHERSBTC')).toBeCloseTo(OTHERS_TODAY / BTC_TODAY, 12);
+  });
+
+  it('gives OTHERS, its dominance and its ratio their whole history, as TOTAL has', async () => {
+    const { market } = track(await setup({ dataDir: keptSince(TODAY - 500 * DAY_MS) }));
+    const total = await market.getBars('CRYPTOCAP:TOTAL', '1D', null, 1_000);
+    for (const ticker of ['OTHERS', 'OTHERS.D', 'OTHERSBTC']) {
+      const { bars } = await market.getBars(`CRYPTOCAP:${ticker}`, '1D', null, 1_000);
+      expect(bars.map((bar) => bar.time)).toEqual(total.bars.map((bar) => bar.time));
+    }
+  });
+
+  it("shows every coin's own market cap the list counts, as CoinGecko gives it", async () => {
+    const { market, cryptocap } = track(await setup());
+    const close = async (ticker: string) =>
+      ((await market.getBars(`CRYPTOCAP:${ticker}`, '1D', null, 1)).bars[0] as Bar).close;
+    // ALP is a small coin no one has compared with TradingView: shown all the same.
+    expect(await close('ALP')).toBeCloseTo(6e9, -3);
+    expect(await close('ALP.D')).toBeCloseTo((6e9 / TOTAL_TODAY) * 100, 9);
+    const tickers = cryptocap.entries().map((entry) => entry.ticker);
+    expect(tickers).toContain('ALP');
+    expect(tickers).toContain('ALP.D');
+    expect(tickers).toContain('LEO');
   });
 
   it("uses CoinGecko's market cap for a coin whose pair is priced like another coin", async () => {
@@ -361,9 +408,7 @@ describe('CRYPTOCAP', () => {
     expect(bars).toHaveLength(500);
     expect(hasMore).toBe(false);
     // Before the pairs' first bars, each coin counts at its kept market cap.
-    const keptTotal =
-      1.6e12 + 2.4e11 + 1.8e11 + 7.5e10 + 7e10 + 8.1e9 + 6e9 + 5e9 + 4e9 + 3e9 + 2e9 + 1e9;
-    expect((bars[0] as Bar).close).toBeCloseTo(keptTotal, -3);
+    expect((bars[0] as Bar).close).toBeCloseTo(KEPT_TOTAL, -3);
     expect((bars.at(-1) as Bar).close).toBeCloseTo(TOTAL_TODAY, -3);
   });
 
@@ -377,6 +422,88 @@ describe('CRYPTOCAP', () => {
     expect(await first('1W')).toBe(Date.UTC(2025, 5, 9) / 1000);
     expect(await first('1M')).toBe(Date.UTC(2025, 6, 1) / 1000);
     expect(await first('3M')).toBe(Date.UTC(2025, 6, 1) / 1000);
+  });
+
+  it("puts Live Coin Watch's older market caps before its own, moved toward them over 30 days", async () => {
+    // Ours from 499 days ago (the day after the oldest kept point); Live Coin Watch's 40 days
+    // before that: TOTAL at 2.5T, Bitcoin 60% of it, Ethereum 200B.
+    const join = TODAY - 499 * DAY_MS;
+    const lcw = fakeLiveCoinWatch({ cap: () => 2.5e12, ethereum: () => 2e11 });
+    const { market, cryptocap, binance } = track(
+      await setup({
+        dataDir: keptSince(TODAY - 500 * DAY_MS),
+        older: { fake: lcw, originMs: join - 40 * DAY_MS },
+      }),
+    );
+    await cryptocap.prepare();
+    await cryptocap.older.idle();
+    expect(await cryptocap.older.status()).toMatchObject({ state: 'done', progress: 1 });
+    expect(lcw.requests.every((request) => request.key === LCW_KEY)).toBe(true);
+
+    const { bars, hasMore } = await market.getBars('CRYPTOCAP:TOTAL', '1D', null, 1_000);
+    expect(bars).toHaveLength(540);
+    expect(hasMore).toBe(false);
+    expect(bars.every((bar, i) => i === 0 || bar.time - (bars[i - 1] as Bar).time === 86_400)).toBe(
+      true,
+    );
+    const older = bars.slice(0, 40);
+    const ours = bars[40] as Bar;
+    expect(older[0]?.time).toBe((join - 40 * DAY_MS) / 1000);
+    expect(ours.time).toBe(join / 1000);
+    // Live Coin Watch's own value until 30 days before the join, then moved toward ours.
+    const ratio = KEPT_TOTAL / 2.5e12 - 1;
+    expect(older[0]?.close).toBe(2.5e12);
+    expect(older[10]?.close).toBe(2.5e12);
+    expect(older[25]?.close).toBeCloseTo(2.5e12 * (1 + ratio * (15 / 30)), -3);
+    expect(older[39]?.close).toBeCloseTo(2.5e12 * (1 + ratio * (29 / 30)), -3);
+    expect(ours.close).toBeCloseTo(KEPT_TOTAL, -3);
+
+    // BTC.D and TOTAL3 too: Bitcoin's 60%, and TOTAL without Bitcoin and Ethereum.
+    const dominance = await market.getBars('CRYPTOCAP:BTC.D', '1D', null, 1_000);
+    expect(dominance.bars[0]?.close).toBeCloseTo(60, 9);
+    const oursD = (1.6e12 / KEPT_TOTAL) * 100;
+    expect(dominance.bars[39]?.close).toBeCloseTo(60 * (1 + (oursD / 60 - 1) * (29 / 30)), 9);
+    const total3 = await market.getBars('CRYPTOCAP:TOTAL3', '1D', null, 1_000);
+    expect(total3.bars[0]?.close).toBeCloseTo(2.5e12 * 0.4 - 2e11, -3);
+
+    // Intraday bars have none older.
+    const H4 = parseResolution('240') as Resolution;
+    binance.setBars('BTCUSDT', '240', [flat(join / 1000, 80_000)]);
+    const fourHours = await cryptocap.fetchRange('TOTAL', H4, join - 5 * DAY_MS, join + DAY_MS);
+    expect(fourHours[0]?.time).toBe((join - DAY_MS + 4 * 3_600_000) / 1000);
+  });
+
+  it("builds weeks and months from every one of Live Coin Watch's days", async () => {
+    const join = TODAY - 499 * DAY_MS;
+    // From Thursday 20 March 2025: April is whole, before the 30 days moved toward ours (9 May).
+    const origin = join - 80 * DAY_MS;
+    // TOTAL rising 1B an hour: a week's or month's close and high are its last day's.
+    const capAt = (ms: number) => 2.5e12 + ((ms - origin) / 3_600_000) * 1e9;
+    const lcw = fakeLiveCoinWatch({ cap: capAt, ethereum: () => 2e11 });
+    const { market, cryptocap } = track(
+      await setup({
+        dataDir: keptSince(TODAY - 500 * DAY_MS),
+        older: { fake: lcw, originMs: origin },
+      }),
+    );
+    await cryptocap.prepare();
+    await cryptocap.older.idle();
+
+    // The first whole week starts Monday 24 March (the week of 17 March is only part there).
+    const W1 = parseResolution('1W') as Resolution;
+    const week = barOpenTime(W1, origin) + 7 * DAY_MS;
+    const weekly = (await market.getBars('CRYPTOCAP:TOTAL', '1W', null, 200)).bars;
+    expect(weekly[0]).toMatchObject({ time: week / 1000, open: capAt(week) });
+    expect(weekly[0]?.close).toBeCloseTo(capAt(week + 7 * DAY_MS), -3);
+    expect(weekly[0]?.high).toBeCloseTo(capAt(week + 7 * DAY_MS), -3);
+    expect(weekly[1]?.open).toBeCloseTo(capAt(week + 7 * DAY_MS), -3);
+
+    // The first whole month is April: its open the 1st's, its close and high the 30th's close.
+    const april = Date.UTC(2025, 3, 1);
+    const monthly = (await market.getBars('CRYPTOCAP:TOTAL', '1M', null, 50)).bars;
+    expect(monthly[0]).toMatchObject({ time: april / 1000, open: capAt(april) });
+    expect(monthly[0]?.close).toBeCloseTo(capAt(Date.UTC(2025, 4, 1)), -3);
+    expect(monthly[1]?.open).toBeCloseTo(capAt(Date.UTC(2025, 4, 1)), -3);
   });
 
   it('weekly bars are built from the daily ones', async () => {

@@ -216,6 +216,58 @@ describe('formulas', () => {
     stop();
   });
 
+  it("builds its weeks from its own days, so a symbol's dip on one day shows in its week", async () => {
+    const { binance, market } = made();
+    const monday = TODAY - 8 * DAY; // 12 October 2026
+    // Both make the week's low on Monday; ETH dips again on Wednesday while BTC is at 100.
+    binance.setBars(
+      'BTCUSDT',
+      '1D',
+      Array.from({ length: 9 }, (_, i) => bar(monday + i * DAY, 100, 100, i === 0 ? 80 : 100, 100)),
+    );
+    binance.setBars(
+      'ETHUSDT',
+      '1D',
+      Array.from({ length: 9 }, (_, i) =>
+        bar(monday + i * DAY, 1, 1, i === 0 ? 0.8 : i === 2 ? 0.85 : 1, 1),
+      ),
+    );
+    const { bars } = await market.getBars('BINANCE:BTCUSDT/BINANCE:ETHUSDT', '1W', null, 5);
+    expect(bars.map((b) => b.time)).toEqual([monday, monday + 7 * DAY]);
+    // Wednesday's 100 / 0.85; each symbol's weekly bar (low 80 / low 0.8) would show only 100.
+    expect(bars[0]?.high).toBeCloseTo(100 / 0.85, 9);
+    expect(bars[0]).toMatchObject({ open: 100, low: 100, close: 100 });
+  });
+
+  it("moves a week's live bar with its days, keeping a dip on a day that's over", async () => {
+    const { binance, market } = made();
+    const monday = TODAY - DAY; // 19 October 2026
+    // Monday: ETH dips while BTC is at 100. Today: both make the week's lows.
+    binance.setBars('BTCUSDT', '1D', [
+      bar(monday, 100, 100, 100, 100),
+      bar(TODAY, 100, 100, 80, 100),
+    ]);
+    binance.setBars('ETHUSDT', '1D', [bar(monday, 1, 1, 0.85, 1), bar(TODAY, 1, 1, 0.8, 1)]);
+    const updates: Bar[] = [];
+    const states: string[] = [];
+    const listener: BarListener = {
+      onBar: (update) => updates.push(update),
+      onState: (state) => states.push(state),
+      onError: (error) => states.push(`error ${error.code}`),
+    };
+    const stop = market.subscribeBars('BINANCE:BTCUSDT/BINANCE:ETHUSDT', '1W', listener);
+    await vi.waitFor(() => expect(states).toContain('live'));
+    // A trade of ETH at 1 moves today's bar: from BTC's 80 to 100 over ETH at 1.
+    binance.emitPrice('ETHUSDT', 1, NOW);
+    await vi.waitFor(() => expect(updates.at(-1)?.low).toBe(80));
+    const week = updates.at(-1) as Bar;
+    expect(week.time).toBe(monday);
+    // Monday's 100 / 0.85 stays the week's high; each symbol's weekly bar would show 100.
+    expect(week.high).toBeCloseTo(100 / 0.85, 9);
+    expect(week).toMatchObject({ open: 100, close: 100 });
+    stop();
+  });
+
   it('gives its value as both Sell and Buy', async () => {
     const { binance, market } = made();
     binance.setBars(

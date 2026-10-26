@@ -12,6 +12,7 @@ import {
   isComplete,
   type LogoStatus,
   MarketSchedule,
+  type OlderCapsStatus,
   PROTOCOL_VERSION,
   parseFlagState,
   parseFormula,
@@ -48,6 +49,8 @@ export const LAST_DAY = Date.UTC(2026, 9, 18) / 1000;
 
 /** The CoinGecko key the mock gateway accepts. */
 export const MOCK_KEY = 'CG-demo-key-3f9a';
+/** The Live Coin Watch key the mock gateway accepts. */
+export const MOCK_LCW_KEY = 'a1b2c3d4-e5f6-7890-abcd-ef0123456789';
 /** A 1×1 PNG, standing in for a coin logo. */
 const LOGO_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -612,6 +615,10 @@ export interface MockMarket {
   stockNow: number;
   /** Every key the page sent to PUT /api/stocks/key. */
   readonly savedStockKeys: { keyId: string; secret: string }[];
+  /** What GET /api/older-caps answers; by default no key and nothing downloaded. */
+  olderCaps: OlderCapsStatus;
+  /** Every key the page sent to PUT /api/older-caps/key. */
+  readonly savedLcwKeys: string[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
   /** Ids of subscriptions the page still holds. */
@@ -689,6 +696,15 @@ class MockGateway implements MockMarket {
     sip: 'delayed',
   };
   readonly savedStockKeys: { keyId: string; secret: string }[] = [];
+  olderCaps: OlderCapsStatus = {
+    key: null,
+    state: 'none',
+    progress: 0,
+    from: null,
+    until: null,
+    message: null,
+  };
+  readonly savedLcwKeys: string[] = [];
   stockNow = STOCK_NOW;
   readonly searchRequests: URLSearchParams[] = [];
   readonly liveExchanges = new Set(MOCK_EXCHANGES.map((exchange) => exchange.id));
@@ -896,6 +912,33 @@ class MockGateway implements MockMarket {
         this.stockKey = { configured: false, source: null, keyId: null, sip: null };
       }
       return route.fulfill({ json: this.stockKey });
+    });
+    await this.page.route(/\/api\/older-caps(\/key)?$/, (route) => {
+      const request = route.request();
+      const isKey = new URL(request.url()).pathname.endsWith('/key');
+      if (isKey && request.method() === 'PUT') {
+        const key = String((request.postDataJSON() as { key?: unknown }).key ?? '');
+        this.savedLcwKeys.push(key);
+        if (key.trim() !== MOCK_LCW_KEY) {
+          return route.fulfill({
+            status: 400,
+            json: { error: 'bad_request', message: 'Live Coin Watch rejected this key' },
+          });
+        }
+        this.olderCaps = {
+          ...this.olderCaps,
+          key: { masked: `••••${MOCK_LCW_KEY.slice(-4)}`, source: 'file' },
+          state: this.olderCaps.state === 'done' ? 'done' : 'loading',
+          message: null,
+        };
+      } else if (isKey && request.method() === 'DELETE') {
+        this.olderCaps = {
+          ...this.olderCaps,
+          key: null,
+          state: this.olderCaps.state === 'done' ? 'done' : 'none',
+        };
+      }
+      return route.fulfill({ json: this.olderCaps });
     });
     await this.page.routeWebSocket(/\/ws$/, (socket) => this.accept(socket));
   }

@@ -80,6 +80,7 @@ const cryptocap = new CryptoCapExchange({
   adapters: exchanges,
   pairs: () => catalog.pairs(),
   waitForPairs: () => catalog.ready(10_000),
+  livecoinwatch: { url: config.livecoinwatchUrl },
   onWarning: warn('cryptocap'),
 });
 
@@ -105,7 +106,15 @@ const logos = new LogoService({
   dataDir: config.dataDir,
 });
 
-const app = await buildServer(config, { market, catalog, watchlist, flags, logos, stocks });
+const app = await buildServer(config, {
+  market,
+  catalog,
+  watchlist,
+  flags,
+  logos,
+  stocks,
+  olderCaps: cryptocap.older,
+});
 app.addHook('onClose', async () => {
   catalog.close();
   await market.close();

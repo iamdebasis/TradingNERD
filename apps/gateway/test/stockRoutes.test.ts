@@ -30,6 +30,7 @@ const config: GatewayConfig = {
   bitstamp: { restUrl: undefined, streamUrl: undefined },
   alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
+  livecoinwatchUrl: undefined,
   dataDir: '',
 };
 const KEY_ID = 'PKTESTKEYID123456789';

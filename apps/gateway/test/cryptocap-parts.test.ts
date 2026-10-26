@@ -78,9 +78,29 @@ describe('compositeBars', () => {
     expect(values.TOTAL3.close).toBe(sumOf(128, 6));
   });
 
-  it('leaves the top 10 out of OTHERS and ranks 1–50 and 1–100 out of TOTALE50 and TOTALE100', () => {
-    // Ranks 11–125 are c9..c123: 120 down to 6.
-    expect(values.OTHERS.close).toBe(sumOf(120, 6));
+  it("leaves TradingView's ten out of OTHERS, an older top 10 than today's", () => {
+    // ZEC and HYPE are larger than DOGE and XMR, yet TradingView's OTHERS keeps them in.
+    const ten = compositeBars([
+      coin('bitcoin', 1000),
+      coin('ethereum', 500),
+      coin('tether', 200),
+      coin('binancecoin', 100),
+      coin('ripple', 90),
+      coin('usd-coin', 80),
+      coin('solana', 70),
+      coin('tron', 40),
+      coin('zcash', 25),
+      coin('hyperliquid', 24),
+      coin('dogecoin', 15),
+      coin('monero', 13),
+      coin('chainlink', 9),
+    ]);
+    expect(ten.OTHERS.close).toBe(25 + 24 + 9);
+    // Only the members of TOTAL count: here bitcoin, ethereum and c1..c123 (128 down to 6).
+    expect(values.OTHERS.close).toBe(sumOf(128, 6));
+  });
+
+  it('leaves ranks 1–50 and 1–100 out of TOTALE50 and TOTALE100', () => {
     // Ranks 51–125: c49..c123 (80 down to 6); 101–125: c99..c123 (30 down to 6).
     expect(values.TOTALE50.close).toBe(sumOf(80, 6));
     expect(values.TOTALE100.close).toBe(sumOf(30, 6));
@@ -100,13 +120,15 @@ describe('compositeBars', () => {
   });
 
   it('ranks by close, ties by id, and leaves out coins without a market cap', () => {
+    // 124 large coins and two tied for the 125th place: "a" takes it, by id.
     const ranked = compositeBars([
-      ...Array.from({ length: 10 }, (_, i) => coin(`big${i}`, 100)),
-      coin('b', 5),
-      coin('a', 5),
+      ...Array.from({ length: 124 }, (_, i) => coin(`big${i}`, 100)),
+      { ...coin('b', 5), open: 2 },
+      { ...coin('a', 5), open: 1 },
       coin('gone', 0),
     ]);
-    expect(ranked.OTHERS.close).toBe(10);
+    expect(ranked.TOTAL.close).toBe(124 * 100 + 5);
+    expect(ranked.TOTAL.open).toBe(124 * 100 + 1);
   });
 });
 

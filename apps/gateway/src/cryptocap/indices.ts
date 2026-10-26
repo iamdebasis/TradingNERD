@@ -3,8 +3,25 @@ import type { CompositeName } from './symbols.ts';
 
 /** TOTAL is the market cap of TradingView's top 125 coins. */
 export const TOTAL_COINS = 125;
-/** OTHERS leaves out the 10 largest. */
-export const TOP_COINS = 10;
+/**
+ * The ten coins TradingView's OTHERS leaves out: an older top 10, not its dominance page's,
+ * which has ZEC and HYPE in place of DOGE and XMR. Fitted at two moments from your screenshots,
+ * 24 October 2026 17:28 UTC and 25 October 19:26 UTC, to within 0.24B and 0.59B of
+ * TradingView's OTHERS; the dominance page's ten miss by 14–16B. Applied to OTHERS' whole
+ * history; whether TradingView used the same ten earlier is still to be checked.
+ */
+export const OTHERS_LEFT_OUT: ReadonlySet<string> = new Set([
+  'bitcoin',
+  'ethereum',
+  'tether',
+  'binancecoin',
+  'ripple',
+  'usd-coin',
+  'solana',
+  'tron',
+  'dogecoin',
+  'monero',
+]);
 /** TOTALE50 and TOTALE100 leave out the top 50 and the top 100. */
 export const E50_FROM = 50;
 export const E100_FROM = 100;
@@ -55,7 +72,8 @@ const byCap = (a: CoinCapBar, b: CoinCapBar) => b.close - a.close || a.id.locale
 /**
  * Every composite's bar from the coins' bars of one period, as TradingView defines them (its
  * help center, docs/SPEC.md §4.11): TOTAL is the top 125 by market cap, TOTAL2 without Bitcoin,
- * TOTAL3 without Ethereum too, OTHERS without the top 10, the ES ones without stablecoins,
+ * TOTAL3 without Ethereum too, OTHERS without TradingView's ten (OTHERS_LEFT_OUT: an older top 10
+ * than its dominance page's, measured), the ES ones without stablecoins,
  * TOTALE50 and TOTALE100 ranks 51–125 and 101–125, STABLE.C the 100 largest stablecoins.
  *
  * The coins are ranked by their close. Open, high, low and close are each added up over the
@@ -75,7 +93,7 @@ export function compositeBars(coins: readonly CoinCapBar[]): Record<CompositeNam
     TOTAL: total,
     TOTAL2: total2,
     TOTAL3: minus(total2, ethereum),
-    OTHERS: sum(members.slice(TOP_COINS)),
+    OTHERS: sum(members.filter((coin) => !OTHERS_LEFT_OUT.has(coin.id))),
     TOTALES: totalEs,
     TOTAL2ES: total2Es,
     TOTAL3ES: minus(total2Es, ethereum?.stable ? undefined : ethereum),

@@ -6,6 +6,7 @@ export * from './intervals.ts';
 export * from './logos.ts';
 export * from './market.ts';
 export * from './marketStatus.ts';
+export * from './olderCaps.ts';
 export * from './protocol.ts';
 export * from './resample.ts';
 export * from './resolution.ts';
