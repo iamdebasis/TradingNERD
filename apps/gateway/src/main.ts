@@ -81,6 +81,7 @@ const cryptocap = new CryptoCapExchange({
   pairs: () => catalog.pairs(),
   waitForPairs: () => catalog.ready(10_000),
   livecoinwatch: { url: config.livecoinwatchUrl },
+  olderCoinsInCharts: config.olderCoinsInCharts,
   onWarning: warn('cryptocap'),
 });
 
@@ -113,7 +114,7 @@ const app = await buildServer(config, {
   flags,
   logos,
   stocks,
-  olderCaps: cryptocap.older,
+  olderCaps: { older: cryptocap.older, coins: cryptocap.olderCoins },
 });
 app.addHook('onClose', async () => {
   catalog.close();

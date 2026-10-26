@@ -10,6 +10,7 @@ import Fastify, { type FastifyInstance, LogController } from 'fastify';
 import type { SymbolCatalog } from './catalog/SymbolCatalog.ts';
 import type { GatewayConfig } from './config.ts';
 import type { OlderCaps } from './cryptocap/older.ts';
+import type { OlderCoins } from './cryptocap/olderCoins.ts';
 import type { LogoService } from './logos/LogoService.ts';
 import type { MarketService } from './market/MarketService.ts';
 import { MarketError } from './market/types.ts';
@@ -35,7 +36,7 @@ export interface GatewayDeps {
   /** US stocks' Alpaca key routes (absent in tests that don't need them). */
   stocks?: UsStocksMarket;
   /** Older market caps' Live Coin Watch key routes (absent in tests that don't need them). */
-  olderCaps?: OlderCaps;
+  olderCaps?: { older: OlderCaps; coins: OlderCoins };
 }
 
 export async function buildServer(

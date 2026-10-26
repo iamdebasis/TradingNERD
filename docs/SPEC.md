@@ -1,18 +1,19 @@
 # tradingNerd — Product & Technical Spec
 
-Living document. Last updated **2026-10-24** (M0–M8d committed; M8e, the overlay of a drag of several symbols, built and verified, awaiting review).
+Living document. Last updated **2026-10-26** (M0–M9e, A1, A2 and A6 committed; M9f, each coin's older days, built and downloading). How to work here: `CLAUDE.md` (the core values) and `AGENTS.md`; where things stand: `docs/HANDOVER.md`; a map of the code: `docs/ARCHITECTURE.md`; security: `docs/SECURITY.md`.
 Measured facts carry the date they were measured; exchange and vendor limits can change.
 
 ---
 
 ## 1. Working agreement
 
-- **No change to this codebase without an explicit YES** to a specific yes/no question. A YES covers only the step it was asked about.
-- **Every task runs in four phases:**
-  1. **Product Owner:** scope, acceptance criteria.
-  2. **Architect / Engineer:** design, then build.
-  3. **Testing:** unit, integration, E2E, real verification.
-  4. **Delivery:** hand-over with test evidence and an honest status.
+- **The five core values in `CLAUDE.md` govern every task:**
+  1. YES before any change.
+  2. Work in roles: Product, Architecture, UI/Art, Testing, Delivery.
+  3. Deep-dive research first.
+  4. The core-values check at the top of every plan.
+  5. The best data for every chart.
+- **The user's standing rules** (never show wrong data, never hide data, git, the running app, keys) and how agents work here are in `AGENTS.md`.
 
 ## 2. Vision and v1 scope
 
@@ -159,6 +160,11 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-26 | **Only whole bars:** a week, month or longer bar (or any bar built from shorter ones) is shown only when our data covers its whole period, unless the exchange's history starts at the pair's listing, where its first bar rightly starts part way, as TradingView's does. From the listing: Binance, Bybit, Coinbase and Bitstamp (measured); Kraken only for pairs newer than its 720 bars; US stocks starting after 4 January 2016; OKX and CRYPTOCAP never | Your YES; measured from your Mac (§6.5). |
 | 2026-10-26 | **Live Coin Watch's older market caps restored** (M9e): TOTAL, TOTAL2, TOTAL3 and BTC.D reach back to 1 May 2013 again, as Live Coin Watch's whole market, a few percent above TradingView's top 125 in most years (§4.14). Per-coin history for every CRYPTOCAP series is next (§11, item 58) | Your word ("some minor data glitches are fine… show all the available/provided historical data") and your rule against hiding data. |
 | 2026-10-26 | **Every coin's own market cap and dominance are shown**, with CoinGecko's supply, also where it differs from TradingView's (24 of its top 100: HYPE −12%, DOGE −9%…; §4.11). Showing them only once checked (A3) was built and taken out the same day | Your rule against hiding data, and your word that minor differences are fine. |
+| 2026-10-26 | **Each coin's older days** (M9f): every CRYPTOCAP symbol's history before ours, built from each coin's market cap as today's is: ETH Zurich's copy of CoinMarketCap to 7 February 2018, Live Coin Watch's per-coin figures after. Built and checked behind a switch that stays off (`CRYPTOCAP_OLDER_COINS`) until the accuracy test; your YES before it replaces anything on the charts | Your YES to steps 1–3 (the import, the download with its tests, the accuracy test); the research (§4.14). |
+| 2026-10-26 | **A coin's market cap is its source's own; its supply a week's median** of market cap ÷ price, used only where an exchange's price is multiplied by a supply. Live Coin Watch's figures are scaled to CoinMarketCap's supply over 1–7 February 2018 and to CoinGecko's on the coin's first own day, in a straight line between | Measured: day-to-day supplies jump in both sources (Bitcoin's 14.4M–18.9M in 2017 until the dataset's cap, taken at the day's opening, was paired with the close the day before; Live Coin Watch's BNB +8% → −24% in June 2026); a week's median times a day's price made absurd caps where a small coin's price was broken for days (1.7 quadrillion dollars on 1 January 2017), so caps stay the sources'. |
+| 2026-10-26 | **Coins are matched by price, not name**: the dataset's to Live Coin Watch's over 1–7 February 2018 (prices within 3%, market caps within 2×), Live Coin Watch's to CoinGecko's by symbol and today's price (within 15%), or else the same name | Names and codes change and collide: BNB was "binance-coin"; Live Coin Watch's BTM is Bitmark, NANO is NanoMatic. |
+| 2026-10-26 | **ETH Zurich's two files are put in `data/cryptocap/older-coins/` by hand**, not fetched by the app (done for you on 26 October: the same bytes as Zenodo's) | Zenodo turns programs away ("unusual traffic from your network", HTTP 403, its API too); getting around that isn't ours to do. |
+| 2026-10-26 | **Which of Live Coin Watch's coins:** its whole list read (about 600 requests); then, month by month, one request a coin, in groups most likely first: CoinGecko's coins; coins still traded, by peak worth; traded coins whose peak is no guide; dead coins with a believable peak (each group given up after 1,000 in a row never among a month's 250 largest); then every day of each coin among a month's 200 largest (stablecoins, the 60 largest), and of every CoinGecko coin | Measured: its ranking says nothing of history (ICON 7,908th, Waltonchain 62,468th); a peak from today's figures misses Luna Classic (8×10^14) and Fantom (none) and lets in junk "worth" 10^25. |
 
 ## 4. Research findings
 
@@ -361,6 +367,12 @@ TradingView's TOTAL, TOTAL2 and TOTAL3 go back more than ten years (its TOTAL pa
   - **Checked live** (your data, 25 October): the download took 16:22–18:44 UTC with a restart, about 2,100 requests, no 429 at 2.5 s apart, and eight network errors retried. 4,565 days from 1 May 2013 to 29 October 2025, none missing but TOTAL3's 7 August 2015 (Ethereum's first point comes after that day's end). Served: 4,926 daily bars of each series to today, without a gap. At the join the day's move is Live Coin Watch's own (TOTAL +2.83% against its +2.79%, TOTAL2 +3.33% against +3.22%, TOTAL3 +2.33% against +2.22%, BTC.D −0.32% against −0.27%). Against TradingView: TOTAL's high on 6 October 2025 4.224T (4.27T, −1.1%); on 7 October TOTAL2 1.757T (1.77T, −0.7%) and TOTAL3 1.196T (1.19T, +0.5%). January 2018's peak 828.8B (CoinMarketCap's about 813–830B); BTC.D 94.1% on 1 May 2013 and 36.1% on 7 January 2018. Weeks (704 from 29 April 2013) and months (162) follow on from each other: January 2018 opened at 613.7B, reached 828.8B and closed at 516.5B; November 2021 reached 3.06T.
   - **Its pace** (not published; measured 25 October): one request after another (about 1.15 a second) 57 went through, then 429 "User has sent too many requests in a given amount of time", answered again 6 s later; at about 2 a second, 44 went through. Steady paces of 0.39 and 0.56 a second held for two minutes. That fits about 30 at once, then about 0.4 a second; a request is a credit, and the credits renew at 00:00 UTC.
 - **Mobula** (free key) was the runner-up; its market cap history is unconfirmed.
+- **Each coin's older days** (measured 26 October, for M9f):
+  - Live Coin Watch's per-coin prices match CoinGecko's within 0.1% over the last year (BTC, BNB, USDT, DOGE, XRP), and it keeps each day's supply as it was (USDT 2.2B → 138B, Bitcoin 16.1M → 19.8M); but its supplies jump and differ (BNB +8% → −24% in June 2026, USDT −19% to −21%, DOGE −12% to −22%; Bitcoin and XRP within 0.7%). A day apart from 2019 on, at 00:00 UTC; 2019 has one-day blips up to 1.6%.
+  - Its list is over 60,000 coins long (100 a request, sorted by code so pages don't shift) and keeps dead ones (Luna Classic, TerraClassicUSD, FTX Token, Celsius, HEX); its codes collide (BCC is Basiscoin Cash, not Bitconnect).
+  - ETH Zurich's dataset (Zenodo 4946058, CC0): `market_cap_all_daily.csv` (2,475 coins, from 28 April 2013 to 7 February 2018) and `close_price_all_daily.csv`. Its market cap is the day's opening one and its price the close; 1,211 coins were ever in a day's top 200 (630,415 days). Its top-125 TOTAL: 10.50B on 1 January 2014, 5.59B in 2015, 7.07B in 2016, 17.65B in 2017, 791B on 7 January 2018 (all coins 813B, CoinMarketCap's published figure about 813–830B).
+  - No free source of per-coin supply for 2018–2025 was found: every free plan stops at about a year (CoinGecko Demo, CoinPaprika, CoinMarketCap Basic); Kaggle's copies of CoinMarketCap need a login and cover about 100 coins.
+  - **The ruler:** your TradingView TOTAL2/XRPUSD weekly screenshot read column by column (its price grid 42.25 px to 100B, its last price 810.51B read as 811.8B; the year labels, offset fitted on our last year to −1.5 days), against our weekly highs drawn into the same columns. On our own last year: median −0.2% (half the columns −0.3% to +0.1%). Live Coin Watch's whole market (M9e) against it, by year: 2018 +20.7%, 2019 +11.7%, 2020 +2.2%, 2021 +5.9%, 2022 +8.3%, 2023 +9.2%, 2024 +9.2%, 2025 +2.3%; 2017 +231% (TradingView's own 2017 is short of Ethereum alone).
 - **Live Coin Watch over the years** (measured 26 October): its whole market is every coin it lists, not TradingView's top 125: TOTAL2 read above TradingView's by year (the median of monthly highs read off your TOTAL2/XRPUSD weekly screenshot, accurate to about 1%): 2018 +19%, 2019 +8%, 2020 +3%, 2021 +4%, 2022 +6%, 2023 +8%, 2024 +8.5%. Its per-coin market caps summed as a top 125 (Wrapped Bitcoin and WhiteBIT left out) gave TOTAL2 1.112T on 9 June 2024 against TradingView's about 1.09T: +2%. A 429 from it means "slow down" (about 0.4 requests a second after a burst of about 30), not that the day's credits are used up. **Mobula** (free key) is untried.
 - **TradingView's own method:** TOTAL is "the total market capitalization of the top-125 cryptocurrencies", and the values are calculated from historical data the same way and "may change over time" (its support pages, §12).
 - **TradingView** is the benchmark, never the source (core value 3).
@@ -614,38 +626,49 @@ TradingView's TOTAL, TOTAL2 and TOTAL3 go back more than ten years (its TOTAL pa
 - **How close:** Live Coin Watch's whole market is every coin it lists, not TradingView's top 125, so TOTAL2 reads above TradingView's by year: 2018 +19%, 2019 to 2024 +3% to +8.5% (§4.14). Kept on your word (§3) until per-coin history replaces it (§11, item 58).
 - **Done when:** the four series reach May 2013 with a bar every day and no step at the join, within 3% of TradingView where it's been measured. **Met** on 26 October: every day from 1 May 2013, weeks and months whole, the join's move Live Coin Watch's own, −1.1% to +0.5% against TradingView's October 2025 highs (§4.14). Measured later the same day against your TOTAL2/XRPUSD screenshot, most older years are further off (above); set aside, then restored on your word.
 
+### 5.14 Each coin's older days (M9f)
+
+- **Every CRYPTOCAP symbol reaches back to 28 April 2013**, or to its coins' start, at a day and longer: TOTAL to OTHERS, the ES ones, TOTALE50 and TOTALE100, STABLE.C, each coin's market cap and dominance, the ratios, and formulas made of them. Intraday bars keep our own history.
+- **Sources:** ETH Zurich's copy of CoinMarketCap to 7 February 2018, Live Coin Watch's per-coin figures from then to our first day, CoinGecko's after (§3).
+- **The download:** with the Live Coin Watch key, a few days of its free requests in the background, carrying on after restarts; its progress on a line of its own in "Older market caps (Live Coin Watch)…".
+- **Not in the charts until checked:** `CRYPTOCAP_OLDER_COINS=1` switches it on, for the accuracy test's own gateway only; then your YES.
+- **Done when:** TOTAL2/XRPUSD's weekly highs are within ±3% of your TradingView screenshot in each year 2019–2024 (Live Coin Watch's whole market: +2.2% to +11.7%; §4.14), with no step at 7/8 February 2018 or at our first day, and a bar every day. **Status (26 October):** built and tested; the download is under way.
+
 ## 6. Architecture
 
 ### 6.1 Overview
 
 ```
- Browser (React UI)
- ┌──────────┬──────────────────────────────┬─────────────────┐
- │ Top bar  │ Chart: Lightweight Charts    │ Watchlist       │
- │          │ + our gesture layer          │ + Symbol search │
- └──────────┴──────────────┬───────────────┴─────────────────┘
-      Data client: search · history · live bars · quotes
-                           │  one WebSocket + REST, loopback only
- Local gateway (Node)      ▼
- ┌───────────────────────────────────────────────────────────┐
- │ Symbol registry + search   │ Bar service: paging,         │
- │                            │ resampling, SQLite cache     │
- │ Live service: candle +     │ Quote service: Chg%,         │
- │ trade merge                │ bid/ask, throttled updates   │
- │ Exchanges: Binance · Bybit · OKX · Coinbase · Kraken,     │
- │ each through its own public REST and WebSocket APIs       │
- └──────────────────────────┬────────────────────────────────┘
-                            ▼ public REST + WebSockets, no keys
+ Browser: React web app (Vite, 127.0.0.1:5173)
+ ┌──────────┬───────────────────────────────┬──────────────────────┐
+ │ Top bar  │ Chart: Lightweight Charts     │ Watchlists, flags,   │
+ │          │ + our gestures and plugins    │ symbol search, logos │
+ └──────────┴───────────────┬───────────────┴──────────────────────┘
+        one WebSocket (bars, live candles, quotes) + REST (search, lists, keys)
+ Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only)
+ ┌──────────────────────────▼───────────────────────────────────────┐
+ │ MarketService: history paging, resampling, the whole-bar rule,   │
+ │ live candles, quotes, an in-memory history cache                 │
+ │ Exchanges: Binance · Bybit · OKX · Coinbase · Kraken · Bitstamp  │
+ │ US stocks: Alpaca (the user's key) · Nasdaq's symbol directory   │
+ │ CRYPTOCAP: market caps from CoinGecko's coins × exchange prices; │
+ │ older years from Live Coin Watch and ETH Zurich's dataset        │
+ │ Formulas (spreads) · symbol catalog and search · logos           │
+ │ Storage: JSON files in data/ (gitignored, owner-only)            │
+ └──────────────────────────┬───────────────────────────────────────┘
+                            ▼ HTTPS and WebSockets to the providers only
 ```
+
+A map of the code, file by file: `docs/ARCHITECTURE.md`.
 
 ### 6.2 Components
 
 | Part | Responsibility |
 |---|---|
-| `apps/web` | React UI: app shell, top bar, chart pane, watchlist, dialogs |
-| `packages/chart` | Lightweight Charts wrapper: chart controller, plugins (countdown label, ⊕ button), gesture handlers |
-| `packages/core` | Shared types, constants, UI ⇄ gateway protocol, interval math, resampler |
-| `apps/gateway` | Local server: symbol registry and search, bar/live/quote services, exchange adapters, SQLite cache, secrets |
+| `apps/web` | React UI: app shell, top bar, chart pane, watchlists, search, dialogs (logos, US stocks, older market caps, chart settings) |
+| `packages/chart` | Lightweight Charts wrapper: chart controller, gestures, plugins (crosshair, last price, extended hours, session shading, axis labels) |
+| `packages/core` | Shared types, the UI ⇄ gateway protocol, interval math, the resampler, the market clock, formulas, watchlist files |
+| `apps/gateway` | Local server: exchange adapters, the market service and its in-memory history cache, search, US stocks, CRYPTOCAP, formulas, logos, storage, secrets |
 
 ### 6.3 Data contracts
 
@@ -660,7 +683,7 @@ TradingView's TOTAL, TOTAL2 and TOTAL3 go back more than ten years (its TOTAL pa
 - **Watchlists** (protocol v7, M8): `GET /api/watchlists` lists them (`{activeId, lists: [{id, name, favorite, count}]}`); `POST` creates one (`{name, sections?, copyOf?, activate?}`, the name made unique); `GET`/`PUT /api/watchlists/:id` read and save one list's sections; `PATCH` renames or stars it; `DELETE` deletes it (never the last); `POST /api/watchlists/:id/activate` opens it. An unknown list answers `not_found` (404). `GET`/`PUT /api/watchlist` still read and save the open list. A list's symbols may be any TradingView symbol with an exchange prefix (spreads included), kept as written when it isn't one we chart.
 - **CRYPTOCAP** (protocol v8, M9a): symbols of the `index` kind; `SymbolInfo.format` is `volume` for market caps (thousands to trillions) and `price`, or absent, otherwise.
 - **Formulas** (protocol v9, M9b): a symbol may be a formula (`CRYPTOCAP:BTC.D+CRYPTOCAP:ETH.D`) of the `spread` kind, up to 256 characters, in REST and WebSocket requests and in lists. An `unknown_symbol` error may carry a `suggestion`: the formula with a symbol we have in place of one we lack.
-- **Older market caps** (M9e): `GET /api/older-caps` gives the download's `state` (`none`, `loading`, `done` or `error`), its `progress` (0–1), the first and last day in (`from`, `until`), a `message`, and the `key` masked with its source; `PUT /api/older-caps/key` (`{key}`) checks a key with Live Coin Watch, keeps it and starts the download (400 if it's rejected); `DELETE` forgets it, keeping the data. The bars come through `/api/bars` as ever.
+- **Older market caps** (M9e): `GET /api/older-caps` gives the download's `state` (`none`, `loading`, `done` or `error`), its `progress` (0–1), the first and last day in (`from`, `until`), a `message`, and the `key` masked with its source; `PUT /api/older-caps/key` (`{key}`) checks a key with Live Coin Watch, keeps it and starts the download (400 if it's rejected); `DELETE` forgets it, keeping the data. The bars come through `/api/bars` as ever. Its `coins` (M9f) is each coin's download: `state`, `progress` (0–1) and `message`; saving or removing the key starts or stops it too.
 - **Quotes** (protocol v4): the browser subscribes with `{channel: 'quotes', symbol}`. The gateway answers `{type: 'quote', id, last, prevClose}`, at most every 250 ms per symbol and only when a number changed. Nothing is sent until the previous close is known; it's `null` only if it couldn't be loaded.
 
 ### 6.4 Live candle merge
@@ -756,6 +779,7 @@ TradingView's TOTAL, TOTAL2 and TOTAL3 go back more than ten years (its TOTAL pa
 | `cryptocap/coins.json` | CRYPTOCAP's coins: CoinGecko's 250 largest and its largest stablecoins, with prices, market caps and circulating supply (about 70 KB; fetched every 15 minutes while in use) |
 | `cryptocap/anchors.json` | Each counted coin's market cap and price, a point a day: CoinGecko's year of history, then each day's latest coins, every day kept (about 4 MB once loaded, growing about 6 MB a year) |
 | `cryptocap/older.json` | TOTAL, TOTAL2, TOTAL3 and BTC.D before our own history: Live Coin Watch's market caps, a bar a day back to May 2013, and the days downloaded (about 1 MB) |
+| `cryptocap/older-coins/` | Each coin's older days (M9f): ETH Zurich's two CSV files (about 22 MB, put in place by hand), the Live Coin Watch download's record (`index.json`, `coarse.json`) and a file of days per chosen coin (`coins/NNNN.json`) |
 | `coingecko-usage.json` | CoinGecko calls this month |
 | `tradingnerd.db` | Not used: the history cache is in memory (§6.7); a copy on disk would make a restart's first loads instant too |
 
@@ -772,6 +796,7 @@ TradingView's TOTAL, TOTAL2 and TOTAL3 go back more than ten years (its TOTAL pa
   - This blocks other websites and DNS-rebinding attacks.
 - **No CORS headers** are sent.
 - **Secrets** are never logged, never returned to the browser, and never committed. The Alpaca key ID and the Live Coin Watch key are shown masked; the Alpaca secret never leaves the gateway, except to Alpaca.
+- **What may leave this Mac,** the rules for AI agents, the checks to run again, and the last audit: `docs/SECURITY.md`.
 
 ### 6.10 Repo layout and commands
 
@@ -780,8 +805,13 @@ apps/web          React UI (Vite)
 apps/gateway      Local gateway (Node 26, Fastify)
 packages/core     Shared types, constants, protocol
 packages/chart    Chart engine wrapper (implemented from M1)
+AGENTS.md         How every AI agent works here (the user's rules, commands, conventions)
+CLAUDE.md         The user's five core values
 docs/SPEC.md      This document
-docs/reference/   TradingView reference screenshots (Display P3) used by visual tests
+docs/HANDOVER.md  Where the work stands, and what's next
+docs/ARCHITECTURE.md · docs/SECURITY.md   A map of the code · what may leave this Mac
+docs/reference/   TradingView reference screenshots (Display P3) used by visual and accuracy tests
+tools/accuracy/   The accuracy ruler: ours against a TradingView screenshot, year by year
 data/             Local runtime data (gitignored, created at runtime)
 ```
 
@@ -835,6 +865,7 @@ In `apps/gateway/src/cryptocap/`:
 - **Calls:** every CoinGecko call is counted (`logos/usage.ts`); the key stays in the gateway.
 - **OTHERS' ten** (`OTHERS_LEFT_OUT` in `indices.ts`): TradingView's own, with the evidence and its date, to be checked again from time to time.
 - **Older market caps** (M9e, `older.ts`, `livecoinwatch.ts`): `OlderCaps` downloads Live Coin Watch's whole market (its market cap and Bitcoin's share) and Ethereum's market cap, 4 days a request, back from our first day plus 4 to May 2013, and turns each day's hourly points into a bar of TOTAL, TOTAL2, TOTAL3 and BTC.D (a day without points near its midnights is left out, and later filled with the close before it). Requests go 2.5 s apart. It saves every 10 windows and when stopped, and carries on after a restart. A 429 means too fast or the day's requests used up: `/credits` tells which, and it waits 30 s or until 00:00 UTC. Anything else is retried after 10 s, 1 min and 5 min. `CryptoCapExchange` puts these days before its own daily bars, each of the last 30 multiplied toward our close on the join day; the market service builds weeks and months from them. Each counts as traded (volume 1, as CapHistory's bars without volume), or resampling would take only a period's first day.
+- **Each coin's older days** (M9f): `ethzurich.ts` reads the dataset (a day's market cap at its opening with the close the day before; the coins ever in a day's top 200). `olderCoins.ts` downloads Live Coin Watch's coins in four steps that carry on after a restart (the list, each candidate's months, the choice, every day 100 at a time, 2.5 s apart, waiting when asked to slow down or out of requests), into `data/cryptocap/older-coins/` (`index.json`, `coarse.json`, `coins/NNNN.json`). `olderBook.ts` matches the two sources and CoinGecko's coins, takes the week's median supply and scales Live Coin Watch's to meet at both joins, and serves each coin's days until its own points begin (a coin that isn't CoinGecko's, until ours do). Switched on, `CapHistory` reads them before its own points, ranks the historical-only coins too, and starts a day and longer at the first older day; `CryptoCapExchange` then leaves out Live Coin Watch's whole market. Our own first day stays where the downloads and joins end (`firstBarMs(…, false)`). A span before Bitcoin's pair's first bar (years back) is no longer taken for a failed fetch.
 
 ### 6.15 Formulas (M9b)
 
@@ -974,6 +1005,7 @@ Reference viewport is 1634 px wide.
 | A2 | Accuracy: OTHERS as TradingView's (its own ten), over its whole history | Within 0.3% of TradingView at two moments. **Built 2026-10-26** |
 | A3 | Accuracy: a coin's own market cap shown only once its supply is checked against TradingView's | Built and taken out on 26 October: every coin is shown (§3) |
 | A6 | Accuracy: formulas' 2-day and longer bars from their own days | Every week since November 2025 within 0.5% of your screenshot. **Built 2026-10-26** |
+| M9f | Each coin's older days: every CRYPTOCAP symbol to 2013 from ETH Zurich's dataset and Live Coin Watch's per-coin figures, behind a switch until checked | TOTAL2/XRPUSD within ±3% of your screenshot in each year 2019–2024. **Steps 1–3 under way (2026-10-26)**: built and tested; downloading; the accuracy test waits for the download |
 
 ## 9. Testing strategy
 
@@ -1043,6 +1075,12 @@ Reference viewport is 1634 px wide.
   - The gateway's parts (`apps/gateway/test/older.test.ts`, a fake Live Coin Watch with hourly points): a day's bar and the four series, TOTAL3 before Ethereum, a day without points at its edges; the blend's straight line; downloading back from the join with the key, 4 days a request; the 30 days moved toward ours, Live Coin Watch's own without ours; a day without points filled; carrying on after a stop without fetching a window twice; what came in kept when stopped mid-window; one download when started twice at once (it fetches every window twice without the queue); waiting for 00:00 UTC; a rejected key; a key checked, used and removed, the data kept.
   - End to end (`cryptocap.test.ts`): TOTAL's daily bars 40 days older than ours, every day, its own until 30 days before the join and moved toward ours after; BTC.D and TOTAL3 too; 4-hour bars without them; weeks and months made of every older day, with a market cap that rises each hour (the first build took only a period's first day: the real check caught it, and this test fails on it). Ethereum asked for only once it existed, a pause after each request (`older.test.ts`). The routes (`olderCapsRoutes.test.ts`): status, a bad and a good key, the file's 0600, never the key in a reply, removing it.
   - In the browser (`tests/e2e/older-caps.spec.ts`): the ⋯ menu's item, a rejected key, a good one masked and never in the browser's storage, the progress, the wait for 00:00 UTC, done, the credit; Remove keeping the data; an environment key; an error in red. The ⋯ menu's screenshot now has its item.
+- **Each coin's older days** (M9f):
+  - The dataset (`apps/gateway/test/ethzurich.test.ts`): a day's market cap paired with the close the day before (Bitcoin's 16.6M on 15 September 2017), days missing either left out, the coins ever in a day's top N.
+  - The download (`olderCoins.test.ts`, the fake Live Coin Watch with its list): no request without a key; the list, the months and the days, a dead coin's days, a coin it doesn't have; nothing asked twice after a stop; page after page; giving a group up after 1,000 in a row; a list page it can't give stops the scan rather than end it; waiting when asked to slow down and for the day; matching by symbol and price (Bytom, not Bitmark); the groups' order; the 250 largest of a month; the choice (a wrapped coin neither counts nor takes a place).
+  - The book (`olderBook.test.ts`): a week's median ignoring a blip and following a step; matching by price, stablecoins by market cap; Live Coin Watch scaled to meet both joins, its own steps and every price kept; a source's own market cap kept where its price is broken for a week.
+  - End to end (`cryptocap.test.ts`): switched on, TOTAL, OTHERS and BTC.D on an older day from Bitcoin's older days (scaled to CoinGecko's supply) and a dead coin's, the dead coin gone from our first day, weeks from the older days, hours not; switched off, nothing older (`config.test.ts`: off unless `CRYPTOCAP_OLDER_COINS=1`).
+  - In the browser (`older-caps.spec.ts`): each coin's download on its own line, its step and percent, done, and in red when it stops.
 - **Accuracy A2, A6:** OTHERS leaves out TradingView's ten, keeping ZEC and HYPE although larger (`cryptocap-parts.test.ts`); OTHERS, OTHERS.D and OTHERSBTC have every day TOTAL has, and every coin's own market cap and dominance are shown and listed, a small one too (`cryptocap.test.ts`); a formula's week built from its days keeps a symbol's one-day dip, in its history and its live bar (`formula.test.ts`; both fail when formulas build weeks themselves).
 - **Only whole bars** (`apps/gateway/test/marketService.test.ts`): a week its days reach only part of is left out where the history may stop short, and kept (starting on its first day) where the exchange vouches for the listing; Kraken vouches only for pairs newer than its 720 bars (`kraken.test.ts`, whose weekly chart now starts with its first whole week); stocks only after Alpaca's first day (`usStocks.test.ts`); CRYPTOCAP's weeks, months and quarters start with the first one its days cover (`cryptocap.test.ts`). All three new tests fail with the old rule.
 - **Sell and Buy** (`tests/e2e/chart.spec.ts`, `reference.spec.ts`): XRP's boxes 65.5 px and the spread 51 px, at the reference's place with its prices shown; a long price (0.00001590) widening both boxes alike, the price inside, the three side by side.
@@ -1167,6 +1205,7 @@ Reference viewport is 1634 px wide.
 58. CRYPTOCAP before 26 October 2025: TOTAL, TOTAL2, TOTAL3 and BTC.D come from Live Coin Watch's whole market (M9e, +3% to +19% against TradingView by year, §4.14); every other CRYPTOCAP symbol (OTHERS, the ES ones, TOTALE50 and TOTALE100, STABLE.C, a coin's own market cap and dominance) starts on 25 October 2025. Next: per-coin history for all of them, by our own top-125 method, from ETH Zurich's CC0 copy of CoinMarketCap (2,475 coins daily, 28 April 2013 to 7 February 2018, dead coins included; its 7 January 2018 total 815.3B against CoinMarketCap's published 813–830B) and Live Coin Watch's per-coin market caps after it (a top 125 read +2% in June 2024). No free source matches TradingView within 0.5% in every year, and TradingView's own early TOTAL2 is below Ethereum's market cap alone (June 2017). CoinGecko's Analyst plan ($129 a month) reaches 2013 with our own method.
 59. Older market caps, provisional (M9e): Live Coin Watch counts every coin with its own supplies, not TradingView's top 125, so its totals differ by a few percent (§4.14); the 30-day blend toward ours (ours; TradingView has one history); TOTAL3 before Ethereum equal to TOTAL2; a day without points repeating the close before it (TOTAL3's 7 August 2015); a day's high and low from hourly points; older days carry no volume of their own (counted as 1, for when CRYPTOCAP shows volume). Measured since against your TOTAL2/XRPUSD screenshot: +3% to +19% by year (§4.14), accepted on your word on 26 October. Live Coin Watch keeps one point a day before mid-2019 (every day to 2018, 79% of 2019's, under 8% after; counted 26 October), so those days' bars go straight from the close before to the day's, without wicks, and weeks and months take their highs and lows from closes. Only the October 2025 highs, January 2018 and that screenshot were compared: screenshots of TradingView's TOTAL, TOTAL2, TOTAL3 and BTC.D at older dates (2014, 2017–2018, 2021) would measure the rest. Live Coin Watch's pace is ours to guess (§4.14): if it turns us away often, the download slows itself 30 s at a time. While the first download runs, a chart shows the days in so far; the market service keeps pages it has served for 10 to 30 minutes.
 60. Shorter history than TradingView's, though not wrong: Kraken's charts reach back 720 bars (its free downloadable OHLCVT files could give the rest), OKX's to its own cut-offs, US stocks to 2016. Coins that join CoinGecko's top 250 later get its free year only, so on older days they count from that year (most were small before).
+61. Each coin's older days, provisional (M9f, ours; TradingView doesn't say how its older history is made): which of Live Coin Watch's coins are looked at (a peak of at least $20M and at most $5T, groups given up after 1,000 in a row outside a month's 250 largest) and kept (a month's 200 largest, the 60 largest stablecoins); matching (prices within 3% and market caps within 2× over 1–7 February 2018; symbol and price within 15% for CoinGecko's); a week's median supply; the straight-line scaling between the joins; the dataset's stablecoins (tether, nubits, bitusd, bitcny, dai, true-usd); wrapped and staked tokens left out by name and category. Coins that rose and fell between monthly looks may be missed (one point a month); the accuracy test will show how much that matters.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -1214,6 +1253,7 @@ Reference viewport is 1634 px wide.
 - Bitstamp (M9c): TradingView's BITSTAMP:XRPUSD https://www.tradingview.com/symbols/XRPUSD/?exchange=BITSTAMP · BITSTAMP:BTCUSD https://www.tradingview.com/symbols/BTCUSD/?exchange=BITSTAMP · Bitstamp's API https://www.bitstamp.net/api/ (its WebSocket page renders in the browser only; measured instead) · third-party: a mirror of TradingView's page https://www.tradingviewapi.com/markets/asset/BITSTAMP-XRPUSD · Tardis.dev https://docs.tardis.dev/historical-data-details/bitstamp
 - Long history (M9d): TradingView's TOTAL https://www.tradingview.com/symbols/CRYPTOCAP-TOTAL/ · its top-125 method https://www.tradingview.com/support/solutions/43000723016-total-market-cap-chart/ and its historical values being recalculated https://www.tradingview.com/support/solutions/43000540941-crypto-market-capitalization-data-is-incorrect-being-recalculated/ · CoinGecko's plans https://www.coingecko.com/en/api/pricing and its download page https://www.coingecko.com/en/coins/bitcoin/historical_data · CoinMarketCap's plans https://coinmarketcap.com/api/pricing/ · CoinPaprika https://docs.coinpaprika.com/api-reference/tickers/get-historical-ticks-for-a-specific-coin.md · CoinLore https://www.coinlore.com/cryptocurrency-data-api · Coinranking https://coinranking.com/api/features/historical-crypto-data · Santiment https://academy.santiment.net/sanapi/historical-and-realtime-data-restrictions/ · LiveCoinWatch https://livecoinwatch.github.io/lcw-api-docs/ and https://www.livecoinwatch.com/tools/api · Coin Metrics https://docs.coinmetrics.io/packages/coin-metrics-community-data · Mobula https://docs.mobula.io/pricing
 - Older market caps (M9e): Live Coin Watch's API https://livecoinwatch.github.io/lcw-api-docs/ (its history, credits and keys) · its free keys https://www.livecoinwatch.com/tools/api
+- Each coin's older days (M9f): ETH Zurich's dataset https://zenodo.org/records/4946058 (CC0; Wu, Wheatley and Sornette, "Classification of cryptocurrency coins and tokens by the dynamics of their market capitalisations", Royal Society Open Science, 2018, doi 10.1098/rsos.180381)
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

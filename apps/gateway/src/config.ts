@@ -39,6 +39,8 @@ export interface GatewayConfig {
   usListingsUrl: string | undefined;
   /** LIVECOINWATCH_URL instead of Live Coin Watch's API, for older market caps. */
   livecoinwatchUrl: string | undefined;
+  /** CRYPTOCAP_OLDER_COINS=1: each coin's older days in the charts (M9f; off until checked). */
+  olderCoinsInCharts: boolean;
   /** Where local data lives (watchlist, secrets, logo cache): DATA_DIR, or the repo's data/. */
   dataDir: string;
 }
@@ -77,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     },
     usListingsUrl: env.US_LISTINGS_URL || undefined,
     livecoinwatchUrl: env.LIVECOINWATCH_URL || undefined,
+    olderCoinsInCharts: env.CRYPTOCAP_OLDER_COINS === '1',
     dataDir: env.DATA_DIR || REPO_DATA_DIR,
   };
 }

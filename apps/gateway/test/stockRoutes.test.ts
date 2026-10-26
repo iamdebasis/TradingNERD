@@ -31,6 +31,7 @@ const config: GatewayConfig = {
   alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
   livecoinwatchUrl: undefined,
+  olderCoinsInCharts: false,
   dataDir: '',
 };
 const KEY_ID = 'PKTESTKEYID123456789';

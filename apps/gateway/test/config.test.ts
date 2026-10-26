@@ -23,6 +23,12 @@ describe('loadConfig', () => {
     expect(loadConfig({ GATEWAY_PORT: '' }).port).toBe(GATEWAY_DEFAULT_PORT);
   });
 
+  it("keeps each coin's older days out of the charts unless CRYPTOCAP_OLDER_COINS is 1", () => {
+    expect(loadConfig({}).olderCoinsInCharts).toBe(false);
+    expect(loadConfig({ CRYPTOCAP_OLDER_COINS: 'yes' }).olderCoinsInCharts).toBe(false);
+    expect(loadConfig({ CRYPTOCAP_OLDER_COINS: '1' }).olderCoinsInCharts).toBe(true);
+  });
+
   it.each(['abc', '-1', '65536', '80.5'])('rejects GATEWAY_PORT=%s', (port) => {
     expect(() => loadConfig({ GATEWAY_PORT: port })).toThrow(/Invalid GATEWAY_PORT/);
   });

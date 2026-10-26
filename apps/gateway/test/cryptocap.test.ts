@@ -123,6 +123,8 @@ interface SetupOptions {
   waitForPairs?: () => Promise<void>;
   /** Live Coin Watch, with a key for it: older market caps download back to `originMs`. */
   older?: { fake: ReturnType<typeof fakeLiveCoinWatch>; originMs: number };
+  /** Each coin's older days in the charts (M9f's switch). */
+  olderCoinsInCharts?: boolean;
 }
 
 async function setup({
@@ -133,6 +135,7 @@ async function setup({
   pairs = () => PAIRS,
   waitForPairs,
   older,
+  olderCoinsInCharts = false,
 }: SetupOptions = {}) {
   const fake = fakeCoinGecko({
     markets: MARKETS,
@@ -165,6 +168,7 @@ async function setup({
           olderOriginMs: older.originMs,
         }
       : {}),
+    olderCoinsInCharts,
     // Without history, the backfill stops after its first coin, as if it were still loading.
     sleep: history ? async () => {} : () => new Promise<void>(() => {}),
     tickMs: 5,
@@ -200,6 +204,43 @@ function keptSince(oldest: number): string {
     }),
   );
   return dataDir;
+}
+
+/** Each coin's older days as OlderCoins keeps them: a coin a file, `days` [UTC s, cap, price]. */
+function writeOlderCoins(
+  dataDir: string,
+  coins: { code: string; cgId?: string; markets?: number; days: [number, number, number][] }[],
+): void {
+  const dir = join(dataDir, 'cryptocap', 'older-coins');
+  mkdirSync(join(dir, 'coins'), { recursive: true });
+  writeFileSync(
+    join(dir, 'index.json'),
+    JSON.stringify({
+      version: 1,
+      span: [0, 1],
+      scan: null,
+      listed: coins.map((coin) => [coin.code, coin.code, 1e9, 1, [], coin.markets ?? 1]),
+      matched: Object.fromEntries(
+        coins.flatMap((coin) => (coin.cgId ? [[coin.code, coin.cgId]] : [])),
+      ),
+      chosen: coins.map((coin) => coin.code),
+      done: coins.map((coin) => coin.code),
+    }),
+  );
+  for (const [i, coin] of coins.entries()) {
+    const start = coin.days[0]?.[0] ?? 0;
+    writeFileSync(
+      join(dir, 'coins', `${String(i).padStart(4, '0')}.json`),
+      JSON.stringify({
+        version: 1,
+        code: coin.code,
+        start,
+        caps: coin.days.map(([, cap]) => cap),
+        prices: coin.days.map(([, , price]) => price),
+        fetched: 0,
+      }),
+    );
+  }
 }
 
 /** The kept points' TOTAL: every coin at its market cap, the excluded one left out. */
@@ -332,6 +373,58 @@ describe('CRYPTOCAP', () => {
     expect(tickers).toContain('ALP');
     expect(tickers).toContain('ALP.D');
     expect(tickers).toContain('LEO');
+  });
+
+  it("puts each coin's older days before our own when switched on: every symbol, a day and longer", async () => {
+    // Our own points from 400 days back; older days from 460 days back to a week past ours.
+    const own = TODAY - 400 * DAY_MS;
+    const older = TODAY - 460 * DAY_MS;
+    const olderDays = (cap: number, price: number, to = own + 7 * DAY_MS) =>
+      Array.from({ length: (to - older) / DAY_MS }, (_, i): [number, number, number] => [
+        (older + i * DAY_MS) / 1000,
+        cap,
+        price,
+      ]);
+    const dataDir = keptSince(own);
+    // Bitcoin at 50,000 with Live Coin Watch's supply, 10% short of CoinGecko's (2e7): scaled to
+    // meet it on its first own day. A dead coin no longer anyone's, counted only before ours.
+    writeOlderCoins(dataDir, [
+      { code: 'BTC', cgId: 'bitcoin', days: olderDays(50_000 * 1.8e7, 50_000) },
+      { code: 'DEAD', markets: 0, days: olderDays(1e10, 1) },
+    ]);
+    const { market } = track(await setup({ dataDir, olderCoinsInCharts: true }));
+    const bars = async (ticker: string, resolution = '1D') =>
+      (await market.getBars(`CRYPTOCAP:${ticker}`, resolution, null, 5_000)).bars;
+    const on = (list: Bar[], ms: number) => list.find((bar) => bar.time * 1000 === ms) as Bar;
+
+    const total = await bars('TOTAL');
+    expect((total[0] as Bar).time * 1000).toBe(older + DAY_MS);
+    const day = TODAY - 420 * DAY_MS;
+    expect(on(total, day).close).toBeCloseTo(50_000 * 2e7 + 1e10, -3);
+    expect(on(await bars('OTHERS'), day).close).toBeCloseTo(1e10, -3);
+    expect(on(await bars('BTC.D'), day).close).toBeCloseTo((1e12 / (1e12 + 1e10)) * 100, 6);
+    // From our own first day on, our own coins only: the dead coin is gone.
+    expect(on(total, own).close).toBeCloseTo(KEPT_TOTAL, -3);
+    // Weeks and months take the older days too.
+    expect(((await bars('TOTAL', '1W'))[0] as Bar).time * 1000).toBeLessThan(own - 50 * DAY_MS);
+    // An hour at a time, nothing older than ours.
+    const hours = await bars('TOTAL', '60');
+    expect((hours[0] as Bar).time * 1000).toBeGreaterThanOrEqual(own);
+  });
+
+  it('keeps the older days out of the charts while switched off', async () => {
+    const own = TODAY - 400 * DAY_MS;
+    const dataDir = keptSince(own);
+    writeOlderCoins(dataDir, [
+      {
+        code: 'DEAD',
+        markets: 0,
+        days: [[(own - 30 * DAY_MS) / 1000, 1e10, 1]],
+      },
+    ]);
+    const { market } = track(await setup({ dataDir }));
+    const { bars } = await market.getBars('CRYPTOCAP:TOTAL', '1D', null, 5_000);
+    expect((bars[0] as Bar).time * 1000).toBe(own + DAY_MS);
   });
 
   it("uses CoinGecko's market cap for a coin whose pair is priced like another coin", async () => {

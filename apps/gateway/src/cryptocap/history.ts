@@ -101,9 +101,25 @@ class Limiter {
   }
 }
 
+/** Each coin's older days (OlderBook, M9f), at a day and longer, before its own points. */
+export interface OlderDays {
+  load(): Promise<void>;
+  /** The first day any coin has (UTC s). */
+  firstSec(): number | null;
+  /** The coins, CoinGecko's and others (dead ones, ones no longer among the largest). */
+  entities(): readonly { id: string; stable: boolean; eligible: boolean }[];
+  entity(id: string): { stable: boolean; eligible: boolean } | undefined;
+  /** A coin's figures at `sec`; null where it has no older day (its own points begin there). */
+  capAt(id: string, sec: number): number | null;
+  priceAt(id: string, sec: number): number | null;
+  supplyAt(id: string, sec: number): number | null;
+}
+
 export interface CapHistoryOptions {
   universe: CoinUniverse;
   anchors: AnchorBook;
+  /** Each coin's older days, when they're in the charts (off until they're checked). */
+  older?: OlderDays;
   pairs: PairBook;
   /** The exchanges coins' prices come from, by id. */
   adapters: ReadonlyMap<string, ExchangeAdapter>;
@@ -122,6 +138,7 @@ export interface CapHistoryOptions {
 export class CapHistory {
   private readonly universe: CoinUniverse;
   private readonly anchors: AnchorBook;
+  private readonly older: OlderDays | undefined;
   private readonly pairs: PairBook;
   private readonly adapters: ReadonlyMap<string, ExchangeAdapter>;
   private readonly now: () => number;
@@ -137,6 +154,7 @@ export class CapHistory {
   constructor(options: CapHistoryOptions) {
     this.universe = options.universe;
     this.anchors = options.anchors;
+    this.older = options.older;
     this.pairs = options.pairs;
     this.adapters = options.adapters;
     this.now = options.now ?? Date.now;
@@ -152,13 +170,17 @@ export class CapHistory {
 
   /**
    * The first bar's open time (ms) at `resolution`: a year back, or further where Bitcoin's kept
-   * points reach, the first whole bar after.
+   * points reach, or at a day and longer where the coins' older days do (unless `older` is
+   * false: where our own history begins); the first whole bar after.
    */
-  firstBarMs(resolution: Resolution): number {
+  firstBarMs(resolution: Resolution, older = true): number {
     const period = durationOf(resolution);
     const kept = this.anchors.firstSec(BITCOIN);
     const yearBack = this.now() - HISTORY_DAYS * DAY_MS;
-    const start = kept === null ? yearBack : Math.min(yearBack, kept * 1000);
+    let start = kept === null ? yearBack : Math.min(yearBack, kept * 1000);
+    // No one kept the older days an hour at a time: they serve a day and longer only.
+    const olderSec = older && period >= DAY_MS ? (this.older?.firstSec() ?? null) : null;
+    if (olderSec !== null) start = Math.min(start, olderSec * 1000);
     return barOpenTime(resolution, start) + period;
   }
 
@@ -169,6 +191,7 @@ export class CapHistory {
     startMs: number,
     endMs: number,
   ): Promise<Bar[]> {
+    await this.older?.load();
     const period = durationOf(resolution);
     const span = CHUNK_BARS * period;
     const from = Math.max(startMs, this.firstBarMs(resolution));
@@ -295,7 +318,8 @@ export class CapHistory {
     // Without the exchanges' pair lists every coin would be CoinGecko's daily points: fine for
     // now, but computed again once the lists are in.
     const complete = fetched.complete && this.pairs.ready();
-    if (!prices.has(BITCOIN) && this.pairs.pairFor('BTC')) {
+    // A failed fetch is tried again; a span before its pair's first bar (years back) is fine.
+    if (!prices.has(BITCOIN) && this.pairs.pairFor('BTC') && !fetched.complete) {
       throw new MarketError('upstream_error', "Bitcoin's prices couldn't be loaded; retrying");
     }
 
@@ -309,7 +333,7 @@ export class CapHistory {
       const coins: CoinCapBar[] = [];
       for (const id of everyone) {
         const cap = caps.get(id)?.[i];
-        if (cap) coins.push({ ...cap, id, stable: this.universe.isStable(id) });
+        if (cap) coins.push({ ...cap, id, stable: this.isStable(id) });
       }
       const values = compositeBars(coins);
       for (const name of COMPOSITES) composites.get(name)?.push(withVolume(values[name]));
@@ -332,14 +356,23 @@ export class CapHistory {
     const first = times[0];
     const last = times.at(-1);
     if (first === undefined || last === undefined) return { candidates, stables };
-    const eligible = this.universe.coins().filter((coin) => this.universe.isEligible(coin.id));
+    const eligible = [
+      ...this.universe
+        .coins()
+        .filter((coin) => this.universe.isEligible(coin.id))
+        .map((coin) => coin.id),
+      // Coins of older days CoinGecko no longer has among its largest, or at all.
+      ...(this.older?.entities() ?? [])
+        .filter((entity) => entity.eligible && !this.universe.coin(entity.id))
+        .map((entity) => entity.id),
+    ];
     for (let day = Math.floor(first / DAY_SEC) * DAY_SEC; day <= last; day += DAY_SEC) {
       const ranked = eligible
-        .map((coin) => ({ id: coin.id, cap: this.anchors.estimatedCapAt(coin.id, day) }))
+        .map((id) => ({ id, cap: this.capAt(id, day) }))
         .filter((coin): coin is { id: string; cap: number } => coin.cap !== null)
         .sort((a, b) => b.cap - a.cap);
       for (const coin of ranked.slice(0, CANDIDATE_RANK)) candidates.add(coin.id);
-      const stable = ranked.filter((coin) => this.universe.isStable(coin.id));
+      const stable = ranked.filter((coin) => this.isStable(coin.id));
       for (const coin of stable.slice(0, STABLE_COINS)) stables.add(coin.id);
     }
     return { candidates, stables };
@@ -413,7 +446,7 @@ export class CapHistory {
     const last = [...coin.bars.values()].at(-1);
     if (!last) return true;
     // While the coin's history loads, CoinGecko's latest price tells as well.
-    const reference = this.anchors.priceAt(id, last.time) ?? this.universe.coin(id)?.price ?? null;
+    const reference = this.priceAt(id, last.time) ?? this.universe.coin(id)?.price ?? null;
     if (reference === null) return true;
     const price = last.close * this.rate(coin.pair.quote, last.time, tether);
     return Math.abs(price / reference - 1) <= PRICE_TOLERANCE;
@@ -424,10 +457,29 @@ export class CapHistory {
     if (quote === 'USD') return 1;
     if (quote === 'USDT') {
       const id = this.universe.bySymbol('USDT')?.id;
-      return tether?.bars.get(time)?.close ?? (id ? this.anchors.priceAt(id, time) : null) ?? 1;
+      return tether?.bars.get(time)?.close ?? (id ? this.priceAt(id, time) : null) ?? 1;
     }
     const id = this.universe.bySymbol('USDC')?.id;
-    return (id ? this.anchors.priceAt(id, time) : null) ?? 1;
+    return (id ? this.priceAt(id, time) : null) ?? 1;
+  }
+
+  /** A coin's market cap at `time`: its older day's before its own points begin, else theirs. */
+  private capAt(id: string, time: number): number | null {
+    return this.older?.capAt(id, time) ?? this.anchors.estimatedCapAt(id, time);
+  }
+
+  private priceAt(id: string, time: number): number | null {
+    return this.older?.priceAt(id, time) ?? this.anchors.priceAt(id, time);
+  }
+
+  private supplyAt(id: string, time: number): number | null {
+    return this.older?.supplyAt(id, time) ?? this.anchors.supplyAt(id, time);
+  }
+
+  /** Whether a coin is a stablecoin: CoinGecko's word, or for an older coin, its own. */
+  private isStable(id: string): boolean {
+    if (this.universe.coin(id)) return this.universe.isStable(id);
+    return this.older?.entity(id)?.stable ?? false;
   }
 
   /**
@@ -446,7 +498,7 @@ export class CapHistory {
     const dailyVolume = coin?.volume ?? 0;
     let lastPrice: number | null = null;
     return times.map((time) => {
-      const supply = this.anchors.supplyAt(id, time);
+      const supply = this.supplyAt(id, time);
       if (prices && supply !== null) {
         const rate = this.rate(prices.pair.quote, time, tether);
         const bar = prices.bars.get(time);
@@ -465,9 +517,9 @@ export class CapHistory {
           return { open: cap, high: cap, low: cap, close: cap, volume: 0 };
         }
       }
-      const open = this.anchors.estimatedCapAt(id, time);
+      const open = this.capAt(id, time);
       if (open === null) return null;
-      const close = this.anchors.estimatedCapAt(id, time + period / 1000) ?? open;
+      const close = this.capAt(id, time + period / 1000) ?? open;
       return {
         open,
         high: Math.max(open, close),

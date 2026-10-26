@@ -703,6 +703,7 @@ class MockGateway implements MockMarket {
     from: null,
     until: null,
     message: null,
+    coins: { state: 'none', progress: 0, message: null },
   };
   readonly savedLcwKeys: string[] = [];
   stockNow = STOCK_NOW;

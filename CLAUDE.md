@@ -49,3 +49,13 @@ Every chart integration (a token, a symbol, an index such as TOTAL) gets the mos
 - Compare providers on history depth and accuracy, free ones first, measured from this machine against TradingView's own numbers and depth.
 - Say which need a free API key, and what a paid tier would add.
 - Use official APIs and data the provider allows. TradingView is the benchmark, never the source (value 3).
+
+## Where everything else is
+
+- `AGENTS.md`: the user's standing rules beyond these values (data, git, the running app, keys), the commands, the conventions and the definition of done, for every AI agent. It's imported below.
+- `docs/HANDOVER.md`: where the work stands and what's next.
+- `docs/ARCHITECTURE.md`: a map of the code.
+- `docs/SECURITY.md`: what may leave this Mac, and the checks.
+- `docs/SPEC.md`: the source of truth.
+
+@AGENTS.md

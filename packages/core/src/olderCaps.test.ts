@@ -8,6 +8,7 @@ const STATUS = {
   from: '2019-03-02',
   until: '2025-10-28',
   message: null,
+  coins: { state: 'loading', progress: 0.25, message: 'Finding the coins' },
 };
 
 describe('older market caps status', () => {
@@ -30,6 +31,8 @@ describe('older market caps status', () => {
     ['progress past 1', { ...STATUS, progress: 1.5 }],
     ['a day that is no date', { ...STATUS, from: 'May 2013' }],
     ['a key without its source', { ...STATUS, key: { masked: '••••9c1e' } }],
+    ['no word of the coins', { ...STATUS, coins: undefined }],
+    ['coins in an unknown state', { ...STATUS, coins: { ...STATUS.coins, state: 'paused' } }],
     ['nothing', null],
   ])('refuses %s', (_label, value) => {
     expect(parseOlderCapsStatus(value)).toBeNull();

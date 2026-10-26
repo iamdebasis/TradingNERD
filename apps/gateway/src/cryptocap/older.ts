@@ -10,6 +10,9 @@ import {
   type MarketPoint,
 } from './livecoinwatch.ts';
 
+/** The older market caps' download and the key; the routes add the coins' download. */
+export type MarketCapsStatus = Omit<OlderCapsStatus, 'coins'>;
+
 /** The CRYPTOCAP symbols older history is kept for: what Live Coin Watch's market gives. */
 export const OLDER_SERIES = ['TOTAL', 'TOTAL2', 'TOTAL3', 'BTC.D'] as const;
 export type OlderSeries = (typeof OLDER_SERIES)[number];
@@ -259,7 +262,7 @@ export class OlderCaps {
   }
 
   /** Checks a key with Live Coin Watch, keeps it, and starts the download with it. */
-  async saveKey(raw: string): Promise<OlderCapsStatus> {
+  async saveKey(raw: string): Promise<MarketCapsStatus> {
     const key = raw.trim();
     if (!key) throw new MarketError('bad_request', 'Enter your Live Coin Watch key');
     try {
@@ -279,7 +282,7 @@ export class OlderCaps {
   }
 
   /** Forgets the key; what was downloaded stays. */
-  async removeKey(): Promise<OlderCapsStatus> {
+  async removeKey(): Promise<MarketCapsStatus> {
     await this.secrets.removeLiveCoinWatch();
     await this.starting;
     this.stopJob();
@@ -287,7 +290,7 @@ export class OlderCaps {
     return this.status();
   }
 
-  async status(): Promise<OlderCapsStatus> {
+  async status(): Promise<MarketCapsStatus> {
     await this.load();
     const key = await this.secrets.livecoinwatch();
     const covered = this.stored.covered;

@@ -38,11 +38,32 @@ function progressOf(status: OlderCapsStatus | null): { text: string; kind: strin
   return { text: ' ', kind: 'idle' };
 }
 
+/** Each coin's download in a line, once there's anything to say of it. */
+function coinsProgressOf(status: OlderCapsStatus | null): { text: string; kind: string } | null {
+  const coins = status?.coins;
+  if (!coins || coins.state === 'none') return null;
+  if (coins.state === 'error') {
+    return {
+      text: `Each coin's history: ${coins.message ?? 'the download stopped'}`,
+      kind: 'error',
+    };
+  }
+  if (coins.state === 'loading') {
+    const percent = `${Math.floor(coins.progress * 100)}%`;
+    return {
+      text: `Each coin's history: ${coins.message ?? 'downloading…'} · ${percent}`,
+      kind: 'idle',
+    };
+  }
+  if (coins.message) return { text: `Each coin's history: ${coins.message}`, kind: 'idle' };
+  return { text: "✓ Each coin's history is in", kind: 'saved' };
+}
+
 /**
  * "Older market caps": the Live Coin Watch key that TOTAL, TOTAL2, TOTAL3 and BTC.D need for
  * the years before our own history (docs/SPEC.md §5.13), in the coin logo dialog's style. A
  * key is checked with Live Coin Watch before it is kept; the browser only ever sees it masked.
- * While the download runs, its progress is shown.
+ * While the downloads run, their progress is shown: the market caps', and each coin's (§5.14).
  */
 export function OlderCapsDialog({
   api = olderCapsApi,
@@ -90,8 +111,8 @@ export function OlderCapsDialog({
     };
   }, [api, apply]);
 
-  // While the download runs, its progress.
-  const loading = status?.state === 'loading';
+  // While a download runs, its progress.
+  const loading = status?.state === 'loading' || status?.coins.state === 'loading';
   useEffect(() => {
     if (!loading) return;
     let alive = true;
@@ -152,6 +173,7 @@ export function OlderCapsDialog({
   };
 
   const progress = progressOf(status);
+  const coinsProgress = key ? coinsProgressOf(status) : null;
 
   return createPortal(
     <div className={styles.backdrop}>
@@ -173,7 +195,8 @@ export function OlderCapsDialog({
         <p className={styles.text}>
           TOTAL, TOTAL2, TOTAL3 and BTC.D reach back to May 2013 with Live Coin Watch's market caps,
           which need a free Live Coin Watch API key. They're downloaded once, in about two hours,
-          and kept on this computer, like the key.
+          and kept on this computer, like the key. With it, each coin's own history is downloaded
+          too, over a few days, for every CRYPTOCAP symbol's older years.
         </p>
 
         {key && !editing && (
@@ -228,6 +251,11 @@ export function OlderCapsDialog({
           {check.kind === 'error' && check.message}
           {check.kind === 'idle' && progress.text}
         </p>
+        {coinsProgress && (
+          <p className={styles.status} data-kind={coinsProgress.kind} aria-live="polite">
+            {coinsProgress.text}
+          </p>
+        )}
 
         <div className={styles.footer}>
           <a

@@ -7,6 +7,7 @@ import { SymbolCatalog } from '../src/catalog/SymbolCatalog.ts';
 import type { GatewayConfig } from '../src/config.ts';
 import { LiveCoinWatchClient } from '../src/cryptocap/livecoinwatch.ts';
 import { OlderCaps } from '../src/cryptocap/older.ts';
+import { OlderCoins } from '../src/cryptocap/olderCoins.ts';
 import { CoinGeckoClient } from '../src/logos/coingecko.ts';
 import { LogoService } from '../src/logos/LogoService.ts';
 import { MarketService } from '../src/market/MarketService.ts';
@@ -30,6 +31,7 @@ const config: GatewayConfig = {
   alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
   livecoinwatchUrl: undefined,
+  olderCoinsInCharts: false,
   dataDir: '',
 };
 const DAY = 86_400_000;
@@ -41,6 +43,7 @@ describe('the gateway with older market caps', () => {
   let app: FastifyInstance;
   let dataDir: string;
   let older: OlderCaps;
+  let coins: OlderCoins;
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'tn-older-routes-'));
     const lcw = fakeLiveCoinWatch({ cap: () => 2e12, keys: [KEY] });
@@ -55,6 +58,15 @@ describe('the gateway with older market caps', () => {
       gapMs: 0,
       sleep: async () => {},
     });
+    coins = new OlderCoins({
+      secrets,
+      dataDir,
+      joinMs: () => JOIN,
+      universe: () => [],
+      client: new LiveCoinWatchClient({ url: 'http://lcw.test', fetch: lcw.fetch }),
+      gapMs: 0,
+      sleep: async () => {},
+    });
     const catalog = new SymbolCatalog({ sources: [], live: new Set(), dataDir });
     const fetch = (async () => new Response('{}', { status: 404 })) as typeof globalThis.fetch;
     app = await buildServer(
@@ -65,12 +77,12 @@ describe('the gateway with older market caps', () => {
         watchlist: new WatchlistsStore(dataDir),
         flags: new FlagStore(dataDir),
         logos: new LogoService({ client: new CoinGeckoClient({ fetch }), secrets, dataDir, fetch }),
-        olderCaps: older,
+        olderCaps: { older, coins },
       },
     );
     app.addHook('onClose', async () => {
       catalog.close();
-      await older.close();
+      await Promise.all([older.close(), coins.close()]);
     });
   });
   afterAll(async () => {
@@ -93,6 +105,7 @@ describe('the gateway with older market caps', () => {
       from: null,
       until: null,
       message: null,
+      coins: { state: 'none', progress: 0, message: null },
     });
     const empty = await call('PUT', '/api/older-caps/key', { key: 42 });
     expect(empty.statusCode).toBe(400);
@@ -115,7 +128,7 @@ describe('the gateway with older market caps', () => {
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(file, 'utf8')).livecoinwatch).toEqual({ key: KEY });
 
-    await older.idle();
+    await Promise.all([older.idle(), coins.idle()]);
     const done = (await call('GET', '/api/older-caps')).json();
     expect(done).toEqual({
       key: { masked: '••••6789', source: 'file' },
@@ -124,6 +137,14 @@ describe('the gateway with older market caps', () => {
       from: '2025-10-18',
       until: '2025-10-29',
       message: null,
+      // The key starts the coins' download too: here a list without a coin, done at once; ETH
+      // Zurich's files aren't here, and it says where they come from.
+      coins: {
+        state: 'done',
+        progress: 1,
+        message:
+          "ETH Zurich's dataset is missing: download its two files from https://zenodo.org/records/4946058 into data/cryptocap/older-coins/",
+      },
     });
     expect(JSON.stringify(done)).not.toContain(KEY);
 

@@ -51,6 +51,7 @@ const config: GatewayConfig = {
   alpaca: { dataUrl: undefined, tradingUrl: undefined, streamUrl: undefined },
   usListingsUrl: undefined,
   livecoinwatchUrl: undefined,
+  olderCoinsInCharts: false,
   dataDir: '', // each server gets its own temporary directory
 };
 

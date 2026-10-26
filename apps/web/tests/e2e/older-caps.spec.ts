@@ -49,14 +49,23 @@ test("the ⋯ menu takes a Live Coin Watch key, checked and masked, and shows th
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
   expect(stored).not.toContain(MOCK_LCW_KEY);
 
-  // The download goes back from our first day: how far it got, and what it waits for.
+  // The download goes back from our first day: how far it got, and what it waits for. Each
+  // coin's history, a few days' download of its own, runs beside it, on a line of its own.
   market.olderCaps = {
     ...market.olderCaps,
     progress: 0.42,
     from: '2020-08-14',
     until: '2025-10-29',
+    coins: {
+      state: 'loading',
+      progress: 0.125,
+      message: 'Finding which coins counted, month by month: 1,200 of at most 9,000 coins',
+    },
   };
   await expect(dialog(page)).toContainText('Downloading… 42% · back to 14 Aug 2020');
+  await expect(dialog(page)).toContainText(
+    "Each coin's history: Finding which coins counted, month by month: 1,200 of at most 9,000 coins · 12%",
+  );
   market.olderCaps = {
     ...market.olderCaps,
     message: "Waiting for Live Coin Watch's requests to renew at 00:00 UTC",
@@ -72,6 +81,11 @@ test("the ⋯ menu takes a Live Coin Watch key, checked and masked, and shows th
     message: null,
   };
   await expect(dialog(page)).toContainText('✓ Daily from 1 May 2013');
+  market.olderCaps = {
+    ...market.olderCaps,
+    coins: { state: 'done', progress: 1, message: null },
+  };
+  await expect(dialog(page)).toContainText("✓ Each coin's history is in");
   await dialog(page).getByRole('button', { name: 'Done' }).click();
   await expect(dialog(page)).toHaveCount(0);
 
@@ -93,6 +107,7 @@ test('Remove forgets the key and keeps what came in; a key from the environment 
     from: '2013-05-01',
     until: '2025-10-29',
     message: null,
+    coins: { state: 'none', progress: 0, message: null },
   };
   await openChart(page);
   await openFromMenu(page);
@@ -119,10 +134,14 @@ test('a download that stopped says why, in red', async ({ page, market }) => {
     from: '2024-06-02',
     until: '2025-10-29',
     message: 'Live Coin Watch rejected the key',
+    coins: { state: 'error', progress: 0.1, message: 'Live Coin Watch rejected the key' },
   };
   await openChart(page);
   await openFromMenu(page);
-  const status = dialog(page).locator('[aria-live="polite"]');
+  const status = dialog(page).locator('[aria-live="polite"]').first();
+  const coins = dialog(page).locator('[aria-live="polite"]').nth(1);
   await expect(status).toHaveText('Live Coin Watch rejected the key');
   await expect(status).toHaveAttribute('data-kind', 'error');
+  await expect(coins).toHaveText("Each coin's history: Live Coin Watch rejected the key");
+  await expect(coins).toHaveAttribute('data-kind', 'error');
 });

@@ -26,6 +26,8 @@ import { BITCOIN, type CoinCapBar, compositeBars } from './indices.ts';
 import { LiveCaps } from './live.ts';
 import { LiveCoinWatchClient } from './livecoinwatch.ts';
 import { OlderCaps, type OlderSeries } from './older.ts';
+import { OlderBook } from './olderBook.ts';
+import { OlderCoins } from './olderCoins.ts';
 import { PairBook } from './pairs.ts';
 import {
   type CapTicker,
@@ -69,6 +71,11 @@ export interface CryptoCapOptions {
   livecoinwatch?: { url?: string | undefined; fetch?: typeof fetch };
   /** Where older market caps start downloading from (tests start later). */
   olderOriginMs?: number;
+  /**
+   * Each coin's older days in the charts, in place of Live Coin Watch's whole market (M9f): off
+   * until they're checked against TradingView (CRYPTOCAP_OLDER_COINS=1 for that check).
+   */
+  olderCoinsInCharts?: boolean;
   onWarning?: (message: string) => void;
 }
 
@@ -101,6 +108,9 @@ export class CryptoCapExchange implements ExchangeAdapter {
   private readonly live: LiveCaps;
   /** TOTAL, TOTAL2, TOTAL3 and BTC.D before our own history, from Live Coin Watch. */
   readonly older: OlderCaps;
+  /** Each coin's older days (M9f): downloaded; in the charts only with `olderCoinsInCharts`. */
+  readonly olderCoins: OlderCoins;
+  private readonly olderBook: OlderBook | null;
   private readonly now: () => number;
   private readonly waitForPairs: () => Promise<void>;
   /** Tickers resolved so far → what they're made of, for subscribing without waiting. */
@@ -122,11 +132,42 @@ export class CryptoCapExchange implements ExchangeAdapter {
       ...(options.sleep ? { sleep: options.sleep } : {}),
       onWarning: warn,
     });
+    const livecoinwatch = new LiveCoinWatchClient({
+      ...(options.livecoinwatch?.url ? { url: options.livecoinwatch.url } : {}),
+      ...(options.livecoinwatch?.fetch ? { fetch: options.livecoinwatch.fetch } : {}),
+    });
+    // Our own history's first day: where older days end, whether or not they're in the charts.
+    const ourFirstDay = () => this.history.firstBarMs(D1, false);
+    this.olderCoins = new OlderCoins({
+      secrets: options.secrets,
+      dataDir: options.dataDir,
+      joinMs: ourFirstDay,
+      universe: () => this.universe.coins(),
+      client: livecoinwatch,
+      ...(options.sleep ? { sleep: options.sleep, gapMs: 0 } : {}),
+      now: this.now,
+      onWarning: warn,
+    });
+    this.olderBook = options.olderCoinsInCharts
+      ? new OlderBook({
+          coins: this.olderCoins,
+          anchors: this.anchors,
+          isEligible: (id) => this.universe.isEligible(id),
+          isStable: (id) => this.universe.isStable(id),
+          // Coins that aren't CoinGecko's end where our own coins' points begin.
+          joinSec: () => {
+            const first = this.anchors.firstSec(BITCOIN);
+            return first === null ? ourFirstDay() / 1000 : Math.floor(first / 86_400) * 86_400;
+          },
+          onWarning: warn,
+        })
+      : null;
     const pairs = new PairBook(options.pairs);
     const adapters = new Map(options.adapters.map((adapter) => [adapter.id, adapter]));
     this.history = new CapHistory({
       universe: this.universe,
       anchors: this.anchors,
+      ...(this.olderBook ? { older: this.olderBook } : {}),
       pairs,
       adapters,
       now: this.now,
@@ -145,12 +186,9 @@ export class CryptoCapExchange implements ExchangeAdapter {
     this.older = new OlderCaps({
       secrets: options.secrets,
       dataDir: options.dataDir,
-      joinMs: () => this.history.firstBarMs(D1),
+      joinMs: ourFirstDay,
       ours: (series, joinMs) => this.oursOn(series, joinMs),
-      client: new LiveCoinWatchClient({
-        ...(options.livecoinwatch?.url ? { url: options.livecoinwatch.url } : {}),
-        ...(options.livecoinwatch?.fetch ? { fetch: options.livecoinwatch.fetch } : {}),
-      }),
+      client: livecoinwatch,
       ...(options.olderOriginMs !== undefined ? { originMs: options.olderOriginMs } : {}),
       ...(options.sleep ? { sleep: options.sleep, gapMs: 0 } : {}),
       now: this.now,
@@ -248,17 +286,18 @@ export class CryptoCapExchange implements ExchangeAdapter {
 
   /**
    * The saved coins and history, so the first lookup needn't wait for the disk; then the older
-   * market caps' download carries on, if there's a key and something left to fetch.
+   * market caps' and coins' downloads carry on, if there's a key and something left to fetch.
    */
   async prepare(): Promise<void> {
     await this.universe.load();
     void this.older.start();
+    void this.olderCoins.start();
   }
 
   async close(): Promise<void> {
     this.live.close();
     this.universe.close();
-    await this.older.close();
+    await Promise.all([this.older.close(), this.olderCoins.close()]);
     await this.anchors.flush();
   }
 
@@ -385,9 +424,12 @@ export class CryptoCapExchange implements ExchangeAdapter {
     endMs: number,
   ): Promise<Bar[]> {
     const ours = await this.history.bars(source, resolution, startMs, endMs);
+    // Each coin's older days give every symbol its older bars: Live Coin Watch's whole market isn't
+    // added then.
+    if (this.olderBook) return ours;
     const series = olderSeriesOf(source);
     if (!series || resolution.unit !== 'day' || resolution.count !== 1) return ours;
-    const join = this.history.firstBarMs(resolution);
+    const join = this.history.firstBarMs(resolution, false);
     if (startMs >= join) return ours;
     const older = await this.older.bars(series, startMs, Math.min(endMs, join));
     return [...older, ...ours];
