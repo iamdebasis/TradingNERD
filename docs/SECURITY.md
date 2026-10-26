@@ -34,8 +34,10 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **No telemetry** in the code or its dependencies.
 - **Git:**
   - `data/`, `.env` files and test output are ignored (`.gitignore`), and `data/` has never been committed.
-  - The repository has no remote.
+  - Every commit carries only `Debasis <30506767+iamdebasis@users.noreply.github.com>` (GitHub's private address) and times in UTC. The history was rewritten on 26 October, before the first push, to take out a personal email and the local time zone.
+  - The TradingView reference screenshots have the user's name and avatars painted over; they still show which coins are on the user's watchlists.
   - The keys in tests are made up (`PKTEST…`, `a1b2c3d4-…`).
+  - The repository's home: https://github.com/iamdebasis/TradingNERD, public.
 
 ## Rules for AI agents
 
@@ -44,6 +46,8 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **The user's Live Coin Watch key is also in `~/.tradingnerd-lcw-key`** (owner-only), for research. Read it only inside a script, use it only with Live Coin Watch, and never print it. To check that a key appears nowhere it shouldn't, compare inside the script and print only "yes" or "no".
 - **Never copy `data/secrets.json` anywhere.** A gateway of your own gets `DATA_DIR` set to a copy of `data/` made without it.
 - **Publish nothing from this project:** no web pages, shared documents or uploads. Research may read public pages, and must send no personal data.
+- **Commit only as the project's identity, in UTC** (AGENTS.md, "Git"), and check before any push. Never put a personal email, name, home folder or time zone into a commit or a file.
+- **Screenshots** added to the repository have account names, avatars and anything identifying covered first. Keep the pixels the tests measure, and prove nothing else changed.
 - **Never get around a block** (bot checks, rate limits, refused requests). Back off, or ask the user.
 - **Live checks against the user's app are read-only** (AGENTS.md).
 
@@ -83,3 +87,4 @@ Also:
 - 28 commits and 26 uncommitted files had no real key.
 - The key routes answered with masked values only.
 - The user's shell history held no key.
+- **Before the first push** (the same day): all 29 commits were rewritten to the project identity with times in UTC. The name and avatars in two screenshots were covered, with no other pixel changed. The time zone was taken out of `HANDOVER.md`, and the old copies were deleted (a backup stayed outside the repository until the user confirmed). Then all 1,406 objects in the repository were searched: no personal email, name, home folder, Mac name, time zone or key. The 65 browser tests that read the screenshots pass.

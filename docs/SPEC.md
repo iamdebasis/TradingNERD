@@ -568,7 +568,7 @@ TradingView's TOTAL, TOTAL2 and TOTAL3 go back more than ten years (its TOTAL pa
 - **Pre/post-market price line:** on a regular-hours intraday or daily chart, the latest pre- or post-market minute's price as a dotted line in orange ("Pre") or blue ("Post"), with its tag at the pane's edge and its price on the axis; none while the regular session trades. Its label steps clear of the last price's.
 - **Watchlist:** Last, Chg and Chg% against the previous session's official close, 15 minutes late, moving with each trade for up to 30 symbols (a chart's first); prices to 2 decimals, 4 below $1. After the ticker: a superscript orange "D" for delayed data, and a dot when the market is out of its session (orange pre-market, blue post-market, gray closed).
 - **The key:** a "US stock data" dialog (from a stock that needs it, or the ⋯ menu) takes the Alpaca key ID and secret, checks them with Alpaca, and shows the plan ("free plan: 15 minutes delayed"); the browser only ever sees the ID masked. Saving reloads the stocks on the chart and in the watchlist.
-- **Status:** M7a committed 2026-10-20 (0c590aa). M7b built 2026-10-24: whole bars, extended hours with Chart settings, market status, the delayed stream with Sell and Buy. Next: M7c logos (Massive's free key) and pixel checks against your screenshots (§11).
+- **Status:** M7a committed 2026-10-20 (be11a36). M7b built 2026-10-24: whole bars, extended hours with Chart settings, market status, the delayed stream with Sell and Buy. Next: M7c logos (Massive's free key) and pixel checks against your screenshots (§11).
 
 ### 5.8 Chart settings and market status (M7b)
 

@@ -109,7 +109,10 @@ The user gave these during the work; they bind as the core values do.
 ### Git
 
 - **Work happens on the branch `m7-us-stocks`.** `main` moves only when the user says "merge". Then fast-forward it from the branch, without checking it out: `git fetch . m7-us-stocks:main`.
-- **Commit only on a YES, and push only on its own YES.** The repository has no remote.
+- **Commit only on a YES, and push only on its own YES.** The repository's home is https://github.com/iamdebasis/TradingNERD, and it's public.
+- **Commit as the project's identity only:** `Debasis <30506767+iamdebasis@users.noreply.github.com>`, GitHub's private address, set in this repository's `.git/config`. Never use a personal email, and never set an identity without asking.
+- **Commit times in UTC:** commit with `TZ=UTC` (`TZ=UTC git commit …`), so no commit carries the local time zone.
+- **Before any push,** check that `git log --all --format='%an <%ae> %ad|%cd' --date=format:%z | sort -u` shows only that identity and +0000.
 - **Commit messages:** a subject naming the milestones ("M9e, A2, A6: older market caps back, OTHERS as TradingView's, formula weeks from days"), a blank line, then dash bullets of what changed and why, then your tool's co-author trailer, if it uses one.
 
 ### The user's running app
@@ -173,5 +176,5 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 ## Where the work stands
 
 See [docs/HANDOVER.md](docs/HANDOVER.md). As of 26 October 2026:
-- **Committed:** M0–M9e, A1, A2 and A6 (last commit `91b07ef`).
-- **Built but uncommitted:** M9f (each coin's older days). Its download is running and its accuracy test is waiting.
+- **Committed:** M0–M9e, A1, A2, A6, and M9f's checkpoint, switched off in the charts (last commit `c4f260a`).
+- **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.
