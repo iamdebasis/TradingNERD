@@ -76,6 +76,13 @@ export interface ExchangeAdapter {
   readonly delayMs?: number;
   /** Numbered trades, for tick bars; exchanges without them have no tick intervals. */
   readonly ticks?: TickSource;
+  /**
+   * Whether its bars at `resolution`, the oldest opening at `firstBarMs`, reach back to the
+   * pair's listing. Then a longer bar built from them may rightly start part way through its
+   * period, as TradingView's first bar after a listing does. Absent or false: its history may
+   * stop short of the listing, so such a bar would be wrong, and it's left out (docs/SPEC.md §6.5).
+   */
+  historyFromListing?(resolution: Resolution, firstBarMs: number): boolean;
 
   /** Rejects with MarketError('unknown_symbol') if the exchange doesn't list it. */
   resolveSymbol(ticker: string): Promise<SymbolInfo>;

@@ -36,6 +36,9 @@ const NATIVE: readonly Resolution[] = Object.keys(TIMEFRAMES).map((text) => {
 });
 /** Before Alpaca's history begins (2016): asking from here gets everything there is. */
 const HISTORY_START = Date.UTC(2015, 0, 1);
+/** Alpaca's first day of history: a stock whose bars begin later was listed then. */
+const FIRST_HISTORY_DAY = Date.UTC(2016, 0, 4);
+const DAY = 86_400_000;
 const MINUTE = 60_000;
 
 /**
@@ -68,6 +71,11 @@ export class UsStockExchange implements ExchangeAdapter {
 
   get delayMs(): number {
     return this.market.delayMs();
+  }
+
+  /** A stock's bars reach its listing unless they begin where Alpaca's history does (2016). */
+  historyFromListing(_resolution: Resolution, firstBarMs: number): boolean {
+    return firstBarMs >= FIRST_HISTORY_DAY + DAY;
   }
 
   async resolveSymbol(ticker: string): Promise<SymbolInfo> {

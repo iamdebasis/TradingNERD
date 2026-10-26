@@ -318,14 +318,20 @@ function resampleSetup({
   maxBarsPerRequest = 1_000,
   nowSec,
   natives,
+  fromListing = false,
 }: {
   maxBarsPerRequest?: number;
   nowSec: number;
   natives?: string[];
+  fromListing?: boolean;
 }) {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(nowSec * 1000);
-  const fake = new FakeExchange(natives ? { maxBarsPerRequest, natives } : { maxBarsPerRequest });
+  const fake = new FakeExchange({
+    maxBarsPerRequest,
+    fromListing,
+    ...(natives ? { natives } : {}),
+  });
   const market = new MarketService([fake], { emitIntervalMs: 0, retryDelayMs: () => 5 });
   return { fake, market };
 }
@@ -382,6 +388,35 @@ describe('MarketService resampled intervals', () => {
       Array.from({ length: 8 }, (_, i) => TEN - 12 * MINUTE + i * 3 * MINUTE),
     );
     expect(hasMore).toBe(true);
+  });
+
+  it("leaves out a week its days only reach part of, but keeps a listing's first week", async () => {
+    // Days from Wednesday 7 October 2026: the week of Monday 5 October is only partly there.
+    const days = Array.from({ length: 12 }, (_, i) => ({
+      time: Date.UTC(2026, 9, 7 + i) / 1000,
+      open: 10 + i,
+      high: 11 + i,
+      low: 9 + i,
+      close: 10.5 + i,
+      volume: 1,
+    }));
+    const day = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
+    const nowSec = Date.UTC(2026, 9, 18, 12) / 1000;
+
+    // History that may stop short of the listing: half a week would be wrong.
+    const cut = resampleSetup({ nowSec, natives: ['1', '1D'] });
+    cut.fake.series.set('1D', days);
+    const weeks = await cut.market.getBars(SYMBOL, '1W', null, 10);
+    expect(weeks.bars.map((bar) => day(bar.time))).toEqual(['2026-10-12']);
+    expect(weeks.bars[0]).toMatchObject({ open: 15, close: 21.5 });
+    expect(weeks.hasMore).toBe(false);
+
+    // History from the listing: its first week starts on the Wednesday, as TradingView's does.
+    const listed = resampleSetup({ nowSec, natives: ['1', '1D'], fromListing: true });
+    listed.fake.series.set('1D', days);
+    const first = await listed.market.getBars(SYMBOL, '1W', null, 10);
+    expect(first.bars.map((bar) => day(bar.time))).toEqual(['2026-10-05', '2026-10-12']);
+    expect(first.bars[0]).toMatchObject({ open: 10, high: 15, low: 9, close: 14.5 });
   });
 
   it('builds 6-month bars from monthly ones, starting in January and July', async () => {

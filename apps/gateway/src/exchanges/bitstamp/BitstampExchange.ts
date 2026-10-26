@@ -103,6 +103,11 @@ export class BitstampExchange implements ExchangeAdapter, CatalogSource {
     return this.instruments.prepare();
   }
 
+  /** Every pair's bars reach back to its listing, at every interval (measured 2026-10-26). */
+  historyFromListing(): boolean {
+    return true;
+  }
+
   /** Described as Bitstamp describes it, as TradingView shows it: "XRP / U.S. dollar". */
   async resolveSymbol(ticker: string): Promise<SymbolInfo> {
     const instrument = await this.instruments.get(ticker);

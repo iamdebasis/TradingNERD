@@ -127,6 +127,16 @@ export class KrakenExchange implements ExchangeAdapter, CatalogSource {
   }
 
   /**
+   * Kraken keeps only its latest 720 bars, so the oldest it has is the pair's listing only when
+   * it's newer than the oldest bar a pair listed before that window would have.
+   */
+  historyFromListing(resolution: Resolution, firstBarMs: number): boolean {
+    const barMs = resolutionDurationMs(resolution);
+    if (barMs === null) return false;
+    return firstBarMs > barOpenTime(resolution, Date.now()) - (HISTORY_BARS - 2) * barMs;
+  }
+
+  /**
    * Whether any bar Kraken still keeps opens before `endMs`, so asking can return something.
    * A bar's margin covers Kraken moving on to a new bar a moment before or after this clock.
    */

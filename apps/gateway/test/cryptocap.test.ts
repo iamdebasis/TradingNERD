@@ -163,6 +163,27 @@ async function setup({
 
 const D1 = parseResolution('1D') as Resolution;
 
+/** A data folder keeping every coin's daily point from `oldest` (ms) to 10 days ago. */
+function keptSince(oldest: number): string {
+  const dataDir = join(mkdtempSync(join(tmpdir(), 'tradingnerd-cryptocap-')), 'data');
+  const days = Array.from(
+    { length: (TODAY - 9 * DAY_MS - oldest) / DAY_MS },
+    (_, i) => (oldest + i * DAY_MS) / 1000,
+  );
+  mkdirSync(join(dataDir, 'cryptocap'), { recursive: true });
+  writeFileSync(
+    join(dataDir, 'cryptocap', 'anchors.json'),
+    JSON.stringify({
+      version: 1,
+      coins: Object.fromEntries(
+        MARKETS.map((coin) => [coin.id, days.map((sec) => [sec, coin.cap, coin.price])]),
+      ),
+      history: {},
+    }),
+  );
+  return dataDir;
+}
+
 /** TOTAL today: Bitcoin at 84,000, the rest at their prices, the excluded coin left out. */
 const BTC_TODAY = 84_000 * supplyOf('bitcoin');
 const TOTAL_TODAY =
@@ -331,21 +352,8 @@ describe('CRYPTOCAP', () => {
   it("reaches back as far as Bitcoin's kept points, past CoinGecko's free year", async () => {
     // Days kept from earlier years: every coin's point a day back to 500 days ago, with no
     // history fetched yet, so this run's backfill fetches its (shorter) history on top of them.
-    const dataDir = join(mkdtempSync(join(tmpdir(), 'tradingnerd-cryptocap-')), 'data');
     const oldest = TODAY - 500 * DAY_MS;
-    const keptDays = Array.from({ length: 491 }, (_, i) => (oldest + i * DAY_MS) / 1000);
-    mkdirSync(join(dataDir, 'cryptocap'), { recursive: true });
-    writeFileSync(
-      join(dataDir, 'cryptocap', 'anchors.json'),
-      JSON.stringify({
-        version: 1,
-        coins: Object.fromEntries(
-          MARKETS.map((coin) => [coin.id, keptDays.map((sec) => [sec, coin.cap, coin.price])]),
-        ),
-        history: {},
-      }),
-    );
-    const { market, fake } = track(await setup({ dataDir }));
+    const { market, fake } = track(await setup({ dataDir: keptSince(oldest) }));
     expect(fake.calls.some((call) => call.url.includes('/coins/bitcoin/market_chart'))).toBe(true);
     const { bars, hasMore } = await market.getBars('CRYPTOCAP:TOTAL', '1D', null, 1_000);
     // From the day after the oldest kept point to today: 500 days, not 365.
@@ -357,6 +365,18 @@ describe('CRYPTOCAP', () => {
       1.6e12 + 2.4e11 + 1.8e11 + 7.5e10 + 7e10 + 8.1e9 + 6e9 + 5e9 + 4e9 + 3e9 + 2e9 + 1e9;
     expect((bars[0] as Bar).close).toBeCloseTo(keptTotal, -3);
     expect((bars.at(-1) as Bar).close).toBeCloseTo(TOTAL_TODAY, -3);
+  });
+
+  it('starts weeks, months and quarters with the first one its days cover whole', async () => {
+    // Our first day is Sunday 8 June 2025 (the day after the oldest kept point).
+    const { market } = track(await setup({ dataDir: keptSince(TODAY - 500 * DAY_MS) }));
+    const first = async (interval: string) =>
+      (await market.getBars('CRYPTOCAP:TOTAL', interval, null, 500)).bars[0]?.time;
+    expect(await first('1D')).toBe(Date.UTC(2025, 5, 8) / 1000);
+    // The week of 2 June, the month of June and the quarter from April would be part-built.
+    expect(await first('1W')).toBe(Date.UTC(2025, 5, 9) / 1000);
+    expect(await first('1M')).toBe(Date.UTC(2025, 6, 1) / 1000);
+    expect(await first('3M')).toBe(Date.UTC(2025, 6, 1) / 1000);
   });
 
   it('weekly bars are built from the daily ones', async () => {

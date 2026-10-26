@@ -100,6 +100,11 @@ export class BinanceExchange implements ExchangeAdapter, CatalogSource {
     };
   }
 
+  /** Every pair's bars reach back to its listing, at every interval (measured 2026-10-26). */
+  historyFromListing(): boolean {
+    return true;
+  }
+
   async resolveSymbol(ticker: string): Promise<SymbolInfo> {
     const [symbol, names] = await Promise.all([this.listingOf(ticker), this.displayNames()]);
     const name = (code: string) => names.get(code) ?? code;

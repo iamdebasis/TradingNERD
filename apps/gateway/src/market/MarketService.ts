@@ -358,7 +358,9 @@ function intervalPlan(adapter: ExchangeAdapter, text: string): IntervalPlan {
 
 /**
  * History for a resampled interval: enough base bars for `countBack` bars plus one, folded.
- * The oldest bar is dropped if the base bars may not reach back to its start. Around-the-clock
+ * The oldest bar is dropped if the base bars may not reach back to its start, unless they begin
+ * at the pair's listing (`historyFromListing`): a bar made of part of its period would be wrong.
+ * Around-the-clock
  * markets fill time slices; markets that close page back by bar count instead, since a slice
  * of time holds far fewer of their bars.
  */
@@ -380,7 +382,8 @@ async function getResampledBars(
     : await pageBack(adapter, ticker, base, endMs, count, RESAMPLE_MAX_REQUESTS, hours);
   let bars = resampleBars(history.bars, target, clock);
   const firstBase = history.bars[0];
-  if (history.hasMore && firstBase && bars[0] && firstBase.time > bars[0].time) {
+  const partial = firstBase && bars[0] && firstBase.time > bars[0].time;
+  if (partial && (history.hasMore || !adapter.historyFromListing?.(base, firstBase.time * 1000))) {
     bars = bars.slice(1);
   }
   if (toSec !== null) bars = bars.filter((bar) => bar.time < toSec);

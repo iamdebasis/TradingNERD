@@ -77,7 +77,10 @@ export interface OkxOptions extends ExchangeOptions {
 
 /**
  * OKX spot: candles on its business stream, trades and the best bid and ask on its public
- * one; history from REST, 300 recent bars a request and older ones 100 at a time.
+ * one; history from REST, 300 recent bars a request and older ones 100 at a time. Its history
+ * stops at a cut-off of its own (BTC-USDT and ETH-USDT on 11 January 2018, LTC-USDT in 2020,
+ * though they traded earlier; 1-second bars only recently), so it doesn't vouch for a listing
+ * (`historyFromListing`): a longer bar its oldest bar only reaches part of is left out.
  */
 export class OkxExchange implements ExchangeAdapter, CatalogSource {
   readonly id = 'OKX';

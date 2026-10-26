@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Bar } from '@tradingnerd/core';
+import { type Bar, parseResolution, type Resolution } from '@tradingnerd/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BarListener, MarketService } from '../src/market/MarketService.ts';
 import type { MarketError } from '../src/market/types.ts';
@@ -149,6 +149,15 @@ describe('US stock symbols', () => {
 });
 
 describe('US stock history', () => {
+  it("vouches for a listing only when a stock's bars begin after Alpaca's history does", async () => {
+    const { stocks } = await setup('2026-10-19T15:00:05Z');
+    const nasdaq = stocks.exchanges().find((exchange) => exchange.id === 'NASDAQ');
+    const day = parseResolution('1D') as Resolution;
+    // Bars from 4 January 2016 are where Alpaca's history begins, not the stock's listing.
+    expect(nasdaq?.historyFromListing?.(day, at('2016-01-04T14:30:00Z'))).toBe(false);
+    expect(nasdaq?.historyFromListing?.(day, at('2020-12-10T14:30:00Z'))).toBe(true);
+  });
+
   it('pages minute bars in regular hours only, up to 15 minutes ago', async () => {
     const { market, stocks } = await setup('2026-10-19T15:00:05Z'); // 11:00 New York
     const { bars } = await market.getBars('NASDAQ:AAPL', '1', null, 120);

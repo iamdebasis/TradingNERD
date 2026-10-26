@@ -64,6 +64,8 @@ export class FakeExchange implements ExchangeAdapter {
   readonly gapless?: boolean;
   readonly nativeResolutions: readonly Resolution[];
   readonly ticks?: TickSource;
+  /** Set when the test's exchange vouches that its bars begin at the pair's listing. */
+  readonly historyFromListing?: () => boolean;
 
   /** Ascending bars served for any interval without its own entry in `series`. */
   bars: Bar[] = [];
@@ -85,15 +87,18 @@ export class FakeExchange implements ExchangeAdapter {
     natives = FAKE_INFO.resolutions,
     ticks,
     gapless,
+    fromListing,
   }: {
     maxBarsPerRequest?: number;
     natives?: string[];
     ticks?: TickSource;
     gapless?: boolean;
+    fromListing?: boolean;
   } = {}) {
     this.maxBarsPerRequest = maxBarsPerRequest;
     if (ticks) this.ticks = ticks;
     if (gapless) this.gapless = true;
+    if (fromListing) this.historyFromListing = () => true;
     this.nativeResolutions = natives.map((text) => {
       const resolution = parseResolution(text);
       if (!resolution) throw new Error(`bad resolution ${text}`);

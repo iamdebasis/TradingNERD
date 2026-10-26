@@ -89,6 +89,11 @@ export class BybitExchange implements ExchangeAdapter, CatalogSource {
     return this.instruments.prepare();
   }
 
+  /** Every pair's bars reach back to its listing, at every interval (measured 2026-10-26). */
+  historyFromListing(): boolean {
+    return true;
+  }
+
   async resolveSymbol(ticker: string): Promise<SymbolInfo> {
     const instrument = await this.instruments.get(ticker);
     return symbolInfo(this, instrument, this.names, BYBIT_INTERVALS.resolutions);

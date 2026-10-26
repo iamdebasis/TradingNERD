@@ -80,6 +80,8 @@ export class CryptoCapExchange implements ExchangeAdapter {
   readonly name = CRYPTOCAP;
   readonly maxBarsPerRequest = CHUNK_BARS;
   readonly gapless = true;
+  // No `historyFromListing`: its history begins where our data does, not where the index
+  // does, so a week or month that opens before our first day is left out.
   readonly nativeResolutions: readonly Resolution[] = CRYPTOCAP_RESOLUTIONS.map(
     (text) => parseResolution(text) as Resolution,
   );

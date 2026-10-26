@@ -190,10 +190,21 @@ describe('KrakenExchange', () => {
     expect(requested.length).toBe(asked);
     // A weekly chart takes three requests, not one for each of its ten 720-day slices.
     const weeks = await new MarketService([kraken]).getBars('KRAKEN:XBTUSD', '1W', null, 1_000);
-    // 721 days, Tuesday 2024-10-29 to Monday 2026-10-19: 104 weeks, the first from Tuesday on.
-    expect(weeks.bars).toHaveLength(104);
+    // 721 days, Tuesday 2024-10-29 to Monday 2026-10-19: Kraken's history stops short of the
+    // listing, so the week of 28 October, of which only Tuesday on is there, is left out.
+    expect(weeks.bars).toHaveLength(103);
+    expect(weeks.bars[0]?.time).toBe(Date.UTC(2024, 10, 4) / 1000);
     expect(weeks.hasMore).toBe(false);
     expect(requested.length - asked).toBe(3);
+  });
+
+  it('vouches for a listing only when its oldest bar is newer than its 720-bar window', async () => {
+    const { kraken } = await setup();
+    // A pair older than the window: its oldest bar is where Kraken's history stops.
+    expect(kraken.historyFromListing(r('1D'), (TODAY - 720 * DAY) * 1000)).toBe(false);
+    // A pair listed 100 days ago: every bar since its listing is there.
+    expect(kraken.historyFromListing(r('1D'), (TODAY - 100 * DAY) * 1000)).toBe(true);
+    expect(kraken.historyFromListing(r('60'), (TODAY - 100 * DAY) * 1000)).toBe(false);
   });
 
   it('asks for a range by its start, and builds weeks from days rather than its Thursday weeks', async () => {
