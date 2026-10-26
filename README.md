@@ -39,7 +39,7 @@ TradingView sets the bar for charting: smooth trackpad gestures, a dense but cal
 
 ## Architecture
 
-A browser app and a local gateway, both bound to `127.0.0.1`. The gateway is the only part that talks to the outside world, and it talks only to the data providers.
+A browser app and a local gateway, both bound to `127.0.0.1`. The gateway is the only part that talks to the outside world, and it talks only to the data providers. Between the two, REST carries history (`/api/bars`), search, lists and keys; one WebSocket carries the live bars, quotes and best bid and ask.
 
 ```mermaid
 flowchart LR
@@ -62,9 +62,9 @@ flowchart LR
     CG["CoinGecko"]
     LW["Live Coin Watch"]
   end
-  TB <-->|"one WebSocket + REST"| MS
-  CH <-->|"bars, live candles"| MS
-  WL <-->|"quotes, search, lists"| MS
+  TB <-->|"REST: symbols"| MS
+  CH <-->|"REST: history (/api/bars)<br/>WebSocket: live bars"| MS
+  WL <-->|"WebSocket: quotes<br/>REST: search, lists"| MS
   MS --> AD
   MS --> US
   MS --> CC
@@ -95,7 +95,7 @@ sequenceDiagram
   participant MS as MarketService (gateway)
   participant C as History cache
   participant EX as Exchange adapter
-  UI->>MS: bars for XRPUSDT, 1W, before now
+  UI->>MS: REST GET /api/bars: XRPUSDT, 1W, before now
   MS->>C: native daily bars cached?
   alt not cached yet
     MS->>EX: fetch a range of daily bars
@@ -104,7 +104,7 @@ sequenceDiagram
   end
   MS->>MS: resample days to weeks, keep only whole weeks
   MS-->>UI: bars, and whether more history exists
-  UI->>MS: subscribe to the live bar
+  UI->>MS: WebSocket: subscribe to the live bar
   loop each trade or candle update
     EX-->>MS: trade or candle
     MS->>MS: merge into the forming bar
@@ -112,7 +112,7 @@ sequenceDiagram
   end
 ```
 
-Scrolling back asks for the next page. After a dropped connection, the gateway tells the chart to reload recent history, so no bar goes missing.
+History comes over REST; the WebSocket carries only what's live. Scrolling back asks `/api/bars` for the next page. After a dropped connection, the gateway tells the chart to reload recent history, so no bar goes missing.
 
 ### How market caps are built (CRYPTOCAP)
 
@@ -256,12 +256,12 @@ AGENTS.md, CLAUDE.md The operating rules for AI agents and the owner's core valu
 
 ## Getting started
 
-You'll need [Node.js 26](https://nodejs.org) and pnpm, which comes through Corepack. It's developed and tested on macOS.
+You'll need [Node.js 26](https://nodejs.org) and pnpm 12.4.1. Node 26 no longer ships Corepack, so pnpm is installed with npm. It's developed and tested on macOS.
 
 ```sh
 git clone https://github.com/iamdebasis/TradingNERD.git
 cd TradingNERD
-corepack enable
+npm install -g pnpm@12.4.1
 pnpm install
 pnpm dev            # gateway on 127.0.0.1:5180, app on http://127.0.0.1:5173
 ```
@@ -288,7 +288,7 @@ pnpm test:live      # opt-in checks against the real exchanges
 | `packages/core` | 336 |
 | `packages/chart` | 48 |
 | `apps/web` (unit) | 163 |
-| `apps/gateway` | 511, plus 66 live tests |
+| `apps/gateway` | 512, plus 66 live tests |
 | End to end (Playwright) | 192 |
 
 The end-to-end suite runs against a fake gateway and fakes every write. It includes pixel comparisons against TradingView's own screenshots and performance budgets.

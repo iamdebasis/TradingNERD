@@ -10,7 +10,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
  │ Top bar  │ Chart: Lightweight Charts     │ Watchlists, flags,   │
  │          │ + our gestures and plugins    │ symbol search, logos │
  └──────────┴───────────────┬───────────────┴──────────────────────┘
-        one WebSocket (bars, live candles, quotes) + REST (search, lists, keys)
+   REST (history /api/bars, search, lists, keys) + one WebSocket (live bars, quotes, book)
  Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only)
  ┌──────────────────────────▼───────────────────────────────────────┐
  │ MarketService: history paging, resampling, the whole-bar rule,   │
@@ -54,11 +54,11 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 ## How data flows
 
 - **A chart's history:**
-  1. The web app asks over the WebSocket for bars before a time.
+  1. The web app asks over REST for bars before a time (`GET /api/bars`, `routes/market.ts`; `ChartSession.ts` in the browser).
   2. `MarketService` finds the adapter.
   3. It fetches native bars (cached), resamples them to the interval, and keeps only whole bars.
-  4. Scrolling back asks for the next page.
-- **Live:** the adapter's candles and trades stream in. `liveBar.ts` merges them into the forming candle, and the session pushes it to the tab.
+  4. Scrolling back asks for the next page the same way.
+- **Live:** once history is on the chart, the tab subscribes over the WebSocket (`ws/session.ts`: bars, book and quotes). The adapter's candles and trades stream in, `liveBar.ts` merges them into the forming candle, and the session pushes it to the tab.
 - **Quotes** (the watchlist's Last, Chg and Chg%) come from the same feeds, throttled.
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 

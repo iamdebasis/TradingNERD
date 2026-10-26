@@ -108,11 +108,15 @@ The user gave these during the work; they bind as the core values do.
 
 ### Git
 
-- **Work happens on the branch `m7-us-stocks`.** `main` moves only when the user says "merge". Then fast-forward it from the branch, without checking it out: `git fetch . m7-us-stocks:main`.
-- **Commit only on a YES, and push only on its own YES.** The repository's home is https://github.com/iamdebasis/TradingNERD, and it's public.
-- **Commit as the project's identity only:** `Debasis <30506767+iamdebasis@users.noreply.github.com>`, GitHub's private address, set in this repository's `.git/config`. Never use a personal email, and never set an identity without asking.
+- **Work comes as pull requests.** Each task is done on a `claude/…` branch, pushed, and opened as a pull request into `main`; the user merges it on GitHub. `main` is protected by a ruleset, so nothing is pushed to it directly. `m7-us-stocks` is kept as a historical branch; no new work happens there.
+- **Commit only on a YES, and push and open the pull request only on their own YES.** The repository's home is https://github.com/iamdebasis/TradingNERD, and it's public: anything pushed is published.
+- **Commit as the project's identity only:** `Debasis <30506767+iamdebasis@users.noreply.github.com>`, GitHub's private address. Never use a personal email, and never set an identity without asking.
+  - **On the Mac,** it's set in this repository's `.git/config`.
+  - **In a cloud session,** the tradingNerd environment sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL` and `TZ=UTC`, which take priority over any git config (checked 26 October 2026). `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` show what a commit will carry.
+  - **If those variables are missing,** commit with `TZ=UTC git -c user.name=Debasis -c user.email=30506767+iamdebasis@users.noreply.github.com commit …`.
+  - **Watch out:** the cloud container's own `~/.gitconfig` sets `Claude <noreply@anthropic.com>`. Without the variables or `-c`, a plain `git commit` carries that identity.
 - **Commit times in UTC:** commit with `TZ=UTC` (`TZ=UTC git commit …`), so no commit carries the local time zone.
-- **Before any push,** check that `git log --all --format='%an <%ae> %ad|%cd' --date=format:%z | sort -u` shows only that identity and +0000.
+- **Before every push,** on the Mac or in a cloud session, check that `git log --all --format='%an <%ae> %ad|%cn <%ce> %cd' --date=format:%z | sort -u` shows only that identity and +0000, as author and as committer.
 - **Commit messages:** a subject naming the milestones ("M9e, A2, A6: older market caps back, OTHERS as TradingView's, formula weeks from days"), a blank line, then dash bullets of what changed and why, then your tool's co-author trailer, if it uses one.
 
 ### The user's running app
@@ -153,6 +157,14 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 | `pnpm --filter @tradingnerd/web exec playwright test tests/e2e/<file>` | One browser test file |
 | `pnpm exec playwright test visual --update-snapshots` (in `apps/web`) | New visual baselines after an intended change: look at them first |
 
+**In a cloud session** (Claude Code on the web, Linux):
+- Put `/opt/node26/bin` first on PATH; the default `node` there is 22.
+- `pnpm install`, `pnpm typecheck`, `pnpm lint` and `pnpm test` run as on the Mac.
+- `pnpm test:e2e`, and so `pnpm verify`, don't run there yet, a known gap (the user's call, 26 October 2026):
+  - the visual baselines are the Mac's (`*-darwin.png`), and Playwright would write Linux ones into the repository;
+  - the browser installed there belongs to another Playwright version than ours.
+- Report e2e as not run. The browser tests and the real check against the running app happen on the Mac.
+
 ## Code conventions
 
 - **TypeScript everywhere.** The gateway runs as TypeScript directly on Node 26, with no build step; imports name their `.ts` files. Biome formats and lints: 2 spaces, single quotes, 100 columns.
@@ -167,14 +179,14 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 
 ## Definition of done
 
-1. `pnpm verify` passes. Rerun a known flaky test before reporting it: Bitstamp's "polls the live candle every 30 s" fails now and then under load.
+1. `pnpm verify` passes (in a cloud session, every check but e2e: see "Commands"). Rerun a known flaky test before reporting it: Bitstamp's "polls the live candle every 30 s" fails now and then under load.
 2. A real check against the user's running app, read-only, with the numbers compared to TradingView's.
 3. `docs/SPEC.md` updated: decision rows, research, requirements, architecture, tests, plan and open items.
 4. `docs/HANDOVER.md` updated with the state and next steps.
-5. The hand-over to the user, then a YES question to commit.
+5. The hand-over to the user, then a YES question to commit, and another to push and open the pull request.
 
 ## Where the work stands
 
 See [docs/HANDOVER.md](docs/HANDOVER.md). As of 26 October 2026:
-- **Committed:** M0–M9e, A1, A2, A6, and M9f's checkpoint, switched off in the charts (last commit `c4f260a`).
+- **Committed:** M0–M9e, A1, A2, A6, and M9f's checkpoint, switched off in the charts. `main` is at `38e1ae9`, pushed and public.
 - **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.

@@ -66,9 +66,12 @@ grep -rnE "x-api-key|x-cg-(demo|pro)-api-key|APCA-API-(KEY-ID|SECRET-KEY)" apps/
 # Permissions: owner-only.
 stat -f '%Sp %N' data data/secrets.json
 
-# Never committed, and nowhere to push to.
+# Never committed, and pushed only to GitHub.
 git log --all --oneline -- data/ | wc -l     # 0
-git remote -v                                # nothing
+git remote -v                                # only origin, https://github.com/iamdebasis/TradingNERD
+
+# Only the project's identity, as author and committer, in UTC, before any push.
+git log --all --format='%an <%ae> %ad|%cn <%ce> %cd' --date=format:%z | sort -u
 ```
 
 Also:
@@ -77,9 +80,9 @@ Also:
 
 ## If a key leaks
 
-1. Replace it in its dialog: the coin-logo dialog for CoinGecko, "US stocks" for Alpaca, "Older market caps (Live Coin Watch)…" for Live Coin Watch.
-2. Revoke the old key on the provider's site: CoinGecko's developer dashboard, Alpaca's dashboard, or Live Coin Watch's API page.
-3. If it reached a commit, rewrite that commit before anything is ever pushed.
+1. Revoke it on the provider's site at once: CoinGecko's developer dashboard, Alpaca's dashboard, or Live Coin Watch's API page.
+2. Put a new one in its dialog: the coin-logo dialog for CoinGecko, "US stocks" for Alpaca, "Older market caps (Live Coin Watch)…" for Live Coin Watch.
+3. If it reached a commit that was pushed, it's public: the repository is public, and copies and caches outlive a rewrite, so revoking it is what protects it. If the commit was never pushed, rewrite it before pushing anything.
 
 ## Last audit
 

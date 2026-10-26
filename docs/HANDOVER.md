@@ -8,8 +8,8 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 
 | | |
 |---|---|
-| Branches | `m7-us-stocks` (the work), last commit `c4f260a` (the M9f checkpoint). `main` is at `69b3f18` (M9c), 5 commits behind; it moves only when the user says "merge". Six older milestone branches are kept (`m1-chart` … `m6-feel-performance`) |
-| Home | https://github.com/iamdebasis/TradingNERD (to be pushed by the user; to be made public) |
+| Branches | `main` is at `38e1ae9` (the README for GitHub), pushed and protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
+| Home | https://github.com/iamdebasis/TradingNERD, public |
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps) |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
@@ -58,10 +58,11 @@ If a year misses, report it with the reasons before changing anything. Likely ca
 - **Before every delivery:** `pnpm verify`, then a read-only check against the running app (AGENTS.md).
 - **Test counts on 26 October:**
   - core 336, chart 48, web 163;
-  - gateway 511 (plus 66 that need the live internet);
+  - gateway 512 (plus 66 that need the live internet);
   - browser 192;
   - lint and typecheck clean.
 - **Known flaky test:** Bitstamp's "polls the live candle every 30 s" sometimes fails under load and passes on a rerun.
+- **Cloud sessions** (Claude Code on the web): put `/opt/node26/bin` first on PATH (the default `node` there is 22). Typecheck, lint and the unit tests run there; the browser tests don't yet, a known gap (AGENTS.md, "Commands"). The real check against the running app happens on the Mac.
 
 ## 4. Security
 
@@ -69,7 +70,7 @@ Audited on 26 October against the code, the running app and all of git history (
 - **Only providers:** nothing leaves the Mac but what the data providers need.
 - **Keys:** owner-only and masked to the browser.
 - **Network:** the servers can't be reached from other machines.
-- **No telemetry,** and no remote to push to.
+- **No telemetry.** The only remote is GitHub (`origin`), and the repository is public, so anything pushed is published.
 - **To do:** back up `data/` (encrypted, e.g. Time Machine), above all `data/cryptocap/anchors.json`, whose kept days can't be downloaded again.
 
 ## 5. Open items
@@ -93,9 +94,10 @@ The full list is SPEC §11; these are the ones that matter most.
 
 ## 6. Next steps, in order
 
-1. The user pushes to GitHub (`git remote add origin https://github.com/iamdebasis/TradingNERD.git`, then `git push -u origin main` and `git push -u origin m7-us-stocks`, signing in with a fine-grained token), then makes the repository public.
-2. Size step 2b and tell the user how many requests it needs.
-3. Let the download finish, then run `tools/accuracy/check.sh`.
-4. Report the result year by year, then ask YES to switch M9f on in the charts.
-5. Update SPEC (§5.14 status, §8, §11) and this file, then ask YES to commit.
-6. Then the user's list: Phase 3 (Kraken's history files), and the open items above, each with its own plan and YES.
+1. Size step 2b and tell the user how many requests it needs.
+2. Let the download finish, then run `tools/accuracy/check.sh`.
+3. Report the result year by year, then ask YES to switch M9f on in the charts.
+4. Update SPEC (§5.14 status, §8, §11) and this file, then ask YES to commit, and again to push and open a pull request.
+5. Then the user's list: Phase 3 (Kraken's history files), and the open items above, each with its own plan and YES.
+
+Steps 1–3 need the user's Mac: the download runs on its gateway, and the ruler needs macOS's `sips`.
