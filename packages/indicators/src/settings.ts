@@ -5,12 +5,52 @@ import {
   isSourceName,
   type LineDash,
   type StyleValue,
+  type ValueFormat,
 } from './types.ts';
 
-/** One instance's settings: its inputs and the look of each plot, level and fill by id. */
+/**
+ * The Style tab's "Output values" (TradingView's Help Center, "I want to hide the values of
+ * individual indicators"; docs/SPEC.md §5.15): the values' precision, and whether they show on
+ * the price scale and in the legend (the status line). Its "Input values", whether the inputs
+ * show in the legend, isn't in TradingView's docs: provisional (§11).
+ */
+export interface DisplaySettings {
+  /** Decimals for the values; null for Default, the indicator's own (RSI's 2). */
+  precision: number | null;
+  /** "Labels on price scale" */
+  priceLabels: boolean;
+  /** "Values in status line" */
+  statusValues: boolean;
+  /** "Inputs in status line" */
+  statusInputs: boolean;
+}
+
+/** The Precision menu's choices after Default (provisional until measured, §11). */
+export const PRECISIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
+
+export const DEFAULT_DISPLAY: Readonly<DisplaySettings> = {
+  precision: null,
+  priceLabels: true,
+  statusValues: true,
+  statusInputs: true,
+};
+
+/**
+ * One instance's settings: its inputs, the look of each plot, level and fill by id, and how its
+ * values show.
+ */
 export interface IndicatorSettings {
   inputs: Record<string, InputValue>;
   styles: Record<string, StyleValue>;
+  display: DisplaySettings;
+}
+
+/** An indicator's value format with the Style tab's Precision applied. */
+export function displayFormat(format: ValueFormat, precision: number | null): ValueFormat {
+  if (precision === null) return format;
+  return format.kind === 'volume'
+    ? { kind: 'volume', decimals: precision }
+    : { kind: 'decimals', decimals: precision };
 }
 
 /** Everything that has a look, by id: plots, levels, then fills. */
@@ -23,11 +63,14 @@ export function defaultSettings(definition: IndicatorDefinition): IndicatorSetti
   for (const input of definition.inputs) inputs[input.id] = input.default;
   const styles: Record<string, StyleValue> = {};
   for (const spec of styleSpecs(definition)) styles[spec.id] = { ...spec.style };
-  return { inputs, styles };
+  return { inputs, styles, display: { ...DEFAULT_DISPLAY } };
 }
 
 const isColor = (value: unknown): value is string =>
   typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value);
+
+const isOpacity = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
 
 const DASHES: readonly LineDash[] = ['solid', 'dashed', 'dotted'];
 
@@ -56,10 +99,7 @@ function sanitizeStyle(base: StyleValue, value: unknown): StyleValue {
   const style: StyleValue = {
     visible: typeof v.visible === 'boolean' ? v.visible : base.visible,
     color: isColor(v.color) ? v.color.toUpperCase() : base.color,
-    opacity:
-      typeof v.opacity === 'number' && Number.isFinite(v.opacity)
-        ? Math.min(1, Math.max(0, v.opacity))
-        : base.opacity,
+    opacity: isOpacity(v.opacity) ? Math.min(1, Math.max(0, v.opacity)) : base.opacity,
   };
   if (base.width !== undefined) {
     style.width =
@@ -76,7 +116,30 @@ function sanitizeStyle(base: StyleValue, value: unknown): StyleValue {
   if (base.fallingColor !== undefined) {
     style.fallingColor = isColor(v.fallingColor) ? v.fallingColor.toUpperCase() : base.fallingColor;
   }
+  if (base.bottomColor !== undefined) {
+    style.bottomColor = isColor(v.bottomColor) ? v.bottomColor.toUpperCase() : base.bottomColor;
+  }
+  if (base.bottomOpacity !== undefined) {
+    style.bottomOpacity = isOpacity(v.bottomOpacity)
+      ? Math.min(1, Math.max(0, v.bottomOpacity))
+      : base.bottomOpacity;
+  }
   return style;
+}
+
+function sanitizeDisplay(value: unknown): DisplaySettings {
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_DISPLAY };
+  const v = value as Record<string, unknown>;
+  const flag = (key: keyof DisplaySettings) =>
+    typeof v[key] === 'boolean' ? (v[key] as boolean) : (DEFAULT_DISPLAY[key] as boolean);
+  return {
+    precision: PRECISIONS.includes(v.precision as (typeof PRECISIONS)[number])
+      ? (v.precision as number)
+      : null,
+    priceLabels: flag('priceLabels'),
+    statusValues: flag('statusValues'),
+    statusInputs: flag('statusInputs'),
+  };
 }
 
 /**
@@ -102,5 +165,5 @@ export function sanitizeSettings(
   for (const spec of styleSpecs(definition)) {
     styles[spec.id] = sanitizeStyle(spec.style, rawStyles[spec.id]);
   }
-  return { inputs, styles };
+  return { inputs, styles, display: sanitizeDisplay(raw.display) };
 }

@@ -29,6 +29,14 @@ describe("an indicator's values as TradingView writes them", () => {
     expect(formatIndicatorValue(950, { kind: 'volume' })).toBe('950');
   });
 
+  it("at the Style tab's Precision", () => {
+    expect(formatIndicatorValue(45.2349, { kind: 'decimals', decimals: 4 })).toBe('45.2349');
+    expect(formatIndicatorValue(45.2349, { kind: 'decimals', decimals: 0 })).toBe('45');
+    // Volumes keep their unit, with up to that many decimals.
+    expect(formatIndicatorValue(34_624_000, { kind: 'volume', decimals: 0 })).toBe('35M');
+    expect(formatIndicatorValue(34_624_000, { kind: 'volume', decimals: 3 })).toBe('34.624M');
+  });
+
   it('a bar without a value as ∅', () => {
     expect(formatIndicatorValue(Number.NaN, { kind: 'volume' })).toBe(NO_VALUE);
     expect(NO_VALUE).toBe('∅');

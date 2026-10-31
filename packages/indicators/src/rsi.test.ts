@@ -4,7 +4,7 @@ import { Ema, Rma, Sma, Stdev, Wma } from './kernels.ts';
 import { RSI, RSI_SMOOTHING } from './rsi.ts';
 import { IndicatorRun } from './run.ts';
 import { defaultSettings } from './settings.ts';
-import type { Inputs, SymbolContext } from './types.ts';
+import { type Inputs, indicatorTitle, type SymbolContext } from './types.ts';
 import { rmaSettling } from './warmup.ts';
 
 const XRP: SymbolContext = { base: 'XRP', hasVolume: true };
@@ -185,7 +185,34 @@ describe("TradingView's RSI", () => {
     });
   });
 
-  it('is titled as TradingView’s legend writes it', () => {
-    expect(RSI.title(defaultSettings(RSI).inputs, XRP)).toBe('RSI 14 close');
+  it('is titled as TradingView’s legend writes it: the name, then the inputs it shows', () => {
+    const { inputs } = defaultSettings(RSI);
+    expect(indicatorTitle(RSI, inputs, XRP)).toBe('RSI 14 close');
+    expect(RSI.legendName(XRP)).toBe('RSI');
+    expect(RSI.legendInputs({ ...inputs, length: 21, source: 'hl2' })).toBe('21 hl2');
+  });
+
+  it("fills beyond 70 and 30 with the built-in's gradients, between the RSI and 50", () => {
+    const overbought = RSI.fills.find((fill) => fill.id === 'overbought');
+    const oversold = RSI.fills.find((fill) => fill.id === 'oversold');
+    expect(overbought).toMatchObject({
+      title: 'Overbought Gradient Fill',
+      between: ['rsi', 50],
+      gradient: { top: 100, bottom: 70 },
+      style: { color: '#4CAF50', opacity: 1, bottomColor: '#4CAF50', bottomOpacity: 0 },
+    });
+    expect(oversold).toMatchObject({
+      title: 'Oversold Gradient Fill',
+      between: ['rsi', 50],
+      gradient: { top: 30, bottom: 0 },
+      style: { color: '#F23645', opacity: 0, bottomColor: '#F23645', bottomOpacity: 1 },
+    });
+    // In the code's order: the background, the two gradients, then the bands' background.
+    expect(RSI.fills.map((fill) => fill.id)).toEqual([
+      'background',
+      'overbought',
+      'oversold',
+      'bbBackground',
+    ]);
   });
 });

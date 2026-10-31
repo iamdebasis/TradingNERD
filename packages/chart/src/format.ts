@@ -21,13 +21,13 @@ const digitsOf = (text: string) => Number(text.replace(/^−/, '').replace(/[KMB
  * A value in thousands, millions, billions or trillions with at most two decimals, trailing
  * zeros dropped: "2.65T", "758.92B", "213.6B", "142M" (TradingView's market caps, measured from
  * the user's screenshots). The unit is the largest the value shows at least 1 of once rounded,
- * so 999.999M reads "1B".
+ * so 999.999M reads "1B". An indicator's Precision may ask for other than two decimals.
  */
-export function formatVolume(value: number): string {
+export function formatVolume(value: number, decimals = 2): string {
   const size = Math.abs(value);
-  let text = trimZeros(size.toFixed(2));
+  let text = trimZeros(size.toFixed(decimals));
   for (const unit of UNITS) {
-    const scaled = (size / unit.size).toFixed(2);
+    const scaled = (size / unit.size).toFixed(decimals);
     if (Number(scaled) >= 1) text = `${trimZeros(scaled)}${unit.suffix}`;
   }
   return value < 0 && digitsOf(text) !== 0 ? `${MINUS}${text}` : text;

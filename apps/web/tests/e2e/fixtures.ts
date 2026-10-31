@@ -1205,6 +1205,7 @@ export interface ChartState {
     pane: number;
     plots: { id: string; start: number; points: number; ghost: boolean }[];
     levels: number;
+    fills: { id: string; gradient: boolean }[];
     valueLabels: string[];
   }[];
   panes: { height: number; stretch: number; autoScale: boolean }[];
@@ -1222,6 +1223,7 @@ export interface GestureTuning {
 
 interface DebugChart {
   debugState(): ChartState;
+  debugBars(): Bar[];
   barX(index: number): number | null;
   priceToY(price: number): number | null;
   yToPrice(y: number): number | null;
@@ -1239,6 +1241,15 @@ export async function chartState(page: Page): Promise<ChartState> {
   );
   if (!state) throw new Error('The chart is not mounted');
   return state;
+}
+
+/** The bars the chart holds, oldest first. */
+export async function chartBars(page: Page): Promise<Bar[]> {
+  const bars = await page.evaluate(
+    () => (window as unknown as DebugWindow).__tradingNerd?.chart?.debugBars() ?? null,
+  );
+  if (!bars) throw new Error('The chart is not mounted');
+  return bars;
 }
 
 /** The gesture constants the chart is using right now. */

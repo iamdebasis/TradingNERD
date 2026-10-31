@@ -46,7 +46,7 @@ export const NO_VALUE = '∅';
 /** An indicator's value as its legend and price axis write it: "45.23", "1.32M". */
 export function formatIndicatorValue(value: number, format: ValueFormat): string {
   if (!Number.isFinite(value)) return NO_VALUE;
-  if (format.kind === 'volume') return formatVolume(value);
+  if (format.kind === 'volume') return formatVolume(value, format.decimals);
   const text = Math.abs(value).toFixed(format.decimals);
   return value < 0 && Number(text) !== 0 ? `${MINUS}${text}` : text;
 }

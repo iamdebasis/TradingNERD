@@ -1,4 +1,5 @@
 import {
+  type DisplaySettings,
   defaultSettings,
   type IndicatorDefinition,
   type IndicatorSettings,
@@ -6,6 +7,7 @@ import {
   type InputValue,
   indicatorDefinition,
   type LineDash,
+  PRECISIONS,
   SOURCES,
   type StyleValue,
 } from '@tradingnerd/indicators';
@@ -22,6 +24,12 @@ const DASHES: readonly { value: LineDash; label: string }[] = [
   { value: 'solid', label: 'Solid' },
   { value: 'dashed', label: 'Dashed' },
   { value: 'dotted', label: 'Dotted' },
+];
+
+/** The Precision menu: Default (the indicator's own), then 0 to 8 decimals. */
+const PRECISION_OPTIONS = [
+  { value: 'default', label: 'Default' },
+  ...PRECISIONS.map((digits) => ({ value: String(digits), label: String(digits) })),
 ];
 
 /**
@@ -73,6 +81,7 @@ export function IndicatorSettingsDialog({ id, onClose }: { id: string; onClose()
     set({ ...settings, inputs: { ...settings.inputs, [inputId]: value } });
   const setStyle = (styleId: string, style: StyleValue) =>
     set({ ...settings, styles: { ...settings.styles, [styleId]: style } });
+  const setDisplay = (display: DisplaySettings) => set({ ...settings, display });
 
   return createPortal(
     <div className={styles.backdrop}>
@@ -117,7 +126,12 @@ export function IndicatorSettingsDialog({ id, onClose }: { id: string; onClose()
           {tab === 'inputs' ? (
             <InputsTab definition={definition} settings={settings} onInput={setInput} />
           ) : (
-            <StyleTab definition={definition} settings={settings} onStyle={setStyle} />
+            <StyleTab
+              definition={definition}
+              settings={settings}
+              onStyle={setStyle}
+              onDisplay={setDisplay}
+            />
           )}
         </div>
         <footer className={styles.footer}>
@@ -303,19 +317,23 @@ function NumberField({
   );
 }
 
+type StyleKind = 'line' | 'columns' | 'level' | 'fill' | 'gradient';
+
 function StyleTab({
   definition,
   settings,
   onStyle,
+  onDisplay,
 }: {
   definition: IndicatorDefinition;
   settings: IndicatorSettings;
   onStyle(id: string, style: StyleValue): void;
+  onDisplay(display: DisplaySettings): void;
 }) {
-  const { inputs, styles: looks } = settings;
+  const { inputs, styles: looks, display } = settings;
   const plots = definition.plots.filter((plot) => plot.shownWhen?.(inputs) ?? true);
   const fills = definition.fills.filter((fill) => fill.shownWhen?.(inputs) ?? true);
-  const row = (id: string, title: string, kind: 'line' | 'columns' | 'level' | 'fill') => {
+  const row = (id: string, title: string, kind: StyleKind) => {
     const style = looks[id];
     if (!style) return null;
     return (
@@ -332,7 +350,67 @@ function StyleTab({
     <>
       {plots.map((plot) => row(plot.id, plot.title, plot.kind))}
       {definition.levels.map((level) => row(level.id, level.title, 'level'))}
-      {fills.map((fill) => row(fill.id, fill.title, 'fill'))}
+      {fills.map((fill) => row(fill.id, fill.title, fill.gradient ? 'gradient' : 'fill'))}
+      <DisplaySection definition={definition} display={display} onChange={onDisplay} />
+    </>
+  );
+}
+
+/**
+ * The Style tab's "Output values": Precision, "Labels on price scale" and "Values in status
+ * line" (TradingView's Help Center and blog, 2022); then "Input values" with "Inputs in status
+ * line" (not in TradingView's docs: provisional, docs/SPEC.md §11). Volume has no inputs in its
+ * legend, and no label on the price scale yet (whether TradingView draws one is still to
+ * measure), so those rows aren't offered for it.
+ */
+function DisplaySection({
+  definition,
+  display,
+  onChange,
+}: {
+  definition: IndicatorDefinition;
+  display: DisplaySettings;
+  onChange(display: DisplaySettings): void;
+}) {
+  const labelsOnScale = definition.placement === 'pane';
+  const inputsInLegend = definition.legendInputs(defaultSettings(definition).inputs) !== '';
+  const check = (key: 'priceLabels' | 'statusValues' | 'statusInputs', title: string) => (
+    <label className={styles.row}>
+      <span className={styles.checkLabel}>
+        <input
+          type="checkbox"
+          className={styles.checkbox}
+          checked={display[key]}
+          onChange={(event) => onChange({ ...display, [key]: event.target.checked })}
+        />
+        {title}
+      </span>
+    </label>
+  );
+  return (
+    <>
+      <h3 className={styles.section}>Output values</h3>
+      <div className={styles.row}>
+        <span className={styles.label}>Precision</span>
+        <div className={styles.control}>
+          <Dropdown
+            label="Precision"
+            value={display.precision === null ? 'default' : String(display.precision)}
+            options={PRECISION_OPTIONS}
+            onChange={(value) =>
+              onChange({ ...display, precision: value === 'default' ? null : Number(value) })
+            }
+          />
+        </div>
+      </div>
+      {labelsOnScale && check('priceLabels', 'Labels on price scale')}
+      {check('statusValues', 'Values in status line')}
+      {inputsInLegend && (
+        <>
+          <h3 className={styles.section}>Input values</h3>
+          {check('statusInputs', 'Inputs in status line')}
+        </>
+      )}
     </>
   );
 }
@@ -344,7 +422,7 @@ function StyleRow({
   onChange,
 }: {
   title: string;
-  kind: 'line' | 'columns' | 'level' | 'fill';
+  kind: StyleKind;
   style: StyleValue;
   onChange(style: StyleValue): void;
 }) {
@@ -363,7 +441,9 @@ function StyleRow({
       </span>
       <div className={styles.styleControls}>
         <Swatch
-          label={kind === 'columns' ? `${title}: growing` : title}
+          label={
+            kind === 'columns' ? `${title}: growing` : kind === 'gradient' ? `${title}: top` : title
+          }
           style={style}
           lines={kind === 'line' || kind === 'level'}
           onChange={onChange}
@@ -375,6 +455,20 @@ function StyleRow({
             lines={false}
             onChange={(next) =>
               onChange({ ...style, fallingColor: next.color, opacity: next.opacity })
+            }
+          />
+        )}
+        {kind === 'gradient' && style.bottomColor !== undefined && (
+          <Swatch
+            label={`${title}: bottom`}
+            style={{
+              ...style,
+              color: style.bottomColor,
+              opacity: style.bottomOpacity ?? style.opacity,
+            }}
+            lines={false}
+            onChange={(next) =>
+              onChange({ ...style, bottomColor: next.color, bottomOpacity: next.opacity })
             }
           />
         )}

@@ -66,7 +66,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   1. The app's indicator store (`apps/web/src/indicators/indicatorStore.ts`, kept in this browser) hands its list to `ChartController.setIndicators`.
   2. `IndicatorLayer` runs each one over the chart's bars (`IndicatorRun`) and draws it: Volume at the bottom of the price pane, the others in panes below.
   3. Every change to the bars reaches it: a page of history (computed afresh), a live tick (the last bar again), a new bar, an exchange's correction.
-  4. The legend reads the values on the bar it shows (`indicatorValues`).
+  4. The legend reads the values on the bar it shows (`indicatorValues`), written at the Style tab's Precision; its "Output values" and "Input values" (`DisplaySettings` in `settings.ts`) only change how values show, so they apply in place, the series and values kept.
   5. The warm-up rule: a value that still depends on bars not loaded isn't drawn; the chart asks for older pages until it's settled, or the gateway says the history starts at the listing (`fromListing` on a page, protocol v10).
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 
@@ -120,6 +120,7 @@ SPEC §6.8 lists every file. The ones to protect:
 - **Visual baselines** (`apps/web/tests/e2e/visual.spec.ts-snapshots/`) change only after looking at the new image.
 - **Each price scale formats its own numbers.** The symbol's format is the candle series' own (`priceFormat: custom`), not the chart's localization, which would override every pane's. Indicator panes format theirs.
 - **The library lays out a new pane a frame later:** read a pane's height from the pane (`getHeight()`), not `chart.paneSize(i)`, which throws until then.
+- **Fills go under plots, levels over them** (Pine's z-order). A gradient fill is a canvas gradient placed at its two prices each frame, so it follows the pane's scale; beyond those prices it keeps its end colors.
 
 ## Adding things
 
@@ -132,6 +133,6 @@ SPEC §6.8 lists every file. The ones to protect:
 - **A chart integration of any kind:** go through core value 5 (compare providers on depth and accuracy) before building.
 - **A built-in indicator:**
   1. Research it first (core value 3): TradingView's formula and defaults, from its Help Center, Pine's reference and the built-in's source.
-  2. Add its definition to `packages/indicators` (inputs, plots, levels, fills, format, title, `settledFrom`) with any new kernels, and register it.
+  2. Add its definition to `packages/indicators` (inputs, plots, levels, fills with their edges and any gradient, format, `legendName` and `legendInputs`, `settledFrom`) with any new kernels, and register it.
   3. Test it against published values and hand-built cases, bar by bar against one pass (`run.test.ts`).
   4. Hand-check it against TradingView on the user's screenshots (SPEC §9).

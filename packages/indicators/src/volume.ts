@@ -85,7 +85,9 @@ export const VOLUME: IndicatorDefinition = {
   ],
   levels: [],
   fills: [],
-  title: (_inputs, symbol) => `Vol · ${symbol.base}`,
+  legendName: (symbol) => `Vol · ${symbol.base}`,
+  // TradingView's legend shows none of Volume's inputs (docs/reference/01-chart-layout.png).
+  legendInputs: () => '',
   create: (inputs, symbol) => new VolumeCalculator(inputs, symbol),
   settledFrom(plotId, inputs) {
     if (plotId === 'volume') return 0;

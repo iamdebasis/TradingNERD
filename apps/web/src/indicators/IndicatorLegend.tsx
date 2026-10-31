@@ -4,7 +4,7 @@ import {
   formatIndicatorValue,
   NO_VALUE,
 } from '@tradingnerd/chart';
-import { indicatorDefinition, type SymbolContext } from '@tradingnerd/indicators';
+import { displayFormat, indicatorDefinition, type SymbolContext } from '@tradingnerd/indicators';
 import { useLayoutEffect } from 'react';
 import styles from './IndicatorLegend.module.css';
 import { EyeCrossedIcon, EyeIcon, FoldIcon, GearIcon, TrashIcon } from './icons';
@@ -49,14 +49,13 @@ export class LegendValues {
       if (!row) continue;
       const { indicator, spans } = row;
       const definition = indicatorDefinition(indicator.kind);
+      const format = displayFormat(definition.format, indicator.settings.display.precision);
       definition.plots.forEach((plot, p) => {
         const span = spans[p];
         if (!span) return;
         const style = indicator.settings.styles[plot.id];
         const noVolume = definition.kind === 'volume' && !this.hasVolume;
-        const text = noVolume
-          ? 'n/a'
-          : formatIndicatorValue(values[p] ?? Number.NaN, definition.format);
+        const text = noVolume ? 'n/a' : formatIndicatorValue(values[p] ?? Number.NaN, format);
         if (span.textContent !== text) span.textContent = text;
         // Columns colored by direction show their bar's color; lines their own.
         const color =
@@ -74,20 +73,28 @@ export class LegendValues {
   }
 }
 
-/** The plots a row shows values for: the ones these inputs have and the style shows. */
+/**
+ * The plots a row shows values for: the ones these inputs have and the style shows, unless the
+ * Style tab's "Values in status line" is off.
+ */
 function shownPlots(indicator: ChartIndicator): boolean[] {
   const definition = indicatorDefinition(indicator.kind);
-  const { inputs, styles } = indicator.settings;
+  const { inputs, styles, display } = indicator.settings;
   return definition.plots.map(
-    (plot) => (plot.shownWhen?.(inputs) ?? true) && styles[plot.id]?.visible === true,
+    (plot) =>
+      display.statusValues &&
+      (plot.shownWhen?.(inputs) ?? true) &&
+      styles[plot.id]?.visible === true,
   );
 }
 
 /**
- * One indicator's legend row, as TradingView's (docs/reference/01-chart-layout.png): its title
- * ("RSI 14 close", "Vol · XRP"), its values in their plots' colors, and on hover its Hide,
- * Settings and Remove buttons. A hidden indicator keeps its row: the title dimmed, no values,
- * and a crossed-out eye that shows it again. A double-click on the title opens its settings.
+ * One indicator's legend row, as TradingView's (docs/reference/01-chart-layout.png): its name and
+ * the inputs it shows, dimmer ("RSI 14 close", "Vol · XRP"; the user's screenshot of 27 October),
+ * its values in their plots' colors, and on hover its Hide, Settings and Remove buttons. The
+ * Style tab can leave out its inputs and its values. A hidden indicator keeps its row: the title
+ * dimmed, no values, and a crossed-out eye that shows it again. A double-click on the title
+ * opens its settings.
  */
 export function IndicatorRow({
   indicator,
@@ -101,7 +108,10 @@ export function IndicatorRow({
   actions: RowActions;
 }) {
   const definition = indicatorDefinition(indicator.kind);
-  const title = definition.title(indicator.settings.inputs, symbol);
+  const name = definition.legendName(symbol);
+  const inputs = indicator.settings.display.statusInputs
+    ? definition.legendInputs(indicator.settings.inputs)
+    : '';
   const shown = shownPlots(indicator);
   const spans: (HTMLSpanElement | null)[] = definition.plots.map(() => null);
 
@@ -123,7 +133,13 @@ export function IndicatorRow({
         title={definition.name}
         onDoubleClick={() => actions.onSettings(indicator.id)}
       >
-        {title}
+        {name}
+        {inputs !== '' && (
+          <>
+            {' '}
+            <span className={styles.inputs}>{inputs}</span>
+          </>
+        )}
       </button>
       {indicator.hidden ? (
         <button

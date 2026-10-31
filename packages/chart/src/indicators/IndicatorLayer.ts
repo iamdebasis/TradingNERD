@@ -1,11 +1,14 @@
 import type { Bar } from '@tradingnerd/core';
 import {
   type BarChange,
+  displayFormat,
+  type FillEdge,
   type IndicatorDefinition,
   IndicatorRun,
   indicatorDefinition,
   type PlotSpec,
   type SymbolContext,
+  type ValueFormat,
 } from '@tradingnerd/indicators';
 import {
   type AutoscaleInfo,
@@ -20,7 +23,7 @@ import {
 } from 'lightweight-charts';
 import type { AxisContext } from '../plugins/axisLabel';
 import { CrosshairPrimitive } from '../plugins/CrosshairPrimitive';
-import { FillPrimitive, type FillShape } from '../plugins/FillPrimitive';
+import { type BandEdge, FillPrimitive, type FillShape } from '../plugins/FillPrimitive';
 import { type ValueLabel, ValueLabelsPrimitive } from '../plugins/ValueLabelsPrimitive';
 import type { ChartTheme } from '../theme';
 import {
@@ -90,6 +93,11 @@ class IndicatorView {
   paneIndex(): number {
     return this.ownPane && this.host ? this.host.getPane().paneIndex() : 0;
   }
+
+  /** How its values are written: its own format at the Style tab's Precision. */
+  get format(): ValueFormat {
+    return displayFormat(this.definition.format, this.indicator.settings.display.precision);
+  }
 }
 
 /** What the browser tests and the debug handle see of one indicator. */
@@ -101,6 +109,8 @@ export interface IndicatorDebugState {
   /** Each drawn plot: its first drawn bar, and how many bars it has a value on. */
   plots: { id: string; start: number; points: number; ghost: boolean }[];
   levels: number;
+  /** Its fills, by id, as drawn: each a solid color or a gradient. */
+  fills: { id: string; gradient: boolean }[];
   /** Its value labels on the price axis, as drawn. */
   valueLabels: string[];
 }
@@ -124,9 +134,15 @@ const sameJson = (a: unknown, b: unknown): boolean => {
   );
 };
 
-/** Whether two states of an indicator draw the same (a pane's height aside). */
+/**
+ * Whether two states of an indicator draw the same series (a pane's height and how its values
+ * are written aside: those change in place).
+ */
 const drawsSame = (a: ChartIndicator, b: ChartIndicator) =>
-  a.kind === b.kind && a.hidden === b.hidden && sameJson(a.settings, b.settings);
+  a.kind === b.kind &&
+  a.hidden === b.hidden &&
+  sameJson(a.settings.inputs, b.settings.inputs) &&
+  sameJson(a.settings.styles, b.settings.styles);
 
 /**
  * The indicators on the chart (docs/SPEC.md §6.16): each one's run over the chart's bars, and the
@@ -170,7 +186,9 @@ export class IndicatorLayer {
     for (const indicator of indicators) {
       const old = kept.get(indicator.id);
       if (old && drawsSame(old.indicator, indicator)) {
+        const display = !sameJson(old.indicator.settings.display, indicator.settings.display);
         old.indicator = indicator;
+        if (display) this.applyDisplay(old);
         next.push(old);
         continue;
       }
@@ -263,7 +281,7 @@ export class IndicatorLayer {
       const pane = view.paneIndex();
       if (pane === target && y !== null) {
         const price = view.host.coordinateToPrice(y);
-        const text = price === null ? null : formatIndicatorValue(price, view.definition.format);
+        const text = price === null ? null : formatIndicatorValue(price, view.format);
         view.crosshair.update(text === null ? null : { y, text });
       } else if (pane === this.crosshairPane) {
         view.crosshair.update(null);
@@ -285,6 +303,12 @@ export class IndicatorLayer {
       if (view.ownPane && view.host) owners.set(view.paneIndex(), view.indicator.id);
     }
     return owners;
+  }
+
+  /** Where a price sits in an indicator's pane (pane px), or null off its scale or without one. */
+  priceToY(id: string, price: number): number | null {
+    const view = this.views.find((item) => item.indicator.id === id);
+    return view?.host?.priceToCoordinate(price) ?? null;
   }
 
   /** Auto-scale back on in every indicator pane (Alt + R, a new symbol). */
@@ -320,6 +344,11 @@ export class IndicatorLayer {
         ghost: plot.ghost,
       })),
       levels: view.levels.length,
+      fills:
+        view.fill?.current().map((shape) => ({
+          id: shape.id,
+          gradient: shape.kind === 'plots' && typeof shape.color !== 'string',
+        })) ?? [],
       valueLabels: view.labels?.current().map((label) => label.text) ?? [],
     }));
   }
@@ -431,6 +460,15 @@ export class IndicatorLayer {
     view.crosshair = null;
   }
 
+  /**
+   * The Style tab's Precision and "Labels on price scale" changed: its scale's numbers and its
+   * labels follow, its series and values stay.
+   */
+  private applyDisplay(view: IndicatorView): void {
+    for (const series of view.series) series.applyOptions({ priceFormat: this.priceFormat(view) });
+    this.refreshDecorations(view);
+  }
+
   /** Each indicator pane in its indicator's place in the list, below the price pane. */
   private orderPanes(): void {
     let index = 1;
@@ -514,35 +552,54 @@ export class IndicatorLayer {
     for (const fill of definition.fills) {
       const style = styles[fill.id];
       if (!style?.visible || !(fill.shownWhen?.(inputs) ?? true)) continue;
+      const [a, b] = fill.between.map((edge) => this.fillEdge(view, edge));
+      if (!a || !b) continue;
       const color = withOpacity(style.color, style.opacity);
-      const [a, b] = fill.between;
-      const levelA = definition.levels.find((level) => level.id === a);
-      const levelB = definition.levels.find((level) => level.id === b);
-      if (levelA && levelB) {
-        shapes.push({
-          kind: 'levels',
-          from: styles[a]?.value ?? levelA.style.value,
-          to: styles[b]?.value ?? levelB.style.value,
-          color,
-        });
+      if (!fill.gradient && typeof a.edge === 'number' && typeof b.edge === 'number') {
+        shapes.push({ id: fill.id, kind: 'levels', from: a.edge, to: b.edge, color });
         continue;
       }
-      const upper = definition.plots.findIndex((plot) => plot.id === a);
-      const lower = definition.plots.findIndex((plot) => plot.id === b);
-      if (upper < 0 || lower < 0) continue;
       shapes.push({
+        id: fill.id,
         kind: 'plots',
-        upper: view.run.values[upper] ?? [],
-        lower: view.run.values[lower] ?? [],
-        start: Math.max(view.starts[upper] ?? 0, view.starts[lower] ?? 0),
-        color,
+        upper: a.edge,
+        lower: b.edge,
+        start: Math.max(a.start, b.start),
+        color: fill.gradient
+          ? {
+              top: fill.gradient.top,
+              bottom: fill.gradient.bottom,
+              topColor: color,
+              bottomColor: withOpacity(
+                style.bottomColor ?? style.color,
+                style.bottomOpacity ?? style.opacity,
+              ),
+            }
+          : color,
       });
     }
     return shapes;
   }
 
-  /** Each drawn line's latest value, on its pane's price axis. */
+  /**
+   * A fill's edge: a level's price as the Style tab sets it, a fixed price, or a plot's values
+   * from its first drawn bar. Null for an id the indicator doesn't have.
+   */
+  private fillEdge(view: IndicatorView, edge: FillEdge): { edge: BandEdge; start: number } | null {
+    if (typeof edge === 'number') return { edge, start: 0 };
+    const { definition } = view;
+    const level = definition.levels.find((spec) => spec.id === edge);
+    if (level) {
+      return { edge: view.indicator.settings.styles[edge]?.value ?? level.style.value, start: 0 };
+    }
+    const plot = definition.plots.findIndex((spec) => spec.id === edge);
+    if (plot < 0) return null;
+    return { edge: view.run.values[plot] ?? [], start: view.starts[plot] ?? 0 };
+  }
+
+  /** Each drawn line's latest value, on its pane's price axis, unless the Style tab hides them. */
   private valueLabels(view: IndicatorView): ValueLabel[] {
+    if (!view.indicator.settings.display.priceLabels) return [];
     const last = this.times.length - 1;
     const labels: ValueLabel[] = [];
     for (const plot of view.plots) {
@@ -553,7 +610,7 @@ export class IndicatorLayer {
       if (!Number.isFinite(value) || !style) continue;
       labels.push({
         price: value,
-        text: formatIndicatorValue(value, view.definition.format),
+        text: formatIndicatorValue(value, view.format),
         color: style.color,
       });
     }
@@ -569,9 +626,12 @@ export class IndicatorLayer {
     };
   }
 
-  /** Its values' format on its pane's scale; also notes where the scale puts its tick labels. */
+  /**
+   * Its values' format on its pane's scale, at the Style tab's Precision; also notes where the
+   * scale puts its tick labels.
+   */
   private priceFormat(view: IndicatorView): PriceFormatCustom {
-    const { format } = view.definition;
+    const { format } = view;
     return {
       type: 'custom',
       minMove: format.kind === 'decimals' ? 10 ** -format.decimals : 1e-8,

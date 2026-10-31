@@ -21,9 +21,9 @@ import { emaSettling, rmaSettling } from './warmup.ts';
  *
  * with its "Smoothing" moving average of the RSI ("RSI-based MA"), and Bollinger Bands around it
  * for "SMA + Bollinger Bands". Defaults: length 14 on close (TradingView's Help Center), smoothing
- * SMA 14, BB StdDev 2 (the built-in's code, as pasted in a public GitHub issue; OANDA's and
- * JYForex's guides agree). Colors: the RSI #7E57C2 (Charting Library); the rest provisional
- * until measured from the user's screenshots (§11).
+ * SMA 14, BB StdDev 2. Its looks, the gradient fills beyond 70 and 30 among them, are the
+ * built-in's code as the user's screenshot of TradingView's Pine Editor shows it (2026-10-27,
+ * §4.15); the fills' titles, cut off there, from a copy of that code in a public GitHub issue.
  */
 
 export const RSI_SMOOTHING = [
@@ -132,7 +132,11 @@ class RsiCalculator implements IndicatorCalculator {
 }
 
 const BAND_GRAY = '#787B86';
+/** Pine's `color.green`, `color.red` and `color.yellow` (the v6 reference's values). */
 const BANDS_GREEN = '#4CAF50';
+const OVERBOUGHT_GREEN = '#4CAF50';
+const OVERSOLD_RED = '#F23645';
+const MA_YELLOW = '#FDD835';
 
 export const RSI: IndicatorDefinition = {
   kind: 'rsi',
@@ -193,8 +197,8 @@ export const RSI: IndicatorDefinition = {
       id: 'ma',
       title: 'RSI-based MA',
       kind: 'line',
-      // The built-in's color.yellow; reported as orange by one guide: to measure (§11).
-      style: { visible: true, color: '#FDD835', opacity: 1, width: 1 },
+      // The built-in's `color.yellow`, as its code reads in the user's screenshot (2026-10-27).
+      style: { visible: true, color: MA_YELLOW, opacity: 1, width: 1 },
       shownWhen: smoothed,
     },
     {
@@ -236,6 +240,34 @@ export const RSI: IndicatorDefinition = {
       between: ['upper', 'lower'],
       style: { visible: true, color: '#7E57C2', opacity: 0.1 },
     },
+    // Between the RSI and a hidden line at 50, green from fully clear at 70 to solid at 100,
+    // and red from clear at 30 to solid at 0: only the part beyond 70 or 30 shows.
+    {
+      id: 'overbought',
+      title: 'Overbought Gradient Fill',
+      between: ['rsi', 50],
+      gradient: { top: 100, bottom: 70 },
+      style: {
+        visible: true,
+        color: OVERBOUGHT_GREEN,
+        opacity: 1,
+        bottomColor: OVERBOUGHT_GREEN,
+        bottomOpacity: 0,
+      },
+    },
+    {
+      id: 'oversold',
+      title: 'Oversold Gradient Fill',
+      between: ['rsi', 50],
+      gradient: { top: 30, bottom: 0 },
+      style: {
+        visible: true,
+        color: OVERSOLD_RED,
+        opacity: 0,
+        bottomColor: OVERSOLD_RED,
+        bottomOpacity: 1,
+      },
+    },
     {
       id: 'bbBackground',
       title: 'Bollinger Bands Background Fill',
@@ -244,7 +276,9 @@ export const RSI: IndicatorDefinition = {
       shownWhen: withBands,
     },
   ],
-  title: (inputs) => `RSI ${inputs.length} ${inputs.source}`,
+  legendName: () => 'RSI',
+  // The built-in hides its other inputs from the legend (`display = display.none`).
+  legendInputs: (inputs) => `${inputs.length} ${inputs.source}`,
   create: (inputs, symbol) => new RsiCalculator(inputs, symbol),
   settledFrom(plotId, inputs) {
     const length = inputs.length as number;

@@ -69,6 +69,10 @@ export interface StyleValue {
   value?: number;
   /** Columns colored by direction: the falling color (the growing one is `color`). */
   fallingColor?: string;
+  /** A gradient fill's color at its bottom value (`color` is the one at its top). */
+  bottomColor?: string;
+  /** 0–1: the opacity of `bottomColor`. */
+  bottomOpacity?: number;
 }
 
 export interface PlotSpec {
@@ -88,17 +92,39 @@ export interface LevelSpec {
   style: StyleValue & { value: number };
 }
 
+/**
+ * One edge of a fill: a level or a plot by id, or a fixed value (Pine's hidden `plot(50)` that
+ * RSI's gradient fills reach to).
+ */
+export type FillEdge = string | number;
+
+/**
+ * Pine's gradient fill, `fill(plot1, plot2, top_value, bottom_value, top_color, bottom_color)`
+ * (TradingView's blog, "Pine Script vertical gradients", 2022): the color runs from the style's
+ * `color` at `top` to its `bottomColor` at `bottom`, and the two edges mask which part shows.
+ */
+export interface FillGradient {
+  top: number;
+  bottom: number;
+}
+
 /** A fill between two levels or two plots, Pine's `fill`. */
 export interface FillSpec {
   id: string;
   title: string;
-  between: readonly [string, string];
+  between: readonly [FillEdge, FillEdge];
   style: StyleValue;
+  gradient?: FillGradient;
   shownWhen?: (inputs: Inputs) => boolean;
 }
 
-/** How an indicator's values are written: fixed decimals, or thousands to trillions. */
-export type ValueFormat = { kind: 'decimals'; decimals: number } | { kind: 'volume' };
+/**
+ * How an indicator's values are written: fixed decimals, or thousands to trillions (with at
+ * most `decimals` decimals, two unless the Style tab's Precision says otherwise).
+ */
+export type ValueFormat =
+  | { kind: 'decimals'; decimals: number }
+  | { kind: 'volume'; decimals?: number };
 
 /** What an indicator needs to know about the chart's symbol. */
 export interface SymbolContext {
@@ -143,12 +169,28 @@ export interface IndicatorDefinition {
   plots: readonly PlotSpec[];
   levels: readonly LevelSpec[];
   fills: readonly FillSpec[];
-  /** The legend's title: its short name and the inputs TradingView shows ("RSI 14 close"). */
-  title(inputs: Inputs, symbol: SymbolContext): string;
+  /** The legend's name before its inputs: the short name ("RSI"), or Volume's "Vol · XRP". */
+  legendName(symbol: SymbolContext): string;
+  /**
+   * The inputs TradingView's legend writes after the name ("14 close"), '' for none: the ones
+   * its Pine code doesn't hide with `display = display.none`.
+   */
+  legendInputs(inputs: Inputs): string;
   create(inputs: Inputs, symbol: SymbolContext): IndicatorCalculator;
   /**
    * Bars from the first one loaded before a plot's value no longer depends on older bars we
    * haven't loaded (§6.16, the warm-up rule). Infinity when the plot never shows.
    */
   settledFrom(plotId: string, inputs: Inputs): number;
+}
+
+/** The legend's whole title: its name, then the inputs it shows ("RSI 14 close", "Vol · XRP"). */
+export function indicatorTitle(
+  definition: IndicatorDefinition,
+  inputs: Inputs,
+  symbol: SymbolContext,
+): string {
+  const shown = definition.legendInputs(inputs);
+  const name = definition.legendName(symbol);
+  return shown === '' ? name : `${name} ${shown}`;
 }

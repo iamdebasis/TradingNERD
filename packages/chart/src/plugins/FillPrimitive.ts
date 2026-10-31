@@ -10,20 +10,39 @@ import type {
 } from 'lightweight-charts';
 import type { DrawTarget } from './axisLabel';
 
-/** A fill between two levels, or between two plots from bar `start` on (Pine's `fill`). */
+/** One side of a band: a plot's value on each bar, or a fixed price. */
+export type BandEdge = readonly number[] | number;
+
+/**
+ * Pine's gradient fill: `topColor` at price `top`, `bottomColor` at `bottom`, in a straight line
+ * between, and the end colors beyond them (a canvas gradient's own rule).
+ */
+export interface GradientPaint {
+  top: number;
+  bottom: number;
+  topColor: string;
+  bottomColor: string;
+}
+
+/**
+ * A fill between two levels, or between two edges from bar `start` on (Pine's `fill`), by its
+ * fill's id.
+ */
 export type FillShape =
-  | { kind: 'levels'; from: number; to: number; color: string }
+  | { id: string; kind: 'levels'; from: number; to: number; color: string }
   | {
+      id: string;
       kind: 'plots';
-      upper: readonly number[];
-      lower: readonly number[];
+      upper: BandEdge;
+      lower: BandEdge;
       start: number;
-      color: string;
+      color: string | GradientPaint;
     };
 
 /**
- * An indicator's fills, drawn behind its lines: RSI's background between its upper and lower
- * bands, and its Bollinger Bands' background between the two bands (the library's own bands
+ * An indicator's fills, drawn behind its lines (Pine's z-order puts fills under plots and levels):
+ * RSI's background between its upper and lower bands, its gradients beyond 70 and 30 between the
+ * RSI and 50, and its Bollinger Bands' background between the two bands (the library's own bands
  * example draws the same way). Bars where either side has no value leave a gap, as in Pine.
  */
 export class FillPrimitive implements ISeriesPrimitive<Time> {
@@ -54,6 +73,10 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  current(): readonly FillShape[] {
+    return this.shapes;
+  }
+
   paneViews(): readonly IPrimitivePaneView[] {
     return this.views;
   }
@@ -63,17 +86,37 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
     if (!chart || !series || this.shapes.length === 0) return;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       for (const shape of this.shapes) {
-        ctx.fillStyle = shape.color;
         if (shape.kind === 'levels') {
           const a = series.priceToCoordinate(shape.from);
           const b = series.priceToCoordinate(shape.to);
           if (a === null || b === null) continue;
+          ctx.fillStyle = shape.color;
           ctx.fillRect(0, Math.min(a, b), mediaSize.width, Math.abs(b - a));
         } else {
+          const paint = this.paint(ctx, series, shape.color);
+          if (paint === null) continue;
+          ctx.fillStyle = paint;
           this.drawBand(ctx, chart, series, shape);
         }
       }
     });
+  }
+
+  /** A solid color, or a gradient placed at its prices on the pane's scale now. */
+  private paint(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    color: string | GradientPaint,
+  ): string | CanvasGradient | null {
+    if (typeof color === 'string') return color;
+    const top = series.priceToCoordinate(color.top);
+    const bottom = series.priceToCoordinate(color.bottom);
+    // A scale squeezed to nothing leaves no room for a gradient: nothing to draw.
+    if (top === null || bottom === null || top === bottom) return null;
+    const gradient = ctx.createLinearGradient(0, top, 0, bottom);
+    gradient.addColorStop(0, color.topColor);
+    gradient.addColorStop(1, color.bottomColor);
+    return gradient;
   }
 
   /** The band between two plots over the bars in view, one polygon per run of values. */
@@ -86,7 +129,7 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
     const timeScale = chart.timeScale();
     const range = timeScale.getVisibleLogicalRange();
     if (!range) return;
-    const last = Math.min(shape.upper.length, shape.lower.length) - 1;
+    const last = Math.min(edgeLength(shape.upper), edgeLength(shape.lower)) - 1;
     const from = Math.max(shape.start, Math.floor(range.from) - 1, 0);
     const to = Math.min(last, Math.ceil(range.to) + 1);
     let run: { x: number; upper: number; lower: number }[] = [];
@@ -107,8 +150,8 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
       run = [];
     };
     for (let i = from; i <= to; i++) {
-      const high = shape.upper[i] ?? Number.NaN;
-      const low = shape.lower[i] ?? Number.NaN;
+      const high = edgeAt(shape.upper, i);
+      const low = edgeAt(shape.lower, i);
       const x = timeScale.logicalToCoordinate(i as Logical);
       const upper = Number.isFinite(high) ? series.priceToCoordinate(high) : null;
       const lower = Number.isFinite(low) ? series.priceToCoordinate(low) : null;
@@ -121,3 +164,11 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
     flush();
   }
 }
+
+/** How many bars an edge has a say on: a fixed price, all of them. */
+const edgeLength = (edge: BandEdge): number =>
+  typeof edge === 'number' ? Number.POSITIVE_INFINITY : edge.length;
+
+/** An edge's price on bar `i` (NaN where its plot has no value). */
+const edgeAt = (edge: BandEdge, i: number): number =>
+  typeof edge === 'number' ? edge : (edge[i] ?? Number.NaN);

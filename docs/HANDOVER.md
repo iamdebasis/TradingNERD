@@ -2,7 +2,7 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 26 October 2026, by the AI Lead Architect and Lead Delivery Engineer (Claude).
+**Last updated:** 27 October 2026, by the AI Lead Architect and Lead Delivery Engineer (Claude).
 
 ## 1. Where things stand
 
@@ -13,7 +13,8 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps) |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
-| Built, not committed | **I1, indicators' framework with Volume and RSI**, on `claude/keen-allen-7wubfe` (a cloud session, 26 October): see §2b |
+| Committed, not merged | **I1, indicators' framework with Volume and RSI**, on `claude/keen-allen-7wubfe` (`01cbe33`, pushed; no pull request yet): see §2b |
+| Built, not committed | **I1's gaps** (27 October): the Style tab's output and input values, RSI's gradient fills, the inputs dimmer in the legend, and browser tests for formulas, ticks, a stock's session and a reconnect: see §2b |
 | Taken out | A3 (hiding unchecked coins), on the user's rule against hiding data |
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
@@ -54,15 +55,22 @@ If a year misses, report it with the reasons before changing anything. Likely ca
 
 ## 2b. Built: I1, indicators (Volume and RSI)
 
-The user said YES to building I1 on 26 October (the plan's research, design and milestones; SPEC §3, §4.15, §5.15, §6.16). Built in a cloud session on `claude/keen-allen-7wubfe`, restarted from `main`. Not committed: the commit and the push each need their own YES.
+The user said YES to building I1 on 26 October (the plan's research, design and milestones; SPEC §3, §4.15, §5.15, §6.16). Built in a cloud session on `claude/keen-allen-7wubfe`, restarted from `main`; committed and pushed on the user's YES (`01cbe33`). No pull request yet: it needs its own YES.
+
+**I1's gaps, closed on 27 October** on the user's word ("complete this: Gaps in what I built"), not committed:
+- The Style tab ends with "Output values" (Precision, Default then 0 to 8; "Labels on price scale"; "Values in status line") and "Input values" ("Inputs in status line"). They change how values show, in place.
+- RSI's gradient fills beyond 70 and 30, from the built-in's code in the user's screenshot (SPEC §11, item 69, closed); the RSI-based MA's `color.yellow` confirmed by the same code.
+- The legend writes an indicator's inputs dimmer than its name, as in that screenshot.
+- Browser tests: the Style tab's values (RSI's and Volume's), the gradients read from the page's pixels, a formula, a tick chart, a stock's session and a reconnect.
+- Found in the screenshot and not built, each waiting on the user (SPEC §11, items 70–73): RSI's Timeframe input; the legend's Source code button (it needs a Pine Editor, now researched and planned, with the user); the script's sentence-case title "Relative strength index"; what's provisional in the gaps.
 
 | Part | State |
 |---|---|
-| `packages/indicators` | Pine's `ta.*` kernels, Volume and RSI as TradingView defines them, the run (committed bars and the live one), the warm-up rule. 73 tests, matching Tulip's published rows and TradingView's EMA example |
+| `packages/indicators` | Pine's `ta.*` kernels, Volume and RSI as TradingView defines them, the run (committed bars and the live one), the warm-up rule, the output and input values. 78 tests, matching Tulip's published rows and TradingView's EMA example |
 | Gateway | `fromListing` on history pages (protocol v10): native, resampled, cached and tick pages. Tests pass |
-| `packages/chart` | Panes, Volume at the bottom of the price pane, RSI's pane with its lines, fill and value labels, the crosshair label per pane, the wheel and vertical drag per pane, pane heights told after a drag |
-| `apps/web` | The Indicators button and its favorites ⌄, the dialog (`/` opens it), legend rows with Hide, Settings and Remove, the fold button, pane legends, the settings dialog (Inputs, Style, Defaults → Reset settings), kept in this browser |
-| Checks in the cloud | Typecheck and lint clean; unit tests all pass (core 339, indicators 73, chart 64, web 166, gateway 517); the browser suite, visual tests aside, 187 of 192 pass with the 16 new indicator tests, the 5 failures the known platform ones (§3), as before the change |
+| `packages/chart` | Panes, Volume at the bottom of the price pane, RSI's pane with its lines, fills (solid and gradient) and value labels, the crosshair label per pane, the wheel and vertical drag per pane, pane heights told after a drag, Precision on each pane's numbers |
+| `apps/web` | The Indicators button and its favorites ⌄, the dialog (`/` opens it), legend rows with Hide, Settings and Remove, the fold button, pane legends, the settings dialog (Inputs, Style with its output and input values, Defaults → Reset settings), kept in this browser |
+| Checks in the cloud (27 October, with the gaps) | Typecheck and lint clean; unit tests all pass (core 339, indicators 78, chart 65, web 166, gateway 517); the browser suite, visual tests aside, 195 of 199 pass with all 23 indicator tests, the 4 failures among the 5 known platform ones (§3; the flick passed this time) |
 
 **Left for the Mac** (the cloud can't do these):
 1. `pnpm verify`, the browser tests included. The chart page's visual baseline changes on purpose (the toolbar's new Indicators button): look at it, then renew it with `pnpm exec playwright test visual --update-snapshots` (in `apps/web`). The other twelve must not change.
@@ -77,10 +85,10 @@ The user said YES to building I1 on 26 October (the plan's research, design and 
 - **Start:** `pnpm dev`, then open http://127.0.0.1:5173.
 - **Keys,** each in its dialog: CoinGecko (coin logos and CRYPTOCAP), Alpaca (US stocks), Live Coin Watch (older market caps).
 - **Before every delivery:** `pnpm verify`, then a read-only check against the running app (AGENTS.md).
-- **Test counts on 26 October** (with I1, not yet committed):
-  - core 339, indicators 73, chart 64, web 166;
+- **Test counts on 27 October** (with I1's gaps, not yet committed):
+  - core 339, indicators 78, chart 65, web 166;
   - gateway 517 (plus 66 that need the live internet);
-  - browser 210 (16 for indicators, 2 more performance);
+  - browser 217 (23 for indicators, 2 more performance);
   - lint and typecheck clean.
 - **Known flaky test:** Bitstamp's "polls the live candle every 30 s" sometimes fails under load and passes on a rerun.
 - **Cloud sessions** (Claude Code on the web): put `/opt/node26/bin` first on PATH (the default `node` there is 22). Typecheck, lint and the unit tests run there; the browser tests don't yet, a known gap (AGENTS.md, "Commands"). The real check against the running app happens on the Mac.
@@ -113,11 +121,12 @@ The full list is SPEC §11; these are the ones that matter most.
   - a separate data folder for the browser tests' own gateway (item 57);
   - M7c stock logos.
 - **Free limits that can change:** CoinGecko's 10,000 calls a month, Live Coin Watch's 10,000 requests a day. CoinDesk reportedly ended its free plan in 2026.
-- **Indicators (I1):** every look not measured from a screenshot is provisional (SPEC §11, items 62–63); TradingView's tick volume for TOTAL isn't ours (item 68); the current RSI's gradient fills are unconfirmed (item 69).
+- **Indicators (I1):** every look not measured from a screenshot is provisional (SPEC §11, items 62–63 and 70); TradingView's tick volume for TOTAL isn't ours (item 68); RSI's Timeframe input, the legend's Source code button and the sentence-case title wait on the user (items 71–73).
+- **Pine Editor:** not built, and out of v1 in SPEC §2. Researched on 27 October (TradingView's Help Center, blog, Pine docs and release notes, the user's screenshot) and planned in milestones P1–P3, with the user for a YES; the plan is in the hand-over of that day.
 
 ## 6. Next steps, in order
 
-For I1 (§2b): the user's YES to commit, and another to push and open the pull request; then on the Mac, `pnpm verify` with the chart page's baseline renewed after looking at it, the performance budgets, and the hand checks with the screenshots asked for.
+For I1 (§2b): the user's YES to commit the gaps, and another to push them and open the pull request; then on the Mac, `pnpm verify` with the chart page's baseline renewed after looking at it, the performance budgets, and the hand checks with the screenshots asked for. Then, on the user's YES, the Pine Editor's first milestone (P1).
 
 For M9f:
 

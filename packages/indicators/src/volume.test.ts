@@ -2,7 +2,7 @@ import type { Bar } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
 import { IndicatorRun } from './run.ts';
 import { defaultSettings } from './settings.ts';
-import type { InputValue, SymbolContext } from './types.ts';
+import { type InputValue, indicatorTitle, type SymbolContext } from './types.ts';
 import { VOLUME } from './volume.ts';
 
 const bar = (time: number, open: number, close: number, volume: number): Bar => ({
@@ -54,9 +54,9 @@ describe("TradingView's Volume", () => {
     expect(run.values[1]?.every(Number.isNaN)).toBe(true);
   });
 
-  it('is titled "Vol · " and the base asset, as in TradingView’s legend', () => {
-    expect(VOLUME.title(defaultSettings(VOLUME).inputs, { base: 'XRP', hasVolume: true })).toBe(
-      'Vol · XRP',
-    );
+  it('is titled "Vol · " and the base asset, as in TradingView’s legend, with no inputs', () => {
+    const xrp = { base: 'XRP', hasVolume: true };
+    expect(indicatorTitle(VOLUME, defaultSettings(VOLUME).inputs, xrp)).toBe('Vol · XRP');
+    expect(VOLUME.legendInputs(defaultSettings(VOLUME).inputs)).toBe('');
   });
 });

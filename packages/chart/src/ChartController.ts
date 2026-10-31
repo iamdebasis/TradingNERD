@@ -592,6 +592,19 @@ export class ChartController {
     };
   }
 
+  /** The bars the chart holds, oldest first: what the browser tests compute indicators over. */
+  debugBars(): Bar[] {
+    return [...this.bars];
+  }
+
+  /** Chart y (CSS px from its top) of a price in an indicator's own pane, or null. */
+  indicatorPriceToY(id: string, price: number): number | null {
+    const y = this.indicators.priceToY(id, price);
+    if (y === null) return null;
+    const pane = this.paneLayout().find((item) => item.indicator === id);
+    return pane ? pane.top + y : null;
+  }
+
   /** Pane x of the bar at a logical index (whole bars only). */
   barX(index: number): number | null {
     return this.chart.timeScale().logicalToCoordinate(index as Logical);

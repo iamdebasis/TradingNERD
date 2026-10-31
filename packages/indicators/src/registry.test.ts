@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { INDICATORS, indicatorDefinition, isIndicatorKind, searchIndicators } from './registry.ts';
 import { RSI } from './rsi.ts';
-import { defaultSettings, sanitizeSettings } from './settings.ts';
+import { DEFAULT_DISPLAY, defaultSettings, displayFormat, sanitizeSettings } from './settings.ts';
 import { SOURCES, sourceValue } from './types.ts';
 import { VOLUME } from './volume.ts';
 import { emaSettling, rmaSettling, settlingBars } from './warmup.ts';
@@ -51,6 +51,59 @@ describe('settings', () => {
     expect(settings.styles.rsi).toEqual({ visible: true, color: '#ABCDEF', opacity: 1, width: 1 });
     expect(settings.styles.upper?.value).toBe(80);
     expect(sanitizeSettings(VOLUME, null)).toEqual(defaultSettings(VOLUME));
+  });
+
+  it("show values and inputs everywhere at the indicator's own precision by default", () => {
+    expect(defaultSettings(RSI).display).toEqual({
+      precision: null,
+      priceLabels: true,
+      statusValues: true,
+      statusInputs: true,
+    });
+    // Settings kept before the Style tab had them read as the defaults.
+    const { display } = sanitizeSettings(RSI, { inputs: {}, styles: {} });
+    expect(display).toEqual(DEFAULT_DISPLAY);
+  });
+
+  it("keep the Style tab's output and input values, and drop a precision it doesn't offer", () => {
+    const kept = sanitizeSettings(RSI, {
+      display: { precision: 4, priceLabels: false, statusValues: false, statusInputs: false },
+    });
+    expect(kept.display).toEqual({
+      precision: 4,
+      priceLabels: false,
+      statusValues: false,
+      statusInputs: false,
+    });
+    for (const precision of [9, -1, 2.5, '3']) {
+      expect(sanitizeSettings(RSI, { display: { precision } }).display.precision).toBeNull();
+    }
+    expect(sanitizeSettings(RSI, { display: { priceLabels: 'no' } }).display.priceLabels).toBe(
+      true,
+    );
+  });
+
+  it("keep a gradient fill's two colors and opacities", () => {
+    const settings = sanitizeSettings(RSI, {
+      styles: { overbought: { color: '#00ff00', bottomColor: '#123abc', bottomOpacity: 0.4 } },
+    });
+    expect(settings.styles.overbought).toEqual({
+      visible: true,
+      color: '#00FF00',
+      opacity: 1,
+      bottomColor: '#123ABC',
+      bottomOpacity: 0.4,
+    });
+    const damaged = sanitizeSettings(RSI, {
+      styles: { oversold: { bottomColor: 'red', bottomOpacity: Number.NaN } },
+    });
+    expect(damaged.styles.oversold).toMatchObject({ bottomColor: '#F23645', bottomOpacity: 1 });
+  });
+
+  it("apply the Style tab's Precision to the values' format", () => {
+    expect(displayFormat(RSI.format, null)).toEqual({ kind: 'decimals', decimals: 2 });
+    expect(displayFormat(RSI.format, 4)).toEqual({ kind: 'decimals', decimals: 4 });
+    expect(displayFormat(VOLUME.format, 0)).toEqual({ kind: 'volume', decimals: 0 });
   });
 });
 

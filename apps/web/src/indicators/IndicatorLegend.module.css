@@ -32,7 +32,13 @@
   cursor: default;
 }
 
-.row[data-hidden] .title {
+/* The inputs after the name, dimmer (the user's screenshot of 27 October; provisional). */
+.inputs {
+  color: var(--color-text-secondary);
+}
+
+.row[data-hidden] .title,
+.row[data-hidden] .inputs {
   color: #575757;
 }
 

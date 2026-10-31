@@ -33,9 +33,9 @@ TradingView sets the bar for charting: smooth trackpad gestures, a dense but cal
 | **Formulas** | Spreads such as `TOTAL2/XRPUSD` or `BTC.D+ETH.D`, typed into search, charted and kept in watchlists |
 | **History** | Deep scroll-back with resampling to any interval, seconds and ticks, and only whole bars. Market caps go back to 2013 through a resumable, rate-limit-aware download and a CC0 academic dataset |
 | **Watchlists** | Several lists, sections, flags, multi-select, drag and drop, and TradingView's own `.txt` import and export |
-| **Indicators** | TradingView's Indicators button and dialog with favorites; Volume and RSI computed as Pine computes them, live and through history, with their legend rows, settings and panes. A value is drawn only where the loaded bars settle it, never one that differs from TradingView's for want of older bars |
+| **Indicators** | TradingView's Indicators button and dialog with favorites; Volume and RSI computed as Pine computes them, live and through history, with their legend rows, settings (inputs, styles, and the Style tab's output and input values) and panes, RSI's gradient fills included. A value is drawn only where the loaded bars settle it, never one that differs from TradingView's for want of older bars |
 | **Performance** | 60 fps panning and zooming through 20,000 bars; under 2 ms a frame with 50 rows ticking; symbol and interval switches under 150 ms, all enforced by tests |
-| **Quality** | About 1,160 unit and integration tests and 210 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
+| **Quality** | About 1,170 unit and integration tests and 217 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
 | **Security** | A loopback-only gateway with Host and Origin checks, owner-only key storage, keys masked to the browser, and no outside requests from the browser |
 
 ## Architecture
@@ -289,11 +289,11 @@ pnpm test:live      # opt-in checks against the real exchanges
 | Suite | Tests |
 |---|---|
 | `packages/core` | 339 |
-| `packages/indicators` | 73 |
-| `packages/chart` | 64 |
+| `packages/indicators` | 78 |
+| `packages/chart` | 65 |
 | `apps/web` (unit) | 166 |
 | `apps/gateway` | 517, plus 66 live tests |
-| End to end (Playwright) | 210 |
+| End to end (Playwright) | 217 |
 
 The end-to-end suite runs against a fake gateway and fakes every write. It includes pixel comparisons against TradingView's own screenshots and performance budgets.
 
