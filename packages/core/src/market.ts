@@ -116,6 +116,12 @@ export interface BarsResponse {
   bars: Bar[];
   /** False once the start of the exchange's history has been reached. */
   hasMore: boolean;
+  /**
+   * True when the history has run out at the pair's listing, where TradingView's starts too (the
+   * exchange vouches for it): the first bar is the listing's, so indicators may start there as
+   * TradingView's do. False whenever `hasMore` is (docs/SPEC.md §6.16).
+   */
+  fromListing: boolean;
 }
 
 /** Decimal places needed to show a tick size such as 0.0001 (→ 4) or 1e-8 (→ 8). */

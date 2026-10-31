@@ -64,13 +64,17 @@ class FakeChart implements ChartSurface {
   setExtendedPrice(price: ExtendedPrice | null) {
     this.extended = price;
   }
-  setBars(bars: readonly Bar[]) {
+  /** Whether the chart was told its first bar is the pair's listing. */
+  fromListing = false;
+  setBars(bars: readonly Bar[], fromListing = false) {
     this.calls.push(`setBars ${bars.length}`);
     this.bars = [...bars];
+    this.fromListing = fromListing;
   }
-  prependBars(bars: readonly Bar[]) {
+  prependBars(bars: readonly Bar[], fromListing = false) {
     this.calls.push(`prependBars ${bars.length}`);
     this.bars = [...bars, ...this.bars];
+    this.fromListing = fromListing;
   }
   mergeRecent(bars: readonly Bar[]) {
     this.calls.push(`mergeRecent ${bars.length}`);
@@ -85,7 +89,7 @@ class FakeChart implements ChartSurface {
   }
   latest() {
     const bar = this.bars.at(-1);
-    return bar ? { bar, previous: this.bars.at(-2) ?? null } : null;
+    return bar ? { bar, previous: this.bars.at(-2) ?? null, index: this.bars.length - 1 } : null;
   }
   showLatest() {
     this.calls.push('showLatest');
@@ -101,8 +105,11 @@ class FakeLegend implements LegendView {
   setInstrument(info: SymbolInfo) {
     this.calls.push(`instrument ${info.description}`);
   }
-  showBar(bar: Bar) {
+  /** The bar index each showBar came with. */
+  readonly indexes: number[] = [];
+  showBar(bar: Bar, _previous: Bar | null, index: number) {
     this.calls.push(`bar ${bar.time} ${bar.close}`);
+    this.indexes.push(index);
   }
   setBook(bid: number, ask: number) {
     this.calls.push(`book ${bid}/${ask}`);
@@ -135,26 +142,28 @@ class FakeFeed implements LiveFeed {
   }
 }
 
-function fakeApi(data: Bar[]) {
+/** A gateway with these bars; `listed`: they start at the pair's listing, as Binance's do. */
+function fakeApi(data: Bar[], info = INFO, listed = false) {
   const requests: { to: number | null; countBack: number }[] = [];
   let failure: Error | null = null;
   const api: MarketApi = {
-    resolveSymbol: async () => INFO,
+    resolveSymbol: async () => info,
     getBars: async (_symbol, _resolution, to, countBack): Promise<BarsResponse> => {
       requests.push({ to, countBack });
       if (failure) throw failure;
       const eligible = data.filter((bar) => to === null || bar.time < to);
-      return { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack };
+      const hasMore = eligible.length > countBack;
+      return { bars: eligible.slice(-countBack), hasMore, fromListing: listed && !hasMore };
     },
   };
   return { api, requests, fail: (error: Error | null) => (failure = error) };
 }
 
-function setup(data = history(2_500)) {
+function setup(data = history(2_500), info = INFO, listed = false) {
   const chart = new FakeChart();
   const legend = new FakeLegend();
   const feed = new FakeFeed();
-  const { api, requests, fail } = fakeApi(data);
+  const { api, requests, fail } = fakeApi(data, info, listed);
   const session = new ChartSession({
     chart,
     api,
@@ -194,7 +203,7 @@ describe('ChartSession', () => {
         resolveSymbol: async () => INFO,
         getBars: () =>
           new Promise((resolve) => {
-            release = () => resolve({ bars: history(5), hasMore: false });
+            release = () => resolve({ bars: history(5), hasMore: false, fromListing: false });
           }),
       },
     });
@@ -225,7 +234,7 @@ describe('ChartSession', () => {
   it('keeps the legend on a hovered older bar while live updates arrive', async () => {
     const { session, legend, feed } = setup();
     await session.start();
-    const older: HoverInfo = { bar: makeBar(LAST - 10 * DAY, 0.9), previous: null };
+    const older: HoverInfo = { bar: makeBar(LAST - 10 * DAY, 0.9), previous: null, index: 989 };
     session.hover(older);
     feed.bars?.onBar(makeBar(LAST, 1.7), false);
     expect(legend.calls.at(-1)).toBe(`bar ${LAST - 10 * DAY} 0.9`);
@@ -236,9 +245,55 @@ describe('ChartSession', () => {
   it('follows live updates while the latest bar itself is hovered', async () => {
     const { session, legend, feed } = setup();
     await session.start();
-    session.hover({ bar: makeBar(LAST, 1), previous: null });
+    session.hover({ bar: makeBar(LAST, 1), previous: null, index: 999 });
     feed.bars?.onBar(makeBar(LAST, 1.8), false);
     expect(legend.calls.at(-1)).toBe(`bar ${LAST} 1.8`);
+  });
+
+  it("gives the legend each bar's place on the chart, for the indicators' values", async () => {
+    const { session, legend, feed } = setup();
+    await session.start();
+    expect(legend.indexes.at(-1)).toBe(INITIAL_BARS - 1);
+    session.hover({ bar: makeBar(LAST - 10 * DAY, 0.9), previous: null, index: 989 });
+    expect(legend.indexes.at(-1)).toBe(989);
+    session.hover(null);
+    feed.bars?.onBar(makeBar(LAST + DAY, 1.6), false);
+    expect(legend.indexes.at(-1)).toBe(INITIAL_BARS);
+  });
+
+  it("tells the chart when its bars reach back to the pair's listing", async () => {
+    const listed = setup(history(1_500), INFO, true);
+    await listed.session.start();
+    expect(listed.chart.fromListing).toBe(false); // a page with more before it
+    await listed.session.loadOlder();
+    expect(listed.chart.fromListing).toBe(true); // the oldest page, from the listing
+    const short = setup(history(5), INFO, true);
+    await short.session.start();
+    expect(short.chart.fromListing).toBe(true);
+    const cut = setup(history(5)); // an exchange that doesn't vouch for its first bar
+    await cut.session.start();
+    expect(cut.chart.fromListing).toBe(false);
+  });
+
+  it("tells the chart which symbols' bars carry real volume, and their unit", async () => {
+    const spot = setup();
+    await spot.session.start();
+    expect(spot.chart.instrument).toMatchObject({ base: 'XRP', hasVolume: true });
+    const total: SymbolInfo = {
+      ...INFO,
+      id: 'CRYPTOCAP:TOTAL',
+      exchange: 'CRYPTOCAP',
+      ticker: 'TOTAL',
+      base: 'CRYPTOCAP',
+      type: 'index',
+    };
+    const index = setup(history(5), total);
+    await index.session.start();
+    expect(index.chart.instrument).toMatchObject({ base: 'TOTAL', hasVolume: false });
+    const spread: SymbolInfo = { ...INFO, ticker: 'TOTAL2/XRPUSD', base: '', type: 'spread' };
+    const formula = setup(history(5), spread);
+    await formula.session.start();
+    expect(formula.chart.instrument).toMatchObject({ hasVolume: false });
   });
 
   it('loads one older page at a time and stops at the start of history', async () => {
@@ -302,7 +357,7 @@ describe('ChartSession', () => {
         resolveSymbol: async () => {
           throw new ApiError('unknown_symbol', 'Binance does not list this symbol');
         },
-        getBars: async () => ({ bars: [], hasMore: false }),
+        getBars: async () => ({ bars: [], hasMore: false, fromListing: false }),
       },
     });
     await session.start();
@@ -339,7 +394,7 @@ describe('ChartSession', () => {
         resolveSymbol: async () => INFO,
         getBars: () =>
           new Promise((resolve) => {
-            release = () => resolve({ bars: history(5), hasMore: false });
+            release = () => resolve({ bars: history(5), hasMore: false, fromListing: false });
           }),
       },
     });
@@ -369,7 +424,7 @@ describe('ChartSession', () => {
         getBars: (_symbol, _resolution, to) => {
           requests.push(to);
           return new Promise((resolve) => {
-            release = () => resolve({ bars: history(5), hasMore: true });
+            release = () => resolve({ bars: history(5), hasMore: true, fromListing: false });
           });
         },
       },
@@ -429,7 +484,11 @@ describe('a stock chart', () => {
         resolveSymbol: async () => STOCK,
         getBars: async (_s, _r, _to, _count, _signal, hours) => {
           sessions.push(hours);
-          return { bars: [makeBar(at('2026-10-19T14:00:00Z'))], hasMore: false };
+          return {
+            bars: [makeBar(at('2026-10-19T14:00:00Z'))],
+            hasMore: false,
+            fromListing: false,
+          };
         },
       },
     });

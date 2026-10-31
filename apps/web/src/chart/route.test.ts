@@ -59,6 +59,7 @@ describe('toChartTheme', () => {
       labelText: '#FFFFFF',
       up: '#089981',
       down: '#F23645',
+      paneSeparator: '#2E2E2E',
       fontFamily: darkTheme.font.family,
       fontSize: 12,
     });

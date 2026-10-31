@@ -33,7 +33,11 @@ function setup(start: number) {
   const cache = new HistoryCache({ now: () => now });
   const load = async (n: number): Promise<BarsResponse> => {
     loads.push(n);
-    return { bars: minutes(Math.floor(now / MINUTE) * MINUTE, n, version), hasMore: true };
+    return {
+      bars: minutes(Math.floor(now / MINUTE) * MINUTE, n, version),
+      hasMore: true,
+      fromListing: false,
+    };
   };
   return {
     cache,
@@ -71,6 +75,30 @@ describe('HistoryCache, latest pages', () => {
     // The 6 bars fetched again replace the kept ones; older ones are kept as they were.
     expect(page.bars.map((bar) => bar.close)).toEqual([1, 1, 1, 1, 2, 2, 2, 2, 2, 2]);
     expect(page.hasMore).toBe(true);
+  });
+
+  it('a page that starts at the listing says so until newer bars push its first bar out', async () => {
+    let now = NOON + 30_000;
+    const cache = new HistoryCache({ now: () => now });
+    const LISTED = NOON - 5 * MINUTE; // a pair listed at 11:55
+    const load = async (n: number): Promise<BarsResponse> => {
+      const liveOpen = Math.floor(now / MINUTE) * MINUTE;
+      const all = minutes(liveOpen, (liveOpen - LISTED) / MINUTE + 1);
+      const bars = all.slice(-n);
+      const hasMore = bars.length < all.length;
+      return { bars, hasMore, fromListing: !hasMore };
+    };
+    const first = await cache.latest('k', r('1'), 8, load);
+    expect(first.bars).toHaveLength(6);
+    expect(first).toMatchObject({ hasMore: false, fromListing: true });
+    now = NOON + MINUTE + 30_000; // 12:01: seven bars, the page still holds them all
+    const caughtUp = await cache.latest('k', r('1'), 8, load);
+    expect(caughtUp.bars).toHaveLength(7);
+    expect(caughtUp).toMatchObject({ hasMore: false, fromListing: true });
+    now = NOON + 3 * MINUTE + 30_000; // 12:03: nine bars, one more than the page holds
+    const trimmed = await cache.latest('k', r('1'), 8, load);
+    expect(trimmed.bars).toHaveLength(8);
+    expect(trimmed).toMatchObject({ hasMore: true, fromListing: false });
   });
 
   it('fetches the bar before the live one again if the page came moments after it closed', async () => {
@@ -112,7 +140,7 @@ describe('HistoryCache, latest pages', () => {
     const cache = new HistoryCache({ now: () => now });
     const load = async (n: number) => {
       loads.push(n);
-      return { bars: months(n), hasMore: true };
+      return { bars: months(n), hasMore: true, fromListing: false };
     };
     await cache.latest('m', r('1M'), 12, load);
     now = Date.UTC(2026, 4, 1, 0, 2); // May has begun: April and May are fetched again
@@ -130,7 +158,7 @@ describe('HistoryCache, older pages and housekeeping', () => {
     let loads = 0;
     const page = (lastOpen: number) => async () => {
       loads++;
-      return { bars: minutes(lastOpen, 5), hasMore: true };
+      return { bars: minutes(lastOpen, 5), hasMore: true, fromListing: false };
     };
     await cache.older('old', r('1'), page(NOON - 60 * MINUTE));
     await cache.older('old', r('1'), page(NOON - 60 * MINUTE));
@@ -154,7 +182,7 @@ describe('HistoryCache, older pages and housekeeping', () => {
       calls++;
       await new Promise((resolve) => setTimeout(resolve, 5));
       if (fail) throw new Error('unreachable');
-      return { bars: minutes(NOON, n), hasMore: true };
+      return { bars: minutes(NOON, n), hasMore: true, fromListing: false };
     };
     const both = [cache.latest('k', r('1'), 3, load), cache.latest('k', r('1'), 3, load)];
     await expect(Promise.all(both)).rejects.toThrow('unreachable');
@@ -169,7 +197,7 @@ describe('HistoryCache, older pages and housekeeping', () => {
     let loads = 0;
     const load = async () => {
       loads++;
-      return { bars: minutes(NOON - 120 * MINUTE, 2), hasMore: true };
+      return { bars: minutes(NOON - 120 * MINUTE, 2), hasMore: true, fromListing: false };
     };
     for (let i = 0; i < MAX_PAGES; i++) await cache.older(`p${i}`, r('1'), load);
     await cache.older('p0', r('1'), load); // used again: now the most recent

@@ -6,6 +6,8 @@ import { IntervalPrompt, promptKey } from '../chart/IntervalPrompt';
 import { type ChartRoute, withInterval, withSymbol } from '../chart/route';
 import { olderCapsApi } from '../data/api';
 import { useGateway, useGatewayStatus } from '../data/GatewayContext';
+import { IndicatorsDialog } from '../indicators/IndicatorsDialog';
+import { indicatorStore } from '../indicators/indicatorStore';
 import { isEditable } from '../lib/dom';
 import { writeJson } from '../lib/storage';
 import { useLogos } from '../logos/LogoContext';
@@ -40,6 +42,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
   /** Older market caps' download: whether Live Coin Watch's data is in, for the credit. */
   const [olderCaps, setOlderCaps] = useState<OlderCapsStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   /** The chart's symbol as resolved, for Chart settings' fields. */
   const [chartInfo, setChartInfo] = useState<SymbolInfo | null>(null);
   const firstLaunchShown = useRef(false);
@@ -90,11 +93,16 @@ export function AppShell({ route }: { route: ChartRoute }) {
   }, []);
 
   // Typing on the chart opens TradingView's prompts: a number the interval prompt, a letter
-  // symbol search.
+  // symbol search, and / the Indicators dialog (Pine docs, First steps).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditable(event.target)) return;
       if (document.querySelector('[role="dialog"]')) return;
+      if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        setIndicatorsOpen(true);
+        return;
+      }
       const digits = promptKey(event);
       const letter = searchKey(event);
       if (digits === null && letter === null) return;
@@ -120,7 +128,15 @@ export function AppShell({ route }: { route: ChartRoute }) {
         onIntervalChange={changeInterval}
         onSymbolSearch={() => setSearching('')}
         onSettings={() => setSettingsOpen(true)}
+        onIndicators={() => setIndicatorsOpen(true)}
+        onAddIndicator={(kind) => indicatorStore.add(kind)}
       />
+      {indicatorsOpen && (
+        <IndicatorsDialog
+          onAdd={(kind) => indicatorStore.add(kind)}
+          onClose={() => setIndicatorsOpen(false)}
+        />
+      )}
       {settingsOpen && (
         <ChartSettingsDialog
           hasSessions={

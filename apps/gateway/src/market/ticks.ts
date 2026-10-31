@@ -37,14 +37,14 @@ export class TickHistory {
     if (toIndex === null) {
       const latest = await source.aggTrades(ticker, null, source.maxPerRequest);
       const oldest = latest[0];
-      if (!oldest) return { bars: [], hasMore: false };
+      if (!oldest) return { bars: [], hasMore: false, fromListing: false };
       pages.push(latest);
       next = oldest.id - 1;
     } else {
       const anchor =
         this.anchors.get(symbol)?.get(before) ??
         (await source.aggTradeContaining(ticker, before - 1))?.id;
-      if (anchor === undefined) return { bars: [], hasMore: false };
+      if (anchor === undefined) return { bars: [], hasMore: false, fromListing: false };
       next = anchor;
     }
 
@@ -89,7 +89,8 @@ export class TickHistory {
     }
     const oldest = bars[0];
     if (hasMore && oldest) this.remember(symbol, oldest.time * ticks, trades);
-    return { bars, hasMore };
+    // History that reaches trade 0, the first a pair's trades can be numbered, is its listing's.
+    return { bars, hasMore, fromListing: !hasMore && first?.firstId === 0 };
   }
 
   /** Notes which aggregate holds the trade just before trade `boundary`. */

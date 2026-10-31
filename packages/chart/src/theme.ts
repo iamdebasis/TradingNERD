@@ -14,6 +14,8 @@ export interface ChartTheme {
   labelText: string;
   up: string;
   down: string;
+  /** The line between the price pane and indicator panes. */
+  paneSeparator: string;
   fontFamily: string;
   /** Axis font size in px. */
   fontSize: number;

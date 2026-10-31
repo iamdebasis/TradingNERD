@@ -14,6 +14,7 @@ import {
 } from '@tradingnerd/core';
 import { ApiError, type MarketApi } from '../data/api';
 import type { LiveFeed } from '../data/GatewayConnection';
+import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type Fill } from './chartSettings';
 import { intlZone } from './timezones';
 
@@ -22,7 +23,8 @@ export type LegendStatus = 'loading' | 'live' | 'reconnecting' | 'error';
 /** What the session tells the legend overlay. */
 export interface LegendView {
   setInstrument(info: SymbolInfo, resolution: Resolution): void;
-  showBar(bar: Bar, previous: Bar | null): void;
+  /** `index`: the bar's place on the chart, for the indicators' values on it. */
+  showBar(bar: Bar, previous: Bar | null, index: number): void;
   setBook(bid: number, ask: number): void;
   setStatus(status: LegendStatus, message?: string): void;
   /** Where the symbol's market is in its day: TradingView's market status icon. */
@@ -129,7 +131,7 @@ export class ChartSession {
       // The best bid and ask don't wait for history: the exchange's stream opens meanwhile.
       if (info.hasBook) this.subscribeBook(info.id);
 
-      const { bars, hasMore } = await api.getBars(
+      const { bars, hasMore, fromListing } = await api.getBars(
         info.id,
         this.options.resolution,
         null,
@@ -148,10 +150,12 @@ export class ChartSession {
           this.settings.timezone === 'exchange' ? info.timezone : intlZone(this.settings.timezone),
         clock: this.schedule ? sessionClock(this.schedule, this.hours) : UTC_CLOCK,
         delayMs: info.delayMs,
+        base: volumeUnit(info),
+        hasVolume: hasRealVolume(info),
       });
       chart.setSessionShading(this.shading());
       chart.setExtendedPrice(null);
-      chart.setBars(bars);
+      chart.setBars(bars, fromListing);
       chart.showLatest();
       this.hasMore = hasMore;
       this.loaded = true;
@@ -178,7 +182,7 @@ export class ChartSession {
     if (Date.now() < this.retryAt) return;
     this.loadingOlder = true;
     try {
-      const { bars, hasMore } = await api.getBars(
+      const { bars, hasMore, fromListing } = await api.getBars(
         symbolId,
         this.options.resolution,
         first,
@@ -187,7 +191,7 @@ export class ChartSession {
         this.hours,
       );
       if (this.disposed) return;
-      chart.prependBars(bars);
+      chart.prependBars(bars, fromListing);
       this.hasMore = hasMore;
     } catch {
       // Keep hasMore; the next scroll after the pause tries again.
@@ -201,7 +205,7 @@ export class ChartSession {
   hover(info: HoverInfo | null): void {
     if (info) {
       this.hoveredTime = info.bar.time;
-      this.options.legend.showBar(info.bar, info.previous);
+      this.options.legend.showBar(info.bar, info.previous, info.index);
     } else {
       this.hoveredTime = null;
       this.showLatest();
@@ -342,7 +346,7 @@ export class ChartSession {
 
   private showLatest(): void {
     const latest = this.options.chart.latest();
-    if (latest) this.options.legend.showBar(latest.bar, latest.previous);
+    if (latest) this.options.legend.showBar(latest.bar, latest.previous, latest.index);
   }
 }
 

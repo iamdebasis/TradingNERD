@@ -884,8 +884,10 @@ class MockGateway implements MockMarket {
         : (formulaBars(symbol, this.barsFor(resolution)) ??
           this.barsFor(resolution).map((bar) => scaled(bar, factor)));
       const eligible = bars.filter((bar) => to === null || bar.time < Number(to));
+      const hasMore = eligible.length > countBack;
+      // The fake's bars are each pair's whole history, as Binance's are: it vouches for them.
       return route.fulfill({
-        json: { bars: eligible.slice(-countBack), hasMore: eligible.length > countBack },
+        json: { bars: eligible.slice(-countBack), hasMore, fromListing: !hasMore },
       });
     });
     await this.page.route(/\/api\/stocks\/key$/, (route) => {
@@ -1196,6 +1198,17 @@ export interface ChartState {
   extendedPriceLabel: { text: string; tag: string; color: string } | null;
   sessionBands: { left: number; right: number; color: string }[];
   priceAxisWidth: number;
+  indicators: {
+    id: string;
+    kind: string;
+    hidden: boolean;
+    pane: number;
+    plots: { id: string; start: number; points: number; ghost: boolean }[];
+    levels: number;
+    fills: { id: string; gradient: boolean }[];
+    valueLabels: string[];
+  }[];
+  panes: { height: number; stretch: number; autoScale: boolean }[];
 }
 
 /** The chart's gesture constants (packages/chart/src/tuning.ts). */
@@ -1210,6 +1223,7 @@ export interface GestureTuning {
 
 interface DebugChart {
   debugState(): ChartState;
+  debugBars(): Bar[];
   barX(index: number): number | null;
   priceToY(price: number): number | null;
   yToPrice(y: number): number | null;
@@ -1227,6 +1241,15 @@ export async function chartState(page: Page): Promise<ChartState> {
   );
   if (!state) throw new Error('The chart is not mounted');
   return state;
+}
+
+/** The bars the chart holds, oldest first. */
+export async function chartBars(page: Page): Promise<Bar[]> {
+  const bars = await page.evaluate(
+    () => (window as unknown as DebugWindow).__tradingNerd?.chart?.debugBars() ?? null,
+  );
+  if (!bars) throw new Error('The chart is not mounted');
+  return bars;
 }
 
 /** The gesture constants the chart is using right now. */

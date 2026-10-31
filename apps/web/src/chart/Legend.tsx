@@ -5,7 +5,7 @@ import {
   formatValue,
 } from '@tradingnerd/chart';
 import { type MarketStatus, type PriceFormat, resolutionLabel } from '@tradingnerd/core';
-import { type Ref, useImperativeHandle, useRef, useState } from 'react';
+import { type ReactNode, type Ref, useImperativeHandle, useRef, useState } from 'react';
 import { CoinLogo } from '../logos/CoinLogo';
 import { groupThousands } from '../watchlist/numbers';
 import type { LegendView } from './ChartSession';
@@ -19,10 +19,11 @@ const setText = (element: HTMLElement | null, text: string) => {
 
 /**
  * The chart's top-left overlay: symbol title, the market status and data pill, OHLC of the
- * hovered bar with its change, and the Sell / spread / Buy quote. Updated imperatively by
- * ChartSession, so cursor moves and live ticks never re-render React.
+ * hovered bar with its change, and the Sell / spread / Buy quote, then the price pane's
+ * indicator rows (`children`). Updated imperatively by ChartSession, so cursor moves and live
+ * ticks never re-render React.
  */
-export function Legend({ ref }: { ref: Ref<LegendView> }) {
+export function Legend({ ref, children }: { ref: Ref<LegendView>; children?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
   // The symbol changes rarely, so its logo is rendered by React; everything else is imperative.
   const [coin, setCoin] = useState<{ id: string; base: string; letter: string } | null>(null);
@@ -179,6 +180,7 @@ export function Legend({ ref }: { ref: Ref<LegendView> }) {
           <span className={styles.tradeSide}>BUY</span>
         </div>
       </div>
+      {children}
     </div>
   );
 }

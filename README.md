@@ -33,8 +33,9 @@ TradingView sets the bar for charting: smooth trackpad gestures, a dense but cal
 | **Formulas** | Spreads such as `TOTAL2/XRPUSD` or `BTC.D+ETH.D`, typed into search, charted and kept in watchlists |
 | **History** | Deep scroll-back with resampling to any interval, seconds and ticks, and only whole bars. Market caps go back to 2013 through a resumable, rate-limit-aware download and a CC0 academic dataset |
 | **Watchlists** | Several lists, sections, flags, multi-select, drag and drop, and TradingView's own `.txt` import and export |
+| **Indicators** | TradingView's Indicators button and dialog with favorites; Volume and RSI computed as Pine computes them, live and through history, with their legend rows, settings (inputs, styles, and the Style tab's output and input values) and panes, RSI's gradient fills included. A value is drawn only where the loaded bars settle it, never one that differs from TradingView's for want of older bars |
 | **Performance** | 60 fps panning and zooming through 20,000 bars; under 2 ms a frame with 50 rows ticking; symbol and interval switches under 150 ms, all enforced by tests |
-| **Quality** | About 1,060 unit and integration tests and 192 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
+| **Quality** | About 1,170 unit and integration tests and 217 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
 | **Security** | A loopback-only gateway with Host and Origin checks, owner-only key storage, keys masked to the browser, and no outside requests from the browser |
 
 ## Architecture
@@ -45,7 +46,7 @@ A browser app and a local gateway, both bound to `127.0.0.1`. The gateway is the
 flowchart LR
   subgraph Browser["Browser: React 19 + Vite on 127.0.0.1:5173"]
     TB["Top bar and intervals"]
-    CH["Chart pane<br/>Lightweight Charts + gesture layer"]
+    CH["Chart pane<br/>Lightweight Charts + gesture layer<br/>+ indicators and their panes"]
     WL["Watchlists, flags, symbol search"]
   end
   subgraph Gateway["Local gateway: Node 26 + Fastify on 127.0.0.1:5180"]
@@ -80,7 +81,8 @@ flowchart LR
 | Part | Responsibility |
 |---|---|
 | [`apps/web`](apps/web) | The screen: app shell, chart pane, interval bar, watchlists, symbol search, dialogs |
-| [`packages/chart`](packages/chart) | The chart engine around Lightweight Charts: the gesture layer (wheel, trackpad, keyboard, drag), plugins (crosshair, last price, extended hours, session shading) |
+| [`packages/chart`](packages/chart) | The chart engine around Lightweight Charts: the gesture layer (wheel, trackpad, keyboard, drag), plugins (crosshair, last price, extended hours, session shading), indicators' series and panes |
+| [`packages/indicators`](packages/indicators) | TradingView's built-in indicators as Pine computes them: the `ta.*` functions, Volume and RSI, bar by bar and live |
 | [`packages/core`](packages/core) | Shared by both sides: the protocol, intervals and the resampler, the market clock, formulas, watchlist files |
 | [`apps/gateway`](apps/gateway) | Exchange adapters, the market service and its cache, search, US stocks, CRYPTOCAP, formulas, logos, storage |
 
@@ -247,7 +249,8 @@ flowchart LR
 apps/web             React app: chart, toolbar, watchlists, search, dialogs
 apps/gateway         Local server: exchanges, market service, CRYPTOCAP, US stocks
 packages/core        Shared protocol, intervals, resampling, market clock, formulas
-packages/chart       Chart engine: Lightweight Charts wrapper, gestures, plugins
+packages/chart       Chart engine: Lightweight Charts wrapper, gestures, plugins, indicator panes
+packages/indicators  Built-in indicators as Pine computes them (Volume, RSI)
 docs/                SPEC (source of truth), architecture, security, hand-over
 docs/reference/      TradingView screenshots used for pixel comparisons
 tools/accuracy/      The screenshot ruler for checking older history
@@ -285,17 +288,19 @@ pnpm test:live      # opt-in checks against the real exchanges
 
 | Suite | Tests |
 |---|---|
-| `packages/core` | 336 |
-| `packages/chart` | 48 |
-| `apps/web` (unit) | 163 |
-| `apps/gateway` | 512, plus 66 live tests |
-| End to end (Playwright) | 192 |
+| `packages/core` | 339 |
+| `packages/indicators` | 78 |
+| `packages/chart` | 65 |
+| `apps/web` (unit) | 166 |
+| `apps/gateway` | 517, plus 66 live tests |
+| End to end (Playwright) | 217 |
 
 The end-to-end suite runs against a fake gateway and fakes every write. It includes pixel comparisons against TradingView's own screenshots and performance budgets.
 
 ## Roadmap
 
 - **Each coin's older days (M9f, under way):** every CRYPTOCAP symbol back to 2013, switched on once the accuracy test passes.
+- **More indicators:** moving averages, Bollinger Bands and VWAP (I2); MACD, Stochastic, ATR and TradingView's pane controls (I3); templates and saved defaults (I4).
 - Kraken's full history from its downloadable files.
 - Gold and silver for spreads such as BTCUSD/XAUUSD.
 - TradingView-style watchlist columns that widen to fit.

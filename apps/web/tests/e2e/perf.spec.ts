@@ -107,8 +107,11 @@ test('50 watchlist rows ticking at full speed cost under 2 ms per frame', async 
   expect([...longFrames, ...gaps.slice(1)].filter((duration) => duration > 100)).toEqual([]);
 });
 
-test('panning and zooming through 20,000 bars keeps up 60 fps', async ({ page }) => {
-  await openChart(page);
+/**
+ * Pans and zooms through 20,000 daily bars for about 3 s, as the budgets' test does, and checks
+ * the frames against the budgets (docs/SPEC.md §5.6).
+ */
+async function panAndZoom20k(page: Page, label: string): Promise<void> {
   // 20,000 daily bars ending on the mock's last one, set on the chart as a session sets them.
   await page.evaluate(`(${testChart})().setBars((() => {
     const last = (${testChart})().latest().bar.time;
@@ -153,7 +156,7 @@ test('panning and zooming through 20,000 bars keeps up 60 fps', async ({ page })
   const { paints, gaps, longFrames } = await frames(page);
   const ms = (value: number) => `${value.toFixed(1)} ms`;
   console.log(
-    `20,000 bars: ${paints.length} frames drawn; per frame median ${ms(median(paints))}, 95th ${ms(percentile(paints, 0.95))}, worst ${ms(Math.max(...paints))}; gaps median ${ms(median(gaps.slice(1)))}, 95th ${ms(percentile(gaps.slice(1), 0.95))}; ${longFrames.length} long frames (> 50 ms)`,
+    `${label}: ${paints.length} frames drawn; per frame median ${ms(median(paints))}, 95th ${ms(percentile(paints, 0.95))}, worst ${ms(Math.max(...paints))}; gaps median ${ms(median(gaps.slice(1)))}, 95th ${ms(percentile(gaps.slice(1), 0.95))}; ${longFrames.length} long frames (> 50 ms)`,
   );
   // Frames came steadily: a 60 Hz frame is 16.7 ms; drawing one stays far under that.
   expect(paints.length).toBeGreaterThan(60);
@@ -162,10 +165,54 @@ test('panning and zooming through 20,000 bars keeps up 60 fps', async ({ page })
   expect(median(gaps.slice(1))).toBeLessThan(20);
   expect(percentile(gaps.slice(1), 0.95)).toBeLessThan(34);
   expect(longFrames.filter((duration) => duration > 100)).toEqual([]);
+}
+
+test('panning and zooming through 20,000 bars keeps up 60 fps', async ({ page }) => {
+  await openChart(page);
+  await panAndZoom20k(page, '20,000 bars');
 });
 
-test('switching symbol or interval shows the new chart in under 150 ms', async ({ page }) => {
+/** Opens the chart with Volume and RSI on it, kept from an earlier visit with their defaults. */
+async function openWithVolumeAndRsi(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'tn.chart.indicators',
+      JSON.stringify({
+        version: 1,
+        list: [
+          { id: 'volume-1', kind: 'volume', hidden: false },
+          { id: 'rsi-1', kind: 'rsi', hidden: false },
+        ],
+        folded: false,
+      }),
+    );
+  });
   await openChart(page);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __tradingNerd: { chart: { debugState(): { indicators: unknown[] } } };
+            }
+          ).__tradingNerd.chart.debugState().indicators.length,
+      ),
+    )
+    .toBe(2);
+}
+
+test('with Volume and RSI on the chart, 20,000 bars still pan and zoom at 60 fps', async ({
+  page,
+}) => {
+  // A slow machine draws the extra pane slowly: room to measure rather than time out.
+  test.setTimeout(60_000);
+  await openWithVolumeAndRsi(page);
+  await panAndZoom20k(page, '20,000 bars, Volume and RSI');
+});
+
+/** Switches symbol and interval six times; each must show the new chart within 150 ms. */
+async function measureSwitches(page: Page, label: string): Promise<void> {
   // From the click to the first frame drawn with the new bars.
   await page.evaluate(() => {
     const w = window as unknown as {
@@ -206,6 +253,18 @@ test('switching symbol or interval shows the new chart in under 150 ms', async (
   const times = await page.evaluate(
     () => (window as unknown as { __switches: number[] }).__switches,
   );
-  console.log(`Switches: ${times.map((ms) => `${Math.round(ms)} ms`).join(', ')}`);
+  console.log(`${label}: ${times.map((ms) => `${Math.round(ms)} ms`).join(', ')}`);
   expect(Math.max(...times)).toBeLessThan(150);
+}
+
+test('switching symbol or interval shows the new chart in under 150 ms', async ({ page }) => {
+  await openChart(page);
+  await measureSwitches(page, 'Switches');
+});
+
+test('with Volume and RSI on the chart, switches still show the new chart in under 150 ms', async ({
+  page,
+}) => {
+  await openWithVolumeAndRsi(page);
+  await measureSwitches(page, 'Switches, Volume and RSI');
 });

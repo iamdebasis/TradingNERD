@@ -1,0 +1,17 @@
+{
+  "name": "@tradingnerd/indicators",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TradingView's built-in indicators, computed bar by bar the way Pine Script computes them",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tradingnerd/core": "workspace:*"
+  }
+}

@@ -1,7 +1,9 @@
 import { symbolName } from '@tradingnerd/core';
+import type { IndicatorKind } from '@tradingnerd/indicators';
 import { useRef, useState } from 'react';
 import { GesturesPopup } from '../gestures/GesturesPopup';
 import { isChanged, useGestureSettings } from '../gestures/gestureSettings';
+import { IndicatorsButton } from '../indicators/IndicatorsButton';
 import { AddIntervalDialog } from './AddIntervalDialog';
 import { IntervalMenu } from './IntervalMenu';
 import { CandlesIcon, ChevronDownIcon, GesturesIcon, SettingsIcon } from './icons';
@@ -26,12 +28,17 @@ export interface ToolbarProps {
   onSymbolSearch(): void;
   /** The settings button was pressed: open Chart settings. */
   onSettings(): void;
+  /** The Indicators button was pressed: open the Indicators dialog. */
+  onIndicators(): void;
+  /** A favorite indicator was picked from the ⌄ beside it. */
+  onAddIndicator(kind: IndicatorKind): void;
 }
 
 /**
  * TradingView's top bar, v1 slice: the symbol pill, the favorite intervals and the interval
- * menu (docs/reference/02-toolbar.png and 03-interval-menu.png), then our own Gestures button,
- * and at the right TradingView's Settings button, which opens Chart settings.
+ * menu (docs/reference/02-toolbar.png and 03-interval-menu.png), the Indicators button and its
+ * favorites ⌄ (01-chart-layout.png), then our own Gestures button, and at the right
+ * TradingView's Settings button, which opens Chart settings.
  */
 export function Toolbar({
   symbol,
@@ -39,6 +46,8 @@ export function Toolbar({
   onIntervalChange,
   onSymbolSearch,
   onSettings,
+  onIndicators,
+  onAddIndicator,
 }: ToolbarProps) {
   const [prefs, setPrefs] = useIntervalPrefs();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -92,6 +101,8 @@ export function Toolbar({
           <ChevronDownIcon />
         </button>
       </fieldset>
+      <span className={styles.separator} />
+      <IndicatorsButton onOpen={onIndicators} onAdd={onAddIndicator} />
       <span className={styles.separator} />
       <button
         ref={gesturesButton}

@@ -100,6 +100,50 @@ describe('MarketService.getBars', () => {
     expect(hasMore).toBe(false);
   });
 
+  it('says the oldest page starts at the listing when the exchange vouches for its first bar', async () => {
+    const fake = new FakeExchange({ maxBarsPerRequest: 4, fromListing: true });
+    fake.bars = dailyBars(10, LAST);
+    const market = new MarketService([fake]);
+    const latest = await market.getBars(SYMBOL, '1D', null, 6);
+    expect(latest).toMatchObject({ hasMore: true, fromListing: false });
+    const oldest = await market.getBars(SYMBOL, '1D', latest.bars[0]?.time ?? 0, 6);
+    expect(oldest.bars).toEqual(dailyBars(10, LAST).slice(0, 4));
+    expect(oldest).toMatchObject({ hasMore: false, fromListing: true });
+  });
+
+  it("doesn't when the exchange can't vouch that its history reaches the listing", async () => {
+    const { market } = setup({ maxBarsPerRequest: 4 });
+    expect(await market.getBars(SYMBOL, '1D', null, 50)).toMatchObject({
+      hasMore: false,
+      fromListing: false,
+    });
+  });
+
+  it('asks the exchange about its first bar, or the bar a page ends before when none is older', async () => {
+    const asked: number[] = [];
+    // Like Kraken's rule: the first bar is the listing's only if it's recent enough.
+    const fake = new FakeExchange({
+      fromListing: (_resolution, firstBarMs) => {
+        asked.push(firstBarMs / 1000);
+        return firstBarMs > (LAST - 9 * 86_400) * 1000;
+      },
+    });
+    fake.bars = dailyBars(10, LAST); // the first opens at LAST − 9 days
+    const market = new MarketService([fake]);
+    expect(await market.getBars(SYMBOL, '1D', null, 50)).toMatchObject({ fromListing: false });
+    expect(await market.getBars(SYMBOL, '1D', LAST - 9 * 86_400, 5)).toMatchObject({
+      bars: [],
+      hasMore: false,
+      fromListing: false,
+    });
+    expect(asked).toEqual([LAST - 9 * 86_400, LAST - 9 * 86_400]);
+    fake.bars = dailyBars(9, LAST); // listed a day later
+    expect(await market.getBars(SYMBOL, '1D', LAST - 8 * 86_400, 5)).toMatchObject({
+      bars: [],
+      fromListing: true,
+    });
+  });
+
   it.each([
     ['countBack 0', SYMBOL, '1D', 0, 'bad_request'],
     ['countBack 5001', SYMBOL, '1D', 5_001, 'bad_request'],
@@ -409,7 +453,7 @@ describe('MarketService resampled intervals', () => {
     const weeks = await cut.market.getBars(SYMBOL, '1W', null, 10);
     expect(weeks.bars.map((bar) => day(bar.time))).toEqual(['2026-10-12']);
     expect(weeks.bars[0]).toMatchObject({ open: 15, close: 21.5 });
-    expect(weeks.hasMore).toBe(false);
+    expect(weeks).toMatchObject({ hasMore: false, fromListing: false });
 
     // History from the listing: its first week starts on the Wednesday, as TradingView's does.
     const listed = resampleSetup({ nowSec, natives: ['1', '1D'], fromListing: true });
@@ -417,6 +461,16 @@ describe('MarketService resampled intervals', () => {
     const first = await listed.market.getBars(SYMBOL, '1W', null, 10);
     expect(first.bars.map((bar) => day(bar.time))).toEqual(['2026-10-05', '2026-10-12']);
     expect(first.bars[0]).toMatchObject({ open: 10, high: 15, low: 9, close: 14.5 });
+    expect(first).toMatchObject({ hasMore: false, fromListing: true });
+
+    // A page that holds fewer weeks than there are doesn't reach the listing's.
+    const latest = await listed.market.getBars(SYMBOL, '1W', null, 1);
+    expect(latest.bars.map((bar) => day(bar.time))).toEqual(['2026-10-12']);
+    expect(latest).toMatchObject({ hasMore: true, fromListing: false });
+    // The page before it does.
+    const older = await listed.market.getBars(SYMBOL, '1W', latest.bars[0]?.time ?? 0, 10);
+    expect(older.bars.map((bar) => day(bar.time))).toEqual(['2026-10-05']);
+    expect(older).toMatchObject({ hasMore: false, fromListing: true });
   });
 
   it('builds 6-month bars from monthly ones, starting in January and July', async () => {

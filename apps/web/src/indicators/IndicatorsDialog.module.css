@@ -1,0 +1,257 @@
+/*
+ * TradingView's "Indicators, metrics, and strategies" dialog. Its parts follow TradingView's
+ * (Pine docs); the sizes copy our symbol search dialog's, measured from
+ * docs/reference/04-add-symbol.png, and are provisional until measured from a screenshot of
+ * this dialog (docs/SPEC.md §11).
+ */
+.backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(840px, calc(100vw - 32px));
+  height: min(600px, calc(100vh - 32px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 24px rgb(0 0 0 / 50%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.titleRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 20px 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-gutter);
+}
+
+.searchField {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 40px;
+  margin: 20px 20px 0;
+  border: 1px solid var(--color-field-border);
+  border-radius: 8px;
+}
+
+.searchField:focus-within {
+  border-color: var(--color-accent);
+}
+
+.searchIcon {
+  display: flex;
+  flex: none;
+  margin-left: 11px;
+  color: var(--color-text-secondary);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 16px;
+  caret-color: var(--color-text);
+}
+
+.input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--color-gutter);
+}
+
+.side {
+  flex: none;
+  width: 200px;
+  padding: 8px 0;
+  border-right: 1px solid var(--color-gutter);
+}
+
+.sideHeading {
+  margin: 16px 20px 6px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.sideItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+  padding: 0 20px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sideItem:hover {
+  background: var(--color-gutter);
+}
+
+.sideItem[aria-current="page"] {
+  background: var(--color-chip);
+}
+
+.sideItem:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chips {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  margin: 12px 20px 4px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  background: var(--color-bright);
+  color: var(--color-bg);
+}
+
+.header {
+  flex: none;
+  padding: 10px 20px 6px 48px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px 0 12px;
+  cursor: pointer;
+}
+
+.row[aria-selected="true"] {
+  background: var(--color-gutter);
+}
+
+/* ☆ shows on the row under the mouse; a starred one's ★ always. */
+.star {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  visibility: hidden;
+  cursor: pointer;
+}
+
+.row[aria-selected="true"] .star,
+.star[data-starred] {
+  visibility: visible;
+}
+
+.star[data-starred] {
+  color: var(--color-bright);
+}
+
+.star:hover {
+  color: var(--color-text);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  padding: 24px 20px;
+  color: var(--color-text-secondary);
+}
+
+.added {
+  flex: none;
+  min-height: 34px;
+  padding: 8px 20px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

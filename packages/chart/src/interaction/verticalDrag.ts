@@ -5,24 +5,33 @@ const THRESHOLD_PX = 8;
 /** …and it must be at least this steep (|dy| ≥ |dx| × ratio), so horizontal pans stay auto. */
 const MIN_STEEPNESS = 0.5;
 
+/** The pane at a chart y: its scale's series, the y inside it, and its height. */
+export type PaneLookup = (
+  y: number,
+) => { series: ISeriesApi<SeriesType>; y: number; height: number } | null;
+
 /**
  * TradingView switches auto-scale off when you drag the chart up or down, and the prices follow
  * the pointer. Lightweight Charts ignores vertical drags while auto-scale is on, so the first
- * such drag is handled here. Once auto-scale is off, the library's own drag takes over.
- * Double-clicking the price axis (or Alt+R) turns auto-scale back on.
+ * such drag is handled here, in whichever pane it starts. Once auto-scale is off, the library's
+ * own drag takes over. Double-clicking the price axis (or Alt+R) turns auto-scale back on.
  */
-export function installVerticalDrag(chart: IChartApi, series: ISeriesApi<SeriesType>): () => void {
+export function installVerticalDrag(chart: IChartApi, paneAt: PaneLookup): () => void {
   const element = chart.chartElement();
 
   const onPointerDown = (down: PointerEvent) => {
     if (down.button !== 0 || !down.isPrimary) return;
+    // A pane separator's handle (the library's, with its resize cursor) resizes panes instead.
+    if (down.target instanceof HTMLElement && down.target.style.cursor === 'row-resize') return;
+    const box = element.getBoundingClientRect();
+    const x = down.clientX - box.left;
+    const target = paneAt(down.clientY - box.top);
+    // The axes scale, not pan.
+    if (!target || x < 0 || x > chart.paneSize(0).width) return;
+    const { series } = target;
+    const pane = { height: target.height };
     const scale = series.priceScale();
     if (!scale.options().autoScale) return;
-    const box = element.getBoundingClientRect();
-    const pane = chart.paneSize();
-    const x = down.clientX - box.left;
-    const y = down.clientY - box.top;
-    if (x < 0 || y < 0 || x > pane.width || y > pane.height) return; // the axes scale, not pan
 
     let start: { from: number; to: number; pricePerPixel: number } | null = null;
     let libraryDragStarted = false;

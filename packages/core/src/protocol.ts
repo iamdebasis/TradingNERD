@@ -15,8 +15,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 8: CRYPTOCAP market caps: the `index` kind and a symbol's price `format`.
  * 9: formulas (spreads): the `spread` kind, symbols up to 256 characters, and an unknown
  *    symbol's `suggestion`.
+ * 10: indicators: a history page's `fromListing`.
  */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
@@ -124,11 +125,16 @@ export function parseBar(value: unknown): Bar | null {
   return bar;
 }
 
-/** Validates GET /api/bars output: bars must be valid and strictly ascending. */
+/**
+ * Validates GET /api/bars output: bars must be valid and strictly ascending. A page without
+ * `fromListing` (a gateway before protocol 10) doesn't vouch for a listing.
+ */
 export function parseBarsResponse(value: unknown): BarsResponse | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { bars, hasMore } = value as Record<string, unknown>;
-  if (!Array.isArray(bars) || typeof hasMore !== 'boolean') return null;
+  const { bars, hasMore, fromListing = false } = value as Record<string, unknown>;
+  if (!Array.isArray(bars) || typeof hasMore !== 'boolean' || typeof fromListing !== 'boolean') {
+    return null;
+  }
   const parsed: Bar[] = [];
   for (const item of bars) {
     const bar = parseBar(item);
@@ -136,7 +142,7 @@ export function parseBarsResponse(value: unknown): BarsResponse | null {
     if (!bar || (previous && bar.time <= previous.time)) return null;
     parsed.push(bar);
   }
-  return { bars: parsed, hasMore };
+  return { bars: parsed, hasMore, fromListing: fromListing && !hasMore };
 }
 
 /** Validates GET /api/symbols/resolve output. */

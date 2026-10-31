@@ -49,7 +49,7 @@ describe('TickHistory', () => {
     const partial = makeAggTrades(3_000, 50_000, 7_000_037);
     const source = new FakeTickSource(partial, 500);
     const truth = foldTicks(partial, 100);
-    const { bars, hasMore } = await new TickHistory().bars(
+    const { bars, hasMore, fromListing } = await new TickHistory().bars(
       source,
       SYMBOL,
       'XRPUSDT',
@@ -61,6 +61,19 @@ describe('TickHistory', () => {
     expect(bars[0]?.time).toBe(70_000);
     expect(bars[0]?.volume).toBeLessThan(100 * 10); // fewer than 100 trades' worth
     expect(hasMore).toBe(false);
+    // Its trades don't begin at trade 0, so they may not be the pair's first.
+    expect(fromListing).toBe(false);
+  });
+
+  it("starts at the listing when it reaches trade 0, the pair's first", async () => {
+    const listed = makeAggTrades(300, 0, 0); // about 900 trades since the listing
+    const source = new FakeTickSource(listed, 500);
+    const page = await new TickHistory().bars(source, SYMBOL, 'XRPUSDT', 100, null, 50);
+    expect(page.bars).toEqual(foldTicks(listed, 100));
+    expect(page).toMatchObject({ hasMore: false, fromListing: true });
+    // Fewer bars asked for than there are: the page doesn't reach the first.
+    const latest = await new TickHistory().bars(source, SYMBOL, 'XRPUSDT', 100, null, 3);
+    expect(latest).toMatchObject({ hasMore: true, fromListing: false });
   });
 
   it(`makes at most ${TICK_MAX_REQUESTS} requests per call, then leaves the rest for later`, async () => {
@@ -86,6 +99,7 @@ describe('TickHistory', () => {
     expect(await new TickHistory().bars(source, SYMBOL, 'XRPUSDT', 100, 1, 10)).toEqual({
       bars: [],
       hasMore: false,
+      fromListing: false,
     });
   });
 });
