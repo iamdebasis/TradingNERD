@@ -8,12 +8,12 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 
 | | |
 |---|---|
-| Branches | `main` is at `6c403cb` (pull request #2 merged: I1 and its gaps), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
+| Branches | `main` is at `4295233` (pull request #3 merged: P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
-| Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI; merged on GitHub) |
+| Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
-| Built, not committed | **P1, the Pine Editor's first milestone** (31 October), on `claude/keen-allen-7wubfe`, from `main` at `6c403cb`: see §2b |
+| Under way | **P2, real Pine scripts and the editor as TradingView's** (31 October), on `claude/keen-allen-7wubfe` from `main` at `4295233`, committed step by step on your YES; pushing and the pull request wait for their own YES. See SPEC §8 |
 | Taken out | A3 (hiding unchecked coins), on the user's rule against hiding data |
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
@@ -54,7 +54,7 @@ If a year misses, report it with the reasons before changing anything. Likely ca
 - Live Coin Watch's supply jumps;
 - wrapped tokens let through.
 
-## 2b. Built: P1, the Pine Editor (31 October)
+## 2b. Merged: P1, the Pine Editor (31 October, pull request #3)
 
 The user said YES on 27 October to "build P1 of the Pine Editor as above (installing Monaco, adding the right toolbar, saving scripts in `data/scripts.json`, and bringing Pine into v1's scope)", and after pull request #2 merged, "carefully go ahead". Built in a cloud session on `claude/keen-allen-7wubfe`, from `main` at `6c403cb`. **Not committed:** committing needs its own YES, and pushing and opening the pull request another. The design is SPEC §3 (the rows of 31 October), §4.16, §5.16, §6.17 and §7.5.
 

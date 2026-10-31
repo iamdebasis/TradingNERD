@@ -4,7 +4,8 @@ import { PineCompileError } from './diagnostics.ts';
 import { lex } from './lexer.ts';
 import { parse } from './parser.ts';
 
-const statements = (source: string) => parse(source).statements;
+/** v6 code, as the tests write it without its //@version line. */
+const statements = (source: string) => parse(source, 6).statements;
 
 /** The first statement's expression. */
 function exprOf(source: string): Expr {
@@ -47,7 +48,7 @@ function show(expr: Expr): string {
 
 function errorOf(source: string): PineCompileError {
   try {
-    parse(source);
+    parse(source, 6);
   } catch (error) {
     if (error instanceof PineCompileError) return error;
     throw error;
@@ -123,7 +124,7 @@ describe('the parser', () => {
     expect(a).toMatchObject({ kind: 'decl', mode: 'var', type: 'float', name: 'x' });
     expect(b).toMatchObject({ kind: 'decl', qualifier: 'const', type: 'string', name: 'T' });
     expect(c).toMatchObject({ kind: 'tupleDecl', names: ['m', 's', 'h'] });
-    expect(d).toMatchObject({ kind: 'assign', op: ':=', name: 'x' });
+    expect(d).toMatchObject({ kind: 'assign', op: ':=', target: { kind: 'name', name: 'x' } });
     expect(e).toMatchObject({ kind: 'decl', name: 'y' });
     expect(statements('y = 2, z = 3')).toHaveLength(2);
   });
@@ -196,8 +197,8 @@ describe('the parser', () => {
     expect(nested.message).toBe('Functions can only be declared in the global scope');
     expect(nested.span.line).toBe(2);
     expect(errorOf('close[1][2]').message).toMatch(/only be used once/);
-    expect(errorOf('type Point\n    float x').message).toMatch(/User-defined types come later/);
-    expect(errorOf('for x in arr\n    y = x').message).toMatch(/for…in loops come later/);
-    expect(errorOf('array<float> a = na').message).toMatch(/Arrays, matrices and maps come later/);
+    expect(errorOf('type Point').message).toMatch(/A type needs at least one field/);
+    expect(errorOf('enum Dir').message).toMatch(/An enum needs at least one member/);
+    expect(errorOf('import foo').message).toMatch(/import <user>\/<library>\/<version>/);
   });
 });

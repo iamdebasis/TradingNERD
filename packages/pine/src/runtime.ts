@@ -151,6 +151,20 @@ export interface Outputs {
 /** How long one bar's execution may take, as Pine stops a loop after 500 ms. */
 const BAR_BUDGET_MS = 500;
 
+/** One message of log.info(), log.warning() or log.error() (Pine docs, Debugging: Pine Logs). */
+export interface LogEntry {
+  level: 'info' | 'warning' | 'error';
+  message: string;
+  /** The bar it was logged on, and that bar's opening time (ms). */
+  bar: number;
+  time: number;
+  /** Logged on the live bar's update rather than a closed bar. */
+  realtime: boolean;
+}
+
+/** The most messages a run keeps (the oldest go first). */
+export const MAX_LOGS = 10_000;
+
 /** What a script may know of the chart's symbol (Pine's syminfo.* and timeframe.*). */
 export interface ScriptSymbol {
   /** "XRPUSDT" */
@@ -210,6 +224,15 @@ export class Runtime {
   /** The slots that roll back and commit (the others are only ever read after being set). */
   readonly slots: Slot[] = [];
   readonly stateful: Stateful[] = [];
+  /**
+   * How to undo the changes made to collections and objects since the last commit, newest last:
+   * the live bar's updates are rolled back as its variables are (Pine docs, Execution model).
+   */
+  private journal: (() => void)[] = [];
+  /** The script makes collections or objects: a correction then runs it afresh. */
+  usesObjects = false;
+  /** Its Pine Logs, oldest first. */
+  logs: LogEntry[] = [];
   outputs: Outputs = { plots: [], plotColors: [], backgrounds: [], fillColors: [] };
   private lastIndex = -1;
   /** The last execution committed: nothing to roll back before the next. */
@@ -247,14 +270,50 @@ export class Runtime {
     this.lastIndex = index;
     this.signal = 0;
     this.ticks = 0;
-    if (!this.committed) for (const slot of this.slots) slot.rollback();
+    if (!this.committed) {
+      for (const slot of this.slots) slot.rollback();
+      for (let i = this.journal.length - 1; i >= 0; i--) (this.journal[i] as () => void)();
+      this.journal = [];
+    }
+    this.touched.clear();
     this.committed = false;
   }
 
   end(): void {
     if (!this.final) return;
     for (const slot of this.slots) slot.commit();
+    this.journal = [];
     this.committed = true;
+  }
+
+  /** A collection or an object changed: on an update that may be rolled back, how to undo it. */
+  record(undo: () => void): void {
+    if (!this.final) this.journal.push(undo);
+  }
+
+  /** Collections already saved for undo in this execution: each is saved once, whole. */
+  private touched = new Set<object>();
+
+  /**
+   * A collection is about to change: on an update that may be rolled back, its state is saved
+   * once per execution, `save` giving the undo (so a loop of pushes copies it once).
+   */
+  touch(collection: object, save: () => () => void): void {
+    if (this.final || this.touched.has(collection)) return;
+    this.touched.add(collection);
+    this.journal.push(save());
+  }
+
+  log(level: LogEntry['level'], message: string): void {
+    const bar = this.bar;
+    this.logs.push({
+      level,
+      message,
+      bar: this.index,
+      time: bar ? (bar.start ?? bar.time * 1000) : Number.NaN,
+      realtime: this.index >= this.realtimeFrom,
+    });
+    if (this.logs.length > MAX_LOGS) this.logs.splice(0, this.logs.length - MAX_LOGS);
   }
 
   /**

@@ -123,6 +123,9 @@ function inputSpec(
       return { ...base, kind: 'color', default: input.defval as number };
     case 'source':
       return { ...base, kind: 'source', default: input.defval as 'close' };
+    default:
+      // Inputs of the newer kinds as text until each has its own control (docs/SPEC.md §5.17).
+      return { ...base, kind: 'string', default: String(input.defval ?? '') };
   }
 }
 

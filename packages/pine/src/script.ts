@@ -10,20 +10,21 @@ import {
   type PlotStyle,
   type ScriptFormat,
 } from './builtins.ts';
-import { type CompiledProgram, Compiler, type InputDef } from './compiler.ts';
+import { type CompiledProgram, type CompileOptions, Compiler, type InputDef } from './compiler.ts';
 import {
   PineCompileError,
   type PineDiagnostic,
   PineRuntimeError,
   type Span,
 } from './diagnostics.ts';
+import { upgrade } from './dialect.ts';
 import { parse } from './parser.ts';
 import { DEFAULT_SYMBOL, type Outputs, type ScriptSymbol } from './runtime.ts';
 import type { FoldEnv, Qual } from './types.ts';
 import type { OutputRef, Value } from './values.ts';
 import { Agreement, drawnFrom } from './warmup.ts';
 
-/** The Pine Script® version this engine runs: TradingView's current one. */
+/** The newest Pine Script® version: TradingView's current one. Older ones run by their own rules. */
 export const PINE_VERSION = 6;
 
 /** Compile passes at most before every variable's qualifier is known (see compileScript). */
@@ -41,18 +42,19 @@ export type CompileResult =
  * variable a series after code above it has used it (Pine docs, Type system), so each pass
  * starts from the strongest qualifiers the one before found, and the last pass reports.
  */
-export function compileScript(source: string): CompileResult {
+export function compileScript(source: string, options: CompileOptions = {}): CompileResult {
   try {
-    const script = parse(source);
-    checkVersion(script, source);
+    const parsed = parse(source);
+    checkVersion(parsed, source);
+    const script = upgrade(parsed);
     let floors: ReadonlyMap<object, Qual> = new Map();
     for (let pass = 0; pass < MAX_PASSES; pass++) {
-      const found = new Compiler(script, source, floors, false).compile().quals;
+      const found = new Compiler(script, source, floors, false, options).compile().quals;
       const settled = sameQuals(found, floors);
       floors = found;
       if (settled) break;
     }
-    const program = new ScriptProgram(script, source, floors);
+    const program = new ScriptProgram(script, source, floors, options);
     return { ok: true, program, warnings: program.warnings };
   } catch (error) {
     if (error instanceof PineCompileError) {
@@ -72,17 +74,22 @@ const cache = new Map<string, CompileResult>();
 
 /**
  * compileScript, remembered for the last few sources: the chart, its legend and its dialogs
- * all compile the same code, and a compile result is never changed.
+ * all compile the same code, and a compile result is never changed. `revision` names the
+ * libraries the code may import, so a changed library compiles the script again.
  */
-export function compileCached(source: string): CompileResult {
-  const hit = cache.get(source);
+export function compileCached(
+  source: string,
+  options: CompileOptions & { revision?: string } = {},
+): CompileResult {
+  const key = options.revision ? `${options.revision}\u0000${source}` : source;
+  const hit = cache.get(key);
   if (hit) {
-    cache.delete(source);
-    cache.set(source, hit);
+    cache.delete(key);
+    cache.set(key, hit);
     return hit;
   }
-  const result = compileScript(source);
-  cache.set(source, result);
+  const result = compileScript(source, options);
+  cache.set(key, result);
   if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
   return result;
 }
@@ -93,9 +100,9 @@ function sameQuals(a: ReadonlyMap<object, Qual>, b: ReadonlyMap<object, Qual>): 
   return true;
 }
 
-/** Only v6: v5 and older differ in ways that change results (Pine docs, v6 migration guide). */
+/** Versions 1 to 6 (no annotation is version 1, as Pine assumes); none newer exists. */
 function checkVersion(script: Script, source: string): void {
-  if (script.version === PINE_VERSION) return;
+  if (script.version === null || (script.version >= 1 && script.version <= PINE_VERSION)) return;
   const lines = source.split(/\r?\n/);
   const at = lines.findIndex((line) => /^\s*\/\/@version/.test(line));
   const line = at < 0 ? 1 : at + 1;
@@ -106,9 +113,7 @@ function checkVersion(script: Script, source: string): void {
     endColumn: Math.max(2, (lines[line - 1] ?? '').length + 1),
   };
   throw new PineCompileError(
-    script.version === null
-      ? 'Add //@version=6 as the first line: tradingNerd runs Pine Script® v6'
-      : `This script is Pine Script® v${script.version}: tradingNerd runs v6 (older versions come later)`,
+    `Pine Script® v${script.version} doesn't exist: the versions are 1 to ${PINE_VERSION}`,
     span,
   );
 }
@@ -222,11 +227,19 @@ export class ScriptProgram {
   private readonly floors: ReadonlyMap<object, Qual>;
   private readonly compiled: CompiledProgram;
 
-  constructor(script: Script, source: string, floors: ReadonlyMap<object, Qual>) {
+  private readonly options: CompileOptions;
+
+  constructor(
+    script: Script,
+    source: string,
+    floors: ReadonlyMap<object, Qual>,
+    options: CompileOptions = {},
+  ) {
     this.script = script;
     this.source = source;
     this.floors = floors;
-    this.compiled = new Compiler(script, source, floors, true).compile();
+    this.options = options;
+    this.compiled = new Compiler(script, source, floors, true, options).compile();
     this.inputs = this.compiled.inputs;
     this.warnings = this.compiled.warnings;
   }
@@ -321,7 +334,17 @@ export class ScriptProgram {
 
   /** A fresh compile of the script, with its own variables and state, for one run. */
   instance(): CompiledProgram {
-    return new Compiler(this.script, this.source, this.floors, true).compile();
+    return new Compiler(this.script, this.source, this.floors, true, this.options).compile();
+  }
+
+  /** The script's Pine version (1 when it has no annotation). */
+  get version(): number {
+    return this.script.version ?? 1;
+  }
+
+  /** Declared with library(). */
+  get isLibrary(): boolean {
+    return this.compiled.indicator.library;
   }
 }
 
@@ -348,6 +371,8 @@ function sanitizeInput(input: InputDef, value: unknown): Value {
         : input.defval;
     case 'source':
       return isSourceName(value) ? value : input.defval;
+    default:
+      return typeof value === typeof input.defval ? (value as Value) : input.defval;
   }
 }
 
@@ -436,7 +461,10 @@ class Execution {
   }
 
   get canCorrect(): boolean {
-    return this.beforeLastCommit !== null && this.error === null;
+    // Collections and objects change in place: a script that makes them runs afresh instead.
+    return (
+      this.beforeLastCommit !== null && this.error === null && !this.program.runtime.usesObjects
+    );
   }
 
   /** The bar before the live one was corrected: back one commit, then both again. */

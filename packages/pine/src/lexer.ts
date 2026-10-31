@@ -61,6 +61,26 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
   'series',
 ]);
 
+/**
+ * The words a version reserves (Pine docs, migration guides): user-defined types, methods,
+ * enums, libraries, `for…in` and the qualifier keywords came with v5, so in v4 `type` is a
+ * parameter name (`input(type = input.integer)`); `var`, `varip`, `switch` and `while` with v4.
+ */
+const V5_WORDS = ['import', 'export', 'method', 'type', 'enum', 'const', 'simple', 'series', 'in'];
+const V4_WORDS = ['var', 'varip', 'switch', 'while'];
+
+export function keywordsOf(version: number): ReadonlySet<string> {
+  if (version >= 5) return KEYWORDS;
+  const removed = new Set(version >= 4 ? V5_WORDS : [...V5_WORDS, ...V4_WORDS]);
+  return new Set([...KEYWORDS].filter((word) => !removed.has(word)));
+}
+
+/** `//@version=N` (spaces tolerated), wherever its line is; null when the script has none. */
+export function versionIn(source: string): number | null {
+  const match = /^[ \t]*\/\/[ \t]*@version[ \t]*=[ \t]*(\d+)/m.exec(source);
+  return match ? Number(match[1]) : null;
+}
+
 /** Longest first, so `:=` wins over `:`. */
 const OPERATORS = [
   ':=',
@@ -203,7 +223,7 @@ function readNumber(code: string, start: number): { text: string; float: boolean
 }
 
 /** One physical line's tokens (its code, without the comment). */
-function tokenize(code: string, line: number): Token[] {
+function tokenize(code: string, line: number, keywords: ReadonlySet<string>): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < code.length) {
@@ -218,7 +238,7 @@ function tokenize(code: string, line: number): Token[] {
       while (j < code.length && isIdentPart(code[j] as string)) j++;
       const text = code.slice(i, j);
       tokens.push({
-        kind: KEYWORDS.has(text) ? 'keyword' : 'ident',
+        kind: keywords.has(text) ? 'keyword' : 'ident',
         text,
         ...span(line, column, j + 1),
       });
@@ -293,26 +313,28 @@ function indentOf(text: string): number {
   return spaces;
 }
 
-/** Splits a script into its logical lines, after comments and Pine's line wrapping. */
-export function lex(source: string): Lexed {
+/**
+ * Splits a script into its logical lines, after comments and Pine's line wrapping. A script with
+ * no `//@version` is read as `fallbackVersion` (1, as Pine assumes; tests of v6 code pass 6).
+ */
+export function lex(source: string, fallbackVersion = 1): Lexed {
   const physical = source.split(/\r?\n/);
   const lines: LogicalLine[] = [];
   const annotations: { line: number; text: string }[] = [];
-  let version: number | null = null;
+  const version = versionIn(source);
+  const keywords = keywordsOf(version ?? fallbackVersion);
   let current: LogicalLine | null = null;
   let depth = 0;
 
   physical.forEach((text, index) => {
     const line = index + 1;
     const { code, comment } = splitComment(text, line);
-    if (comment?.startsWith('//@')) {
-      const match = /^\/\/@version\s*=\s*(\d+)/.exec(comment);
-      if (match) version = Number(match[1]);
-      else annotations.push({ line, text: comment.slice(3) });
+    if (comment?.startsWith('//@') && !/^\/\/@version/.test(comment)) {
+      annotations.push({ line, text: comment.slice(3) });
     }
     if (code.trim() === '') return;
     const indent = indentOf(code);
-    const tokens = tokenize(code, line);
+    const tokens = tokenize(code, line, keywords);
     const last = current?.tokens.at(-1);
     const continues =
       current !== null &&

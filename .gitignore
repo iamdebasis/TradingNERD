@@ -15,6 +15,9 @@ dist/
 .env.*
 *.local
 
+# The Pine corpus's downloads (tools/pine-corpus): other people's scripts, never committed
+/tools/pine-corpus/.cache/
+
 # Test output
 coverage/
 test-results/

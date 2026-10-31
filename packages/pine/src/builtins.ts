@@ -1,5 +1,17 @@
 import { SOURCES, type SourceName, sourceValue } from '@tradingnerd/indicators';
-import type { Arg, Expr } from './ast.ts';
+import {
+  Args,
+  type Call,
+  constant,
+  type Ev,
+  type Fold,
+  type Handler,
+  type NumEv,
+  series,
+  simple,
+} from './args.ts';
+import type { Arg } from './ast.ts';
+import { collectionCalls } from './collections.ts';
 import type { Compiler, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import type { Runtime } from './runtime.ts';
@@ -36,20 +48,22 @@ import {
   type Base,
   CONST,
   type Compiled,
+  castTo,
   type FoldEnv,
   INPUT,
   isNumeric,
   maxQual,
   naOf,
-  QUAL_NAMES,
   type Qual,
   SERIES,
   SIMPLE,
   typeName,
+  unify,
 } from './types.ts';
 import {
   COLORS,
   fromGradient,
+  hexColor,
   isOutputRef,
   type OutputRef,
   packColor,
@@ -57,11 +71,6 @@ import {
   type Value,
   withTransparency,
 } from './values.ts';
-
-type Call = Extract<Expr, { kind: 'call' }>;
-type Fold = (env: FoldEnv) => Value;
-type Ev = (rt: Runtime) => Value;
-type NumEv = (rt: Runtime) => number;
 
 /** Pine's display flags (the v6 reference's display.* constants). */
 export const DISPLAY = {
@@ -96,47 +105,41 @@ export type LineStyle = (typeof LINE_STYLES)[number];
 export const FORMATS = ['inherit', 'price', 'volume', 'percent', 'mintick'] as const;
 export type ScriptFormat = (typeof FORMATS)[number];
 
-/** Namespaces and functions that come with later milestones. */
+/**
+ * What tradingNerd doesn't run yet, in plain words (no milestone codes): the editor shows these
+ * where TradingView would run the script.
+ */
 const LATER: readonly [RegExp, string][] = [
-  [/^(plotshape|plotchar|plotarrow|plotbar|plotcandle|barcolor)$/, 'come later (P2)'],
-  [/^(label|line|box|table|polyline|linefill|chart\.point)\./, 'Drawings come later (P3)'],
-  [/^request\./, 'Data from other symbols and intervals comes later (P2)'],
-  [/^strategy(\.|$)/, 'Strategies come later (P3)'],
-  [/^library$/, 'Libraries come later (P3)'],
-  [/^log\./, 'Pine Logs come later (P2)'],
-  [/^(array|matrix|map)\./, 'Arrays, matrices and maps come later (P2)'],
   [
-    /^(str\.(format|split|replace|contains|substring|length|lower|upper|pos|match|repeat|trim)|str\.format_time)$/,
-    'come later (P2)',
+    /^(plotshape|plotchar|plotarrow|plotbar|plotcandle|barcolor)$/,
+    "isn't supported in tradingNerd yet",
   ],
-  [/^input\.(timeframe|symbol|session|time|price|text_area|enum)$/, 'come later (P2)'],
+  [
+    /^(label|line|box|table|polyline|linefill|chart\.point)\./,
+    "isn't supported in tradingNerd yet: drawings (labels, lines, boxes, tables) come in a later update",
+  ],
+  [
+    /^request\./,
+    "isn't supported in tradingNerd yet: data from other symbols and timeframes comes in a later update",
+  ],
+  [
+    /^strategy(\.|$)/,
+    "isn't supported in tradingNerd yet: strategies come with the Strategy Tester in a later update",
+  ],
+  [/^log\./, "isn't supported in tradingNerd yet"],
+  [
+    /^(str\.(format|split|replace|replace_all|contains|substring|length|lower|upper|pos|match|repeat|trim|startswith|endswith|tonumber)|str\.format_time)$/,
+    "isn't supported in tradingNerd yet",
+  ],
+  [
+    /^input\.(timeframe|symbol|session|time|price|text_area|enum)$/,
+    "isn't supported in tradingNerd yet",
+  ],
   [
     /^(time|time_close|timestamp|year|month|weekofyear|dayofmonth|dayofweek|hour|minute|second)$/,
-    'Time functions come later (P2)',
+    "isn't supported in tradingNerd yet",
   ],
 ];
-
-const constant = (base: Base, value: Value, span: Span): Compiled => ({
-  base,
-  qual: CONST,
-  ev: () => value,
-  fold: () => value,
-  span,
-});
-
-const simple = (base: Base, read: (rt: Runtime) => Value, span: Span): Compiled => ({
-  base,
-  qual: SIMPLE,
-  ev: read,
-  span,
-});
-
-const series = (base: Base, read: (rt: Runtime) => Value, span: Span): Compiled => ({
-  base,
-  qual: SERIES,
-  ev: read,
-  span,
-});
 
 /** A bar's value by name: open … hlcc4, time, bar_index. */
 function barValue(name: string): ((rt: Runtime, k: number) => number) | null {
@@ -162,6 +165,13 @@ function barValue(name: string): ((rt: Runtime, k: number) => number) | null {
 
 const isIntraday = (tf: string) => /^\d+$/.test(tf) || /S$/.test(tf) || /T$/.test(tf);
 
+/** Pine v5's values for the colors v6 changed (v6 migration guide: Color changes). */
+const V5_COLORS: Readonly<Record<string, number>> = {
+  red: hexColor('#FF5252'),
+  teal: hexColor('#00897B'),
+  yellow: hexColor('#FFEB3B'),
+};
+
 /** Built-in variables and constants by name; null when the name isn't one. */
 export function compileBuiltinName(c: Compiler, name: string, span: Span): Compiled | null {
   const bar = barValue(name);
@@ -174,10 +184,16 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
   const member = dot < 0 ? name : name.slice(dot + 1);
   switch (space) {
     case 'color': {
-      const value = COLORS[member];
+      // v5 and older had other values for three of them (v6 guide: Color changes).
+      const value = (c.version <= 5 ? V5_COLORS[member] : undefined) ?? COLORS[member];
       if (value !== undefined) return constant('color', value, span);
       break;
     }
+    case 'order':
+      if (member === 'ascending' || member === 'descending') {
+        return constant('order_style', member, span);
+      }
+      break;
     case 'plot':
       if (
         member.startsWith('style_') &&
@@ -219,7 +235,7 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
     case 'barstate':
       return barstate(member, span);
     case 'timeframe':
-      return timeframe(member, span);
+      return timeframe(member, span, c.version);
     case 'syminfo':
       return syminfo(member, span);
     case 'ta':
@@ -273,11 +289,12 @@ function barstate(member: string, span: Span): Compiled | null {
   return read ? series('bool', read, span) : null;
 }
 
-function timeframe(member: string, span: Span): Compiled | null {
+function timeframe(member: string, span: Span, version: number): Compiled | null {
   const tf = (rt: Runtime) => rt.symbol.timeframe;
   switch (member) {
     case 'period':
-      return simple('string', tf, span);
+      // v5 and older wrote a multiplier of 1 as nothing: "D", not "1D" (v6 migration guide).
+      return simple('string', version <= 5 ? (rt) => tf(rt).replace(/^1([DWM])$/, '$1') : tf, span);
     case 'multiplier':
       return simple('int', (rt) => Number.parseInt(tf(rt), 10) || 1, span);
     case 'isintraday':
@@ -345,179 +362,6 @@ export function compileHistoryOfBuiltin(
   );
 }
 
-// ---- arguments ----
-
-/**
- * The call's arguments by parameter: positional ones in order, then named ones (the v6
- * reference's signatures). Unknown names, repeats and missing required ones are errors.
- */
-function bind(
-  c: Compiler,
-  call: Call,
-  names: readonly string[],
-  required: number,
-): (Arg | undefined)[] {
-  const fn = call.callee;
-  const bound: (Arg | undefined)[] = names.map(() => undefined);
-  let position = 0;
-  for (const arg of call.args) {
-    let i: number;
-    if (arg.name === null) {
-      if (position >= names.length) c.fail(`Too many arguments in the call to '${fn}'`, arg.span);
-      i = position++;
-    } else {
-      i = names.indexOf(arg.name);
-      if (i < 0) c.fail(`'${fn}' has no parameter '${arg.name}'`, arg.span);
-    }
-    if (bound[i])
-      c.fail(`The '${names[i]}' argument is given twice in the call to '${fn}'`, arg.span);
-    bound[i] = arg;
-  }
-  for (let i = 0; i < required; i++) {
-    if (!bound[i]) c.fail(`Missing the '${names[i]}' argument in the call to '${fn}'`, call.span);
-  }
-  return bound;
-}
-
-class Args {
-  private readonly c: Compiler;
-  private readonly call: Call;
-  private readonly scope: Scope;
-  private readonly names: readonly string[];
-  private readonly bound: (Arg | undefined)[];
-  private readonly cache = new Map<number, Compiled>();
-
-  constructor(c: Compiler, call: Call, scope: Scope, names: readonly string[], required: number) {
-    this.c = c;
-    this.call = call;
-    this.scope = scope;
-    this.names = names;
-    this.bound = bind(c, call, names, required);
-  }
-
-  get fn(): string {
-    return this.call.callee;
-  }
-
-  has(name: string): boolean {
-    return this.bound[this.index(name)] !== undefined;
-  }
-
-  raw(name: string): Arg | undefined {
-    return this.bound[this.index(name)];
-  }
-
-  private index(name: string): number {
-    const i = this.names.indexOf(name);
-    if (i < 0) throw new Error(`No parameter ${name} in ${this.fn}`);
-    return i;
-  }
-
-  /** The argument compiled, or undefined when not given. */
-  get(name: string): Compiled | undefined {
-    const i = this.index(name);
-    const arg = this.bound[i];
-    if (!arg) return undefined;
-    let compiled = this.cache.get(i);
-    if (!compiled) {
-      compiled = this.c.expr(arg.value, this.scope);
-      this.cache.set(i, compiled);
-    }
-    return compiled;
-  }
-
-  private check(
-    name: string,
-    ok: (base: Base) => boolean,
-    want: string,
-    max: Qual,
-  ): Compiled | undefined {
-    const value = this.get(name);
-    if (!value) return undefined;
-    this.c.needType(value, ok(value.base), this.fn, name, want);
-    this.c.needQual(value, max, this.fn, name, want.split(' ').at(-1) as Base);
-    return value;
-  }
-
-  number(name: string, max: Qual = SERIES): NumEv | undefined {
-    const value = this.check(name, isNumeric, qualWord(max, 'float'), max);
-    return value?.ev as NumEv | undefined;
-  }
-
-  int(name: string, max: Qual = SERIES): NumEv | undefined {
-    const value = this.check(name, (b) => b === 'int' || b === 'na', qualWord(max, 'int'), max);
-    return value?.ev as NumEv | undefined;
-  }
-
-  bool(name: string, max: Qual = SERIES): ((rt: Runtime) => boolean) | undefined {
-    const value = this.check(name, (b) => b === 'bool' || b === 'na', qualWord(max, 'bool'), max);
-    return value?.ev as ((rt: Runtime) => boolean) | undefined;
-  }
-
-  color(name: string, max: Qual = SERIES): Compiled | undefined {
-    return this.check(name, (b) => b === 'color' || b === 'na', qualWord(max, 'color'), max);
-  }
-
-  string(name: string, max: Qual = SERIES): Compiled | undefined {
-    return this.check(name, (b) => b === 'string' || b === 'na', qualWord(max, 'string'), max);
-  }
-
-  /**
-   * A const or input argument (const only when `max` says so), worked out from the inputs before
-   * the bars; the default when not given.
-   */
-  folded(name: string, fallback: Value, check?: (c: Compiled) => void, max: Qual = INPUT): Fold {
-    const value = this.get(name);
-    if (!value) return () => fallback;
-    check?.(value);
-    this.c.needQual(value, max, this.fn, name, value.base);
-    if (!value.fold) {
-      if (!this.c.strict) return () => fallback;
-      return this.c.fail(
-        `The '${name}' argument of '${this.fn}' must be known before the script runs (const or input)`,
-        value.span,
-      );
-    }
-    return value.fold;
-  }
-
-  /** A const or input argument of one type: Pine's "input int", "const bool", "input plot_style". */
-  foldedAs(name: string, base: Base, fallback: Value, max: Qual = INPUT): Fold {
-    const check = (value: Compiled) => {
-      const ok =
-        value.base === base || value.base === 'na' || (base === 'float' && value.base === 'int');
-      this.c.needType(value, ok, this.fn, name, `${QUAL_NAMES[max]} ${base}`);
-    };
-    return this.folded(name, fallback, check, max);
-  }
-
-  /** A const argument (titles, an input's settings). */
-  constant(name: string, fallback: Value, base: Base | null = null): Value {
-    const value = this.get(name);
-    if (!value) return fallback;
-    if (base)
-      this.c.needType(
-        value,
-        value.base === base || value.base === 'na' || (base === 'float' && value.base === 'int'),
-        this.fn,
-        name,
-        `const ${base}`,
-      );
-    this.c.needQual(value, CONST, this.fn, name, value.base);
-    if (!value.fold) {
-      if (!this.c.strict) return fallback;
-      return this.c.fail(`The '${name}' argument of '${this.fn}' must be a constant`, value.span);
-    }
-    return value.fold({ inputs: [] });
-  }
-
-  get span(): Span {
-    return this.call.span;
-  }
-}
-
-const qualWord = (max: Qual, base: string) => `${QUAL_NAMES[max]} ${base}`;
-
 // ---- calls ----
 
 export function compileCall(c: Compiler, call: Call, scope: Scope): Compiled {
@@ -531,11 +375,52 @@ export function compileCall(c: Compiler, call: Call, scope: Scope): Compiled {
   return handler(c, call, scope);
 }
 
-type Handler = (c: Compiler, call: Call, scope: Scope) => Compiled;
-
 const CALLS: Record<string, Handler> = {
   indicator: indicatorCall,
-  strategy: (c, call) => c.fail('Strategies come later (P3)', call.calleeSpan),
+  library: libraryCall,
+  strategy: (c, call) =>
+    c.fail(
+      '"strategy" isn\'t supported in tradingNerd yet: strategies come with the Strategy Tester in a later update',
+      call.calleeSpan,
+    ),
+  // v4's iff(): both values are worked out on every bar, then one picked (v5 guide).
+  __iff: (c, call, scope) => {
+    const args = new Args(c, call, scope, ['condition', 'then', 'else'], 3);
+    const cond = c.condition(args.get('condition') as Compiled);
+    const then = args.get('then') as Compiled;
+    const otherwise = args.get('else') as Compiled;
+    const base = unify(then.base, otherwise.base);
+    if (!base) {
+      return c.fail(
+        `iff()'s two values must have the same type, not '${then.base}' and '${otherwise.base}'`,
+        call.span,
+      );
+    }
+    const cv = cond.ev;
+    const t = castTo(then, base);
+    const o = castTo(otherwise, base);
+    return {
+      base,
+      qual: maxQual(cond.qual, then.qual, otherwise.qual),
+      ev: (rt) => {
+        const x = t(rt);
+        const y = o(rt);
+        return (cv(rt) as boolean) ? x : y;
+      },
+      span: call.span,
+    };
+  },
+  // v4's rsi(x, y): RSI for an int length; with a float, MFI's formula (v5 guide).
+  __rsi_v4: (c, call, scope) => {
+    const second = call.args[1];
+    const kind = second ? c.expr(second.value, scope).base : 'int';
+    if (kind === 'int')
+      return (CALLS['ta.rsi'] as Handler)(c, { ...call, callee: 'ta.rsi' }, scope);
+    const args = new Args(c, call, scope, ['x', 'y'], 2);
+    const x = args.number('x') as NumEv;
+    const y = args.number('y') as NumEv;
+    return series('float', (rt) => 100 - 100 / (1 + x(rt) / y(rt)), call.span);
+  },
   input: (c, call, scope) => inputCall(c, call, scope, null),
   'input.int': (c, call, scope) => inputCall(c, call, scope, 'int'),
   'input.float': (c, call, scope) => inputCall(c, call, scope, 'float'),
@@ -570,12 +455,15 @@ const CALLS: Record<string, Handler> = {
     const args = new Args(c, call, scope, ['x'], 1);
     const x = args.get('x') as Compiled;
     const ev = x.ev;
+    if (x.base === 'bool' && c.version >= 6) {
+      c.fail("na() doesn't take a bool in Pine v6: a bool is always true or false", x.span);
+    }
     const isNa =
       x.base === 'bool'
         ? () => false
-        : x.base === 'string'
-          ? (v: Value) => v === null
-          : (v: Value) => Number.isNaN(v as number);
+        : isNumeric(x.base) || x.base === 'color'
+          ? (v: Value) => typeof v === 'number' && Number.isNaN(v)
+          : (v: Value) => v === null || (typeof v === 'number' && Number.isNaN(v));
     return {
       base: 'bool',
       qual: x.qual,
@@ -614,6 +502,9 @@ const CALLS: Record<string, Handler> = {
   },
   fixnan: (c, call, scope) => {
     const args = new Args(c, call, scope, ['source'], 1);
+    if (args.get('source')?.base === 'bool' && c.version >= 6) {
+      c.fail("fixnan() doesn't take a bool in Pine v6", call.span);
+    }
     const source = args.number('source') as NumEv;
     const fn = c.rt.register(new FixnanFn());
     return series('float', (rt) => fn.call(source(rt), rt.final), call.span);
@@ -644,7 +535,22 @@ const CALLS: Record<string, Handler> = {
   ...mathCalls(),
   ...colorCalls(),
   ...taCalls(),
+  ...collectionCalls(),
 };
+
+/** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
+export const isBuiltinNamespace = (name: string): boolean => name in CALLS;
+
+/** Where a value's built-in methods live: `arr.push()` is `array.push(arr)`. */
+export function methodNamespace(base: Base): string | null {
+  if (base.startsWith('array<')) return 'array';
+  if (base.startsWith('matrix<')) return 'matrix';
+  if (base.startsWith('map<')) return 'map';
+  if (['label', 'line', 'box', 'table', 'linefill', 'polyline', 'chart.point'].includes(base)) {
+    return base;
+  }
+  return null;
+}
 
 /** int(), float(), bool(), color(), string(): Pine's casts. */
 function cast(c: Compiler, call: Call, scope: Scope, to: Base): Compiled {
@@ -707,18 +613,14 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
   const timeframe = args.constant('timeframe', '', 'string');
   if (timeframe !== '' && timeframe !== null) {
     c.fail(
-      'Indicators on another timeframe come later (P2): leave timeframe = ""',
+      'An indicator on another timeframe isn\'t supported in tradingNerd yet: leave timeframe = ""',
       args.get('timeframe')?.span as Span,
     );
   }
-  if (args.has('scale'))
-    c.fail("Scales other than the script's own come later (P2)", args.get('scale')?.span as Span);
-  if (args.has('calc_bars_count')) {
-    c.fail(
-      'calc_bars_count comes later (P2): the script runs on every bar',
-      args.get('calc_bars_count')?.span as Span,
-    );
-  }
+  // scale and calc_bars_count are taken; the script draws on its own scale over every bar
+  // (provisional, docs/SPEC.md §11).
+  args.get('scale');
+  args.get('calc_bars_count');
   const format = args.constant('format', 'inherit', 'string');
   if (!(FORMATS as readonly unknown[]).includes(format)) {
     c.fail(
@@ -741,6 +643,24 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     overlay: args.constant('overlay', false, 'bool') === true,
     format: format as string,
     precision: typeof precision === 'number' && !Number.isNaN(precision) ? precision : null,
+    library: false,
+    span: call.span,
+  };
+  return { base: 'void', qual: CONST, ev: () => null, span: call.span };
+}
+
+/** library(): a library's declaration; on the chart it draws what its own code plots. */
+function libraryCall(c: Compiler, call: Call, scope: Scope): Compiled {
+  if (c.indicator) c.fail('A script can only have one declaration statement', call.calleeSpan);
+  const args = new Args(c, call, scope, ['title', 'overlay', 'dynamic_requests'], 1);
+  const title = String(args.constant('title', '', 'string') ?? '');
+  c.indicator = {
+    title,
+    shorttitle: title,
+    overlay: args.constant('overlay', false, 'bool') === true,
+    format: 'inherit',
+    precision: null,
+    library: true,
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };
@@ -801,6 +721,23 @@ function inputCall(
 ): Compiled {
   // input.int and input.float take options in third place when the call gives a list there.
   let names = INPUT_NAMES[kind ?? 'generic'] as readonly string[];
+  // v4 and older: input() took minval, maxval, step and options whatever its type (v4 reference).
+  if (kind === null && c.version <= 4) {
+    names = [
+      'defval',
+      'title',
+      'minval',
+      'maxval',
+      'confirm',
+      'step',
+      'options',
+      'tooltip',
+      'inline',
+      'group',
+      'display',
+      'active',
+    ];
+  }
   const third = call.args[2];
   if (
     (kind === 'int' || kind === 'float') &&

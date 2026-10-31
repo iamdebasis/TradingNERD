@@ -244,25 +244,29 @@ describe('Pine’s compile errors, in its own words where it has them (Pine docs
     );
   });
 
-  it('wants //@version=6, an indicator() and something drawn', () => {
-    expect(compileError('indicator("x")\nplot(close)').message).toMatch(/Add \/\/@version=6/);
-    expect(compileError('//@version=5\nindicator("x")\nplot(close)').message).toMatch(
-      /v5: tradingNerd runs v6/,
+  it('takes versions 1 to 6, wants a declaration and something drawn', () => {
+    expect(compileError('//@version=7\nindicator("x")\nplot(close)').message).toMatch(
+      /v7 doesn't exist: the versions are 1 to 6/,
     );
-    expect(compileError('//@version=6\nplot(close)').message).toMatch(/must declare indicator\(\)/);
+    expect(compileError('//@version=6\nplot(close)').message).toMatch(
+      /must declare indicator\(\) or library\(\)/,
+    );
     expect(compileError('//@version=6\nindicator("x")\na = 1').message).toMatch(
       /must draw something/,
     );
   });
 
-  it('says which features come later', () => {
+  it('says plainly what tradingNerd doesn\u2019t run yet, without milestone codes', () => {
     expect(error('label.new(bar_index, high, "x")\nplot(close)')).toMatch(
-      /Drawings come later \(P3\)/,
+      /isn't supported in tradingNerd yet: drawings/,
     );
-    expect(error('x = request.security("BTC", "D", close)\nplot(x)')).toMatch(/comes later \(P2\)/);
+    expect(error('x = request.security("BTC", "D", close)\nplot(x)')).toMatch(
+      /other symbols and timeframes/,
+    );
     expect(compileError('//@version=6\nstrategy("x")\nplot(close)').message).toMatch(
-      /Strategies come later/,
+      /Strategy Tester/,
     );
+    expect(error('label.new(bar_index, high, "x")\nplot(close)')).not.toMatch(/\(P\d\)/);
   });
 
   it('points at where the error is', () => {
