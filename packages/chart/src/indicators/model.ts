@@ -8,12 +8,16 @@ import type {
 } from '@tradingnerd/indicators';
 import { LineStyle, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { formatVolume } from '../format';
+import type { ChartScript } from './script';
 
-/** An indicator on the chart, as the app keeps it (docs/SPEC.md §6.16). */
+/** An indicator on the chart, as the app keeps it (docs/SPEC.md §6.16, §6.17). */
 export interface ChartIndicator {
   /** The instance's own id: its row in the legend. */
   id: string;
-  kind: IndicatorKind;
+  /** A built-in's kind, or a Pine script's ("script", its code in `script`). */
+  kind: IndicatorKind | 'script';
+  /** A script's code as it went on the chart, and where it came from. */
+  script?: ChartScript;
   settings: IndicatorSettings;
   /** The legend's eye: a hidden indicator draws nothing, but keeps its pane. */
   hidden: boolean;
@@ -48,7 +52,9 @@ export function formatIndicatorValue(value: number, format: ValueFormat): string
   if (!Number.isFinite(value)) return NO_VALUE;
   if (format.kind === 'volume') return formatVolume(value, format.decimals);
   const text = Math.abs(value).toFixed(format.decimals);
-  return value < 0 && Number(text) !== 0 ? `${MINUS}${text}` : text;
+  const signed = value < 0 && Number(text) !== 0 ? `${MINUS}${text}` : text;
+  // A script's format.percent writes its values with a percent sign.
+  return format.kind === 'percent' ? `${signed}%` : signed;
 }
 
 /** "#RRGGBB" at an opacity, as a CSS color. */

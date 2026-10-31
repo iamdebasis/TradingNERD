@@ -11,6 +11,7 @@ export * from './protocol.ts';
 export * from './resample.ts';
 export * from './resolution.ts';
 export * from './schedule.ts';
+export * from './scripts.ts';
 export * from './search.ts';
 export * from './stocks.ts';
 export * from './ticks.ts';

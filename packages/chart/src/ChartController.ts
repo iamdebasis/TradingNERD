@@ -1,6 +1,7 @@
 import {
   type Bar,
   type BarClock,
+  formatResolution,
   isIntraday,
   type PriceFormat,
   type Resolution,
@@ -67,6 +68,15 @@ const PANE_SEPARATOR = 1;
 export interface ChartInstrument {
   pricePrecision: number;
   tickSize: number;
+  /** What a Pine script knows of the symbol (syminfo.*; docs/SPEC.md §6.17). */
+  ticker?: string;
+  /** "BINANCE:XRPUSDT" */
+  tickerid?: string;
+  description?: string;
+  /** Pine's syminfo.type: "crypto", "stock", "fund", "index", "spread". */
+  symbolType?: string;
+  /** The currency its prices are in. */
+  currency?: string;
   /** How prices are written: market caps in thousands to trillions ("price" when absent). */
   format?: PriceFormat;
   resolution: Resolution;
@@ -374,10 +384,23 @@ export class ChartController {
         },
       },
     });
-    this.indicators.setSymbol({
-      base: instrument.base ?? '',
-      hasVolume: instrument.hasVolume ?? true,
-    });
+    this.indicators.setSymbol(
+      { base: instrument.base ?? '', hasVolume: instrument.hasVolume ?? true },
+      {
+        symbol: {
+          ticker: instrument.ticker ?? '',
+          tickerid: instrument.tickerid ?? '',
+          description: instrument.description ?? '',
+          type: instrument.symbolType ?? 'crypto',
+          basecurrency: instrument.base ?? '',
+          currency: instrument.currency ?? '',
+          mintick: tickSize,
+          timeframe: formatResolution(resolution),
+          hasVolume: instrument.hasVolume ?? true,
+        },
+        priceDecimals: precision,
+      },
+    );
     this.chart.applyOptions({
       localization: {
         locale: 'en-US',
@@ -459,6 +482,11 @@ export class ChartController {
   /** Each indicator's values on bar `index` (HoverInfo.index), NaN where none shows. */
   indicatorValues(index: number): IndicatorValues[] {
     return this.indicators.valuesAt(index);
+  }
+
+  /** Why each script on the chart draws nothing, by its id: its compile or runtime error. */
+  indicatorErrors(): Map<string, string> {
+    return this.indicators.errors();
   }
 
   /**

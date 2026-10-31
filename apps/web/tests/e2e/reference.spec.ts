@@ -111,7 +111,8 @@ test.describe('matches the TradingView reference pixels', () => {
   });
 
   test('screenshot scale matches the reference', () => {
-    expect(ours.width).toBe(1634 * 2);
+    // The reference's width, plus the right toolbar it doesn't show (playwright.config.ts).
+    expect(ours.width).toBe((1634 + 48) * 2);
     expect(reference.width).toBe(3262);
   });
 

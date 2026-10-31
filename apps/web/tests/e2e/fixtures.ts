@@ -635,7 +635,36 @@ export interface MockMarket {
   sendBarsState(state: 'live' | 'reconnecting'): Promise<void>;
   /** Drops the page's WebSocket, like a gateway restart. */
   drop(): Promise<void>;
+  /** My scripts, as /api/scripts serves them (apps/gateway/src/routes/scripts.ts). */
+  scripts: MockScript[];
+  /** Every script save the page made: POST for a new one, PUT for a new version. */
+  readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[];
 }
+
+/** One of My scripts in the mock, every version kept. */
+export interface MockScript {
+  id: string;
+  name: string;
+  from: 'rsi' | 'volume' | null;
+  versions: { version: number; savedAt: number; source: string }[];
+}
+
+const scriptSummary = (script: MockScript) => {
+  const last = script.versions.at(-1) as MockScript['versions'][number];
+  return {
+    id: script.id,
+    name: script.name,
+    from: script.from,
+    version: last.version,
+    savedAt: last.savedAt,
+  };
+};
+
+const savedScript = (script: MockScript) => ({
+  ...scriptSummary(script),
+  source: (script.versions.at(-1) as MockScript['versions'][number]).source,
+  versions: script.versions.map(({ version, savedAt }) => ({ version, savedAt })),
+});
 
 export interface MockList {
   id: string;
@@ -714,6 +743,9 @@ class MockGateway implements MockMarket {
   readonly flagSaves: FlagState[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
+  scripts: MockScript[] = [];
+  readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[] = [];
+  private nextScript = 1;
   private readonly page: Page;
   private socket: WebSocketRoute | null = null;
   private openCount = 0;
@@ -869,6 +901,56 @@ class MockGateway implements MockMarket {
         return route.fulfill({ json: this.index() });
       }
       return bad();
+    });
+    // My scripts, as the gateway keeps them (apps/gateway/src/routes/scripts.ts).
+    await this.page.route(/\/api\/scripts(\/[^?]*)?$/, (route) => {
+      const request = route.request();
+      const method = request.method();
+      const [, id, versions, number] = new URL(request.url()).pathname.split('/').slice(2);
+      const missing = () =>
+        route.fulfill({
+          status: 404,
+          json: { error: 'not_found', message: 'There is no such script' },
+        });
+      // Saved a minute apart from the tests' fixed clock.
+      const now = NOW + this.scriptSaves.length * 60_000;
+      if (!id) {
+        if (method === 'GET') {
+          const scripts = [...this.scripts].sort(
+            (a, b) => scriptSummary(b).savedAt - scriptSummary(a).savedAt,
+          );
+          return route.fulfill({ json: { scripts: scripts.map(scriptSummary) } });
+        }
+        const body = request.postDataJSON() as Record<string, unknown>;
+        this.scriptSaves.push({ method: 'POST', body });
+        const script: MockScript = {
+          id: `s-${this.nextScript++}`,
+          name: String(body.name).trim(),
+          from: body.from === 'rsi' || body.from === 'volume' ? body.from : null,
+          versions: [{ version: 1, savedAt: now, source: String(body.source) }],
+        };
+        this.scripts.push(script);
+        return route.fulfill({ json: savedScript(script) });
+      }
+      const script = this.scripts.find((item) => item.id === id);
+      if (!script) return missing();
+      if (versions === 'versions') {
+        const found = script.versions.find((item) => item.version === Number(number));
+        return found ? route.fulfill({ json: found }) : missing();
+      }
+      if (method === 'PUT') {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        this.scriptSaves.push({ method: 'PUT', body });
+        const last = script.versions.at(-1) as MockScript['versions'][number];
+        if (last.source !== body.source) {
+          script.versions.push({
+            version: last.version + 1,
+            savedAt: now,
+            source: String(body.source),
+          });
+        }
+      }
+      return route.fulfill({ json: savedScript(script) });
     });
     await this.page.route(/\/api\/bars\?/, (route) => {
       const params = new URL(route.request().url()).searchParams;
@@ -1203,10 +1285,14 @@ export interface ChartState {
     kind: string;
     hidden: boolean;
     pane: number;
-    plots: { id: string; start: number; points: number; ghost: boolean }[];
+    plots: { id: string; start: number; points: number; ghost: boolean; type: string }[];
     levels: number;
     fills: { id: string; gradient: boolean }[];
+    /** A script's backgrounds, by id. */
+    backgrounds: string[];
     valueLabels: string[];
+    /** What stopped a script, if anything did. */
+    error: string | null;
   }[];
   panes: { height: number; stretch: number; autoScale: boolean }[];
 }

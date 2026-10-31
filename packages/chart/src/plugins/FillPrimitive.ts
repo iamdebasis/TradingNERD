@@ -11,7 +11,7 @@ import type {
 import type { DrawTarget } from './axisLabel';
 
 /** One side of a band: a plot's value on each bar, or a fixed price. */
-export type BandEdge = readonly number[] | number;
+export type BandEdge = ArrayLike<number> | number;
 
 /**
  * Pine's gradient fill: `topColor` at price `top`, `bottomColor` at `bottom`, in a straight line
@@ -22,6 +22,11 @@ export interface GradientPaint {
   bottom: number;
   topColor: string;
   bottomColor: string;
+}
+
+/** A script's fill whose color changes from bar to bar: its color at each bar, or none. */
+export interface BarColors {
+  at(i: number): string | null;
 }
 
 /**
@@ -36,7 +41,7 @@ export type FillShape =
       upper: BandEdge;
       lower: BandEdge;
       start: number;
-      color: string | GradientPaint;
+      color: string | GradientPaint | BarColors;
     };
 
 /**
@@ -92,6 +97,8 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
           if (a === null || b === null) continue;
           ctx.fillStyle = shape.color;
           ctx.fillRect(0, Math.min(a, b), mediaSize.width, Math.abs(b - a));
+        } else if (typeof shape.color === 'object' && 'at' in shape.color) {
+          this.drawColoredBand(ctx, chart, series, shape, shape.color);
         } else {
           const paint = this.paint(ctx, series, shape.color);
           if (paint === null) continue;
@@ -117,6 +124,49 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
     gradient.addColorStop(0, color.topColor);
     gradient.addColorStop(1, color.bottomColor);
     return gradient;
+  }
+
+  /**
+   * A band whose color changes from bar to bar: each stretch between two bars in the color of
+   * the later one (as we read Pine's fill; provisional, docs/SPEC.md §11).
+   */
+  private drawColoredBand(
+    ctx: CanvasRenderingContext2D,
+    chart: IChartApi,
+    series: ISeriesApi<SeriesType>,
+    shape: Extract<FillShape, { kind: 'plots' }>,
+    colors: BarColors,
+  ): void {
+    const timeScale = chart.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    if (!range) return;
+    const last = Math.min(edgeLength(shape.upper), edgeLength(shape.lower)) - 1;
+    const from = Math.max(shape.start, Math.floor(range.from) - 1, 0);
+    const to = Math.min(last, Math.ceil(range.to) + 1);
+    let before: { x: number; upper: number; lower: number } | null = null;
+    for (let i = from; i <= to; i++) {
+      const high = edgeAt(shape.upper, i);
+      const low = edgeAt(shape.lower, i);
+      const x = timeScale.logicalToCoordinate(i as Logical);
+      const upper = Number.isFinite(high) ? series.priceToCoordinate(high) : null;
+      const lower = Number.isFinite(low) ? series.priceToCoordinate(low) : null;
+      if (x === null || upper === null || lower === null) {
+        before = null;
+        continue;
+      }
+      const color = colors.at(i);
+      if (before && color !== null) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(before.x, before.upper);
+        ctx.lineTo(x, upper);
+        ctx.lineTo(x, lower);
+        ctx.lineTo(before.x, before.lower);
+        ctx.closePath();
+        ctx.fill();
+      }
+      before = { x, upper, lower };
+    }
   }
 
   /** The band between two plots over the bars in view, one polygon per run of values. */

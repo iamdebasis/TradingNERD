@@ -9,28 +9,42 @@ import { useGateway, useGatewayStatus } from '../data/GatewayContext';
 import { IndicatorsDialog } from '../indicators/IndicatorsDialog';
 import { indicatorStore } from '../indicators/indicatorStore';
 import { isEditable } from '../lib/dom';
-import { writeJson } from '../lib/storage';
+import { readJson, writeJson } from '../lib/storage';
 import { useLogos } from '../logos/LogoContext';
 import { LogoDialog } from '../logos/LogoDialog';
 import { OlderCapsDialog } from '../olderCaps/OlderCapsDialog';
+import { PineEditor } from '../pine/PineEditor';
+import { pineStore, usePine } from '../pine/pineStore';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { searchKey } from '../search/searchPrefs';
 import { useStockKeys } from '../stocks/stockKeys';
 import { Toolbar } from '../toolbar/Toolbar';
 import { Watchlist } from '../watchlist/Watchlist';
 import styles from './AppShell.module.css';
+import { type RightPanel, RightToolbar } from './RightToolbar';
 import { Splitter } from './Splitter';
+import { usePanelWidth } from './usePanelWidth';
 import { useWatchlistWidth } from './useWatchlistWidth';
+import { PINE_DEFAULT_WIDTH, PINE_MIN_WIDTH } from './watchlistWidth';
 
 /** Where the last interval and symbol are remembered, for a page opened without them. */
 export const LAST_INTERVAL_KEY = 'tn.chart.interval';
 export const LAST_SYMBOL_KEY = 'tn.chart.symbol';
+/** Whether the watchlist panel is open (the right toolbar's Watchlist button). */
+export const WATCHLIST_OPEN_KEY = 'tn.layout.watchlistOpen';
+const PINE_WIDTH_KEY = 'tn.layout.pineWidth';
 
 export function AppShell({ route }: { route: ChartRoute }) {
   const gateway = useGateway();
   const gatewayStatus = useGatewayStatus();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const watchlist = useWatchlistWidth(workspaceRef);
+  const pineWidth = usePanelWidth(workspaceRef, PINE_WIDTH_KEY, PINE_DEFAULT_WIDTH, PINE_MIN_WIDTH);
+  const pine = usePine();
+  const [watchlistOpen, setWatchlistOpen] = useState(() => readJson(WATCHLIST_OPEN_KEY) !== false);
+  // One panel at a time on the right: the Pine Editor over the watchlist while it's open.
+  const rightPanel: RightPanel | null = pine.open ? 'pine' : watchlistOpen ? 'watchlist' : null;
+  const panelWidth = rightPanel === 'pine' ? pineWidth : watchlist;
   const [resolution, setResolution] = useState(route.resolution);
   const [symbol, setSymbol] = useState(route.symbol);
   const [prompt, setPrompt] = useState<string | null>(null);
@@ -117,7 +131,22 @@ export function AppShell({ route }: { route: ChartRoute }) {
   // During a drag the splitter writes the width straight to this CSS variable once per frame,
   // with no React render; React takes over again when the drag commits.
   const previewWidth = (width: number) => {
-    workspaceRef.current?.style.setProperty('--watchlist-width', `${width}px`);
+    workspaceRef.current?.style.setProperty('--panel-width', `${width}px`);
+  };
+
+  const showWatchlist = (open: boolean) => {
+    setWatchlistOpen(open);
+    writeJson(WATCHLIST_OPEN_KEY, open);
+  };
+  const togglePanel = (panel: RightPanel) => {
+    if (panel === 'pine') {
+      pineStore.setOpen(!pine.open);
+    } else if (pine.open) {
+      pineStore.setOpen(false);
+      showWatchlist(true);
+    } else {
+      showWatchlist(!watchlistOpen);
+    }
   };
 
   return (
@@ -153,53 +182,68 @@ export function AppShell({ route }: { route: ChartRoute }) {
           onClose={() => setSearching(null)}
         />
       )}
-      <div
-        ref={workspaceRef}
-        className={styles.workspace}
-        style={{ '--watchlist-width': `${watchlist.width}px` } as CSSProperties}
-      >
-        <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
-          <ChartPane symbol={symbol} resolution={resolution} onInfo={setChartInfo} />
-          {prompt !== null && (
-            <IntervalPrompt
-              initial={prompt}
-              onSubmit={(next) => {
-                setPrompt(null);
-                if (next !== resolution) changeInterval(next);
-              }}
-              onClose={() => setPrompt(null)}
+      <div className={styles.main}>
+        <div
+          ref={workspaceRef}
+          className={styles.workspace}
+          style={{ '--panel-width': `${panelWidth.width}px` } as CSSProperties}
+        >
+          <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
+            <ChartPane symbol={symbol} resolution={resolution} onInfo={setChartInfo} />
+            {prompt !== null && (
+              <IntervalPrompt
+                initial={prompt}
+                onSubmit={(next) => {
+                  setPrompt(null);
+                  if (next !== resolution) changeInterval(next);
+                }}
+                onClose={() => setPrompt(null)}
+              />
+            )}
+          </main>
+          {rightPanel && (
+            <Splitter
+              key={rightPanel}
+              width={panelWidth.width}
+              min={panelWidth.min}
+              max={panelWidth.max}
+              onPreview={previewWidth}
+              onCommit={panelWidth.commit}
             />
           )}
-        </main>
-        <Splitter
-          width={watchlist.width}
-          min={watchlist.min}
-          max={watchlist.max}
-          onPreview={previewWidth}
-          onCommit={watchlist.commit}
-        />
-        {logoDialog && (
-          <LogoDialog
-            firstLaunch={logoDialog === 'first-launch'}
-            onClose={() => setLogoDialog(null)}
-          />
-        )}
-        {olderCapsOpen && (
-          <OlderCapsDialog onStatus={setOlderCaps} onClose={() => setOlderCapsOpen(false)} />
-        )}
-        <aside className={`${styles.panel} ${styles.watchlist}`} aria-label="Watchlist">
-          <Watchlist
-            symbol={symbol}
-            onChoose={changeSymbol}
-            quotes={gateway}
-            moreItems={watchlistMenu}
-            moreNote={
-              olderCaps?.from
-                ? 'Data provided by CoinGecko and Live Coin Watch'
-                : 'Data provided by CoinGecko'
-            }
-          />
-        </aside>
+          {logoDialog && (
+            <LogoDialog
+              firstLaunch={logoDialog === 'first-launch'}
+              onClose={() => setLogoDialog(null)}
+            />
+          )}
+          {olderCapsOpen && (
+            <OlderCapsDialog onStatus={setOlderCaps} onClose={() => setOlderCapsOpen(false)} />
+          )}
+          {rightPanel === 'pine' && (
+            <aside className={`${styles.panel} ${styles.side}`} aria-label="Pine Editor panel">
+              <PineEditor onClose={() => pineStore.setOpen(false)} />
+            </aside>
+          )}
+          <aside
+            className={`${styles.panel} ${styles.side}`}
+            aria-label="Watchlist"
+            hidden={rightPanel !== 'watchlist'}
+          >
+            <Watchlist
+              symbol={symbol}
+              onChoose={changeSymbol}
+              quotes={gateway}
+              moreItems={watchlistMenu}
+              moreNote={
+                olderCaps?.from
+                  ? 'Data provided by CoinGecko and Live Coin Watch'
+                  : 'Data provided by CoinGecko'
+              }
+            />
+          </aside>
+        </div>
+        <RightToolbar open={rightPanel} onToggle={togglePanel} />
       </div>
     </div>
   );

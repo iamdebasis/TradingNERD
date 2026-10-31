@@ -27,8 +27,9 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 4. **Logos:** coin and exchange logos from CoinGecko (§5.5).
 5. **US stocks and funds (M7):** every US-listed stock and ETF, charted and in the watchlist, 15 minutes delayed on Alpaca's free plan (§5.7).
 6. **Indicators (I1 onward):** TradingView's Indicators button and dialog, built-ins with their legend rows, settings and panes; I1 brings the framework with Volume and RSI (§5.15), more built-ins follow (§8).
+7. **Pine Script (P1 onward):** TradingView's Pine Editor, opened from the right toolbar or an indicator's Source code button (`{}`). A built-in's code is editable at once, its original kept; Reset to original; Add to chart and Update on chart; Save into My scripts, every save a version; My scripts in the Indicators dialog. Scripts run on our own Pine v6 engine (§5.16).
 
-**Not in v1:** drawing tools, Pine Script itself (its editor, personal and community scripts), strategies, alerts, replay, multi-chart layouts, trading, forex, perpetual futures, and TradingView's right-hand icon bar.
+**Not in v1:** drawing tools, community scripts and publishing, strategies, alerts, replay, multi-chart layouts, trading, forex and perpetual futures. TradingView's right toolbar has only its Watchlist and Pine Editor buttons.
 
 ## 3. Decision log
 
@@ -179,6 +180,21 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-27 | **RSI's gradient fills:** between the RSI and a hidden line at 50, green from clear at 70 to solid at 100, red from clear at 30 to solid at 0, so only what's beyond 70 or 30 shows; each a Style row with its top and bottom colors | The built-in's own code, in your screenshot of TradingView's Pine Editor (27 October); the titles, cut off there, from a copy of that code in a public GitHub issue. Closes §11, item 69. |
 | 2026-10-27 | **The legend writes an indicator's inputs dimmer than its name** ("RSI" bright, "14 close" in the secondary text color) | Measured from your screenshot of 27 October (downscaled, so provisional: §11, item 70). |
 | 2026-10-27 | **Fills draw under plots, levels over them** | Pine's own z-order: background colors, fills, plots, levels (Pine docs, Visuals overview); I1 already drew them so. |
+| 2026-10-31 | **Pine Script comes into scope with P1** (§5.16): the Pine Editor as a side panel, a built-in's code editable as a copy, Add to chart and Update on chart, Save into My scripts with versions | Your YES to P1 of the plan of 27 October, after the research (§4.16). |
+| 2026-10-31 | **Our own Pine v6 engine** (`packages/pine`, TypeScript): it reads, checks and runs scripts bar by bar as Pine does, its `ta.*` built on I1's kernels | The open engines are AGPL (PineTS) or GPL (OpenPineScript); the MIT ones are young and untested. Ours reuses kernels already checked against TradingView in I1. |
+| 2026-10-31 | **Only `//@version=6` runs**; an older or missing version is an error that says so | v5 and older give other numbers for the same code (int division, `and`/`or` evaluation, a `for` loop's end, na bools: Pine's v6 migration guide). A clear message beats wrong values. |
+| 2026-10-31 | **RSI's Pine code is our own** (`packages/indicators/src/rsi.pine.ts`), written to compute exactly what the built-in computes, not TradingView's text. A test runs it against the built-in bar for bar: 20,000 bars, all seven smoothings, two sources, without volume, through ticks, new bars and corrections; identical | The repository is public. Measured: identical on every bar (§4.16). |
+| 2026-10-31 | **Built-ins keep running on TypeScript**; their Pine code is a copy to read and edit, which runs as a script | They stay as checked in I1, and stay fast (RSI: 7 ms over 20,000 bars, its script 20 ms). |
+| 2026-10-31 | **Your model for a built-in's code:** editable at once; a banner, "Built-in script. Your edits make a copy; the original stays as it is."; Reset to original once edited, an edit that Undo takes back; the unsaved code kept in this browser through closing and reloads; Save makes it one of My scripts | Your model (27 October): TradingView's guarantee (the original never changes) without its Make a copy step. |
+| 2026-10-31 | **The warm-up rule for scripts:** three check runs beside the script's own (one starting a bar later; one with bar 0 1% higher; one with bars 0 and 1 a thousand times higher and lower). A value is drawn from where every check agrees with ours (within a billionth of their largest difference, or rounding) and none still shows the far-off first bars; when our first bar is the listing, every value | Generalizes I1's rule (§3, 26 October) to any script. Measured on RSI's code against a run with 3,000 more bars of history: within 6 billionths of an RSI point from where it starts drawing (§4.16). The checks and their thresholds are ours, provisional (§11, item 75). |
+| 2026-10-31 | **A script's RSI-based MA (EMA, SMMA) starts 138 and 238 bars earlier than the built-in's**, as accurate | Measured (§4.16): I1's rule for those two is cautious. Whether the built-in should follow is your call (§11, item 76). |
+| 2026-10-31 | **A script on the chart keeps a snapshot of its code**; Update on chart replaces it, keeping the inputs and looks the new code still has. The chart's indicators are kept as version 2 (`tn.chart.indicators`); a version 1 list reads as it is | TradingView's Add to chart puts a draft on the chart, and Update on chart changes it (Help Center). |
+| 2026-10-31 | **A script's styles keep only what its Style tab changed**; the rest follows the code, so a color from an input keeps following the input | Ours, provisional (§11, item 77): TradingView doesn't say which wins. |
+| 2026-10-31 | **My scripts are kept by the gateway in `data/scripts.json`**, written whole: every save that changes the code is a new version, numbered from 1; a name already taken gets " 2"; up to 500 scripts and 1,000 versions each. Protocol v11 | Your YES (`data/scripts.json`); TradingView numbers a script's saves as versions (Help Center, "How to apply an older version of an indicator"). |
+| 2026-10-31 | **The right toolbar** holds Watchlist and Pine Editor; one panel shows at a time on the right, each at its own width | Your YES; TradingView's Pine button has been on its right toolbar since August 2025 (Pine release notes). |
+| 2026-10-31 | **Monaco** (MIT, 0.57.0) runs the editor, loaded the first time the Pine Editor opens, with only its own editor worker: no language packs, nothing from a CDN, about 1 MB gzipped from our own bundle | Your YES; TradingView's editor is Monaco (blog, 2022). |
+| 2026-10-31 | **Pine's documented defaults:** a plot without a color is `color.blue`; bool and color inputs stay out of the status line unless `display` says otherwise; `x % 0` is `x`, by the Pine docs' own formula | Pine docs: Colors; Inputs; Operators. |
+| 2026-10-31 | **Not documented, so provisional:** an hline without a color is gray and dashed, a fill blue at 90% transparency; an untitled plot is "Plot"; an input's step is 1; a fill whose color changes colors each stretch by its later bar; areas fill to the pane's bottom; crosses draw as circles; a value an offset puts past the last bar isn't drawn | §11, items 78–80. |
 
 ## 4. Research findings
 
@@ -432,6 +448,82 @@ Read from TradingView's public pages (never scripted), Pine's reference and manu
 **Measured here** (headless Chromium, no GPU; read the ratios): the math, 20,000 bars, about 1 ms for RSI 14 with its MA; panning 20,000 bars, the page's own drawing per frame median 1.5–1.8 ms without indicators and 3.1–3.4 ms with Volume and RSI, 95th percentile 7.3–7.8 ms and 11.4–11.6 ms (§11, item 67).
 
 **Still unknown, searched and not found:** Volume's colors and its share of the pane, and whether it has a label on the price scale; a new pane's height; the dialog's look and whether it stays open after adding; what the legend writes for na (we recall ∅); the settings dialog's look, its gradient fills' rows among them. All marked provisional (§11, items 62 and 70).
+
+### 4.16 The Pine Editor and Pine Script v6 (researched 2026-10-27 and 2026-10-31)
+
+Read from TradingView's public pages (never scripted), Pine's v6 user manual and reference (through GitHub copies, as its site doesn't load from here), and third-party guides where TradingView is silent (marked). Sources in §12.
+
+**TradingView's Pine Editor (its own sources):**
+
+| Topic | TradingView | Source |
+|---|---|---|
+| Where it opens | A side panel since August 2025: over the right of the screen, or beside the chart on wide screens; it can float, sit at the bottom or detach. The Pine button on the right toolbar opens it | Pine release notes (August 2025); Help Center, "How to work with Pine Editor" |
+| The editor | Monaco, VS Code's editor, since October 2022: the command palette (F1), suggestions, hover help, multiple cursors, find and replace, the minimap, word wrap (Alt/Option + Z) | Blog, "Pine Script has a new VSC-style editor"; Help Center, "Useful Pine Editor commands" |
+| Its header | The script's name and its menu (Save script, Make a copy, Rename, Version history, Create new: Indicator, Strategy, Library, Built-in…; Open script); Add to chart, or Update on chart once added (Ctrl/Cmd + Enter); Publish script; More (…) | Help Center, "How to work with Pine Editor", "How to create a new script" |
+| A built-in's code | Read-only, greyed, with the banner "This script is read-only. To edit its code you can make a copy."; a copy is a script of your own, the original never changes | Help Center, "I want to see the source code of a built-in script"; your screenshot |
+| Reaching the code | The legend's Source code button (`{}`), or Create new → Built-in… | Help Center; your screenshot |
+| Add to chart | Compiles; an unsaved script goes on the chart as a draft; later edits go on with Update on chart | Help Center, "How to create a new script" |
+| Save | Ctrl/Cmd + S or the menu; a new script asks for a name, its name in My scripts, apart from its `indicator()` title | Pine docs; TradingCode (third-party) |
+| Versions | Every save is a version, listed by date and time, older ones comparable and applicable | Help Center, "How to apply an older version of an indicator" |
+| Unsaved changes | Marks in the gutter against the last save; kept with the open scripts for next time | Blog, "Track unsaved changes in the Pine Editor" (2023); Help Center |
+| Errors | Red underlines for errors, orange for warnings, the message on hover, a console that goes to the line | Pine docs, Errors |
+| Status bar | The console's button; "47 · Sep 29, 17:40" (version and save time), "Line 1, Col 1", "Pine Script® v6" | Your screenshot |
+
+**Pine Script v6, as the engine runs it** (Pine's user manual and v6 reference):
+
+- **Execution:** each historical bar once, at its close; the live bar again on every update, from the last commit; the bar's closing update commits. `var` keeps its value from bar to bar, `varip` through the live bar's updates too. Each call of a function keeps its own history.
+- **Layout:** a local block is four spaces or a tab in; a line indented by any other amount continues the one before; commas separate statements on one line.
+- **Operators**, strongest first: `[]`; unary `+ − not`; `* / %`; `+ −`; `< > <= >=`; `== !=`; `and`; `or`; `?:`. `%` rounds the quotient down (`a − b × floor(a/b)`, so `x % 0` is `x`); an int divided by an int is a fraction; division by zero is na; a comparison with na is false.
+- **Types and qualifiers:** const < input < simple < series, an expression taking its strongest operand's; a later `:=` can make a variable a series. Only int becomes float by itself. A bool is never na; conditions must be bool. `and` and `or` stop early.
+- **Structures:** `if` and `switch` give na (false for a bool) when no block runs; `for … to … by` keeps its direction and works out its end again on every iteration; `while`; `break`, `continue`; tuples; functions in the global scope only, without recursion.
+- **Where outputs go:** `plot`, `hline`, `fill`, `bgcolor` and `indicator` only in the global scope; inputs anywhere.
+- **Defaults it documents:** `color.blue` for a plot without a color (Colors); bool and color inputs out of the status line (Inputs); `display.all` for everything else.
+- **Errors in its own words**, e.g. "Cannot call 'ta.ema' with argument 'length'='x'. An argument of 'series int' type was used but a 'simple int' is expected."
+
+**Not documented, so provisional (§11):** an hline's color and style without arguments (we use gray, dashed); a fill's color without one (blue at 90% transparency); an untitled plot's name in the Style tab; an input's step without one; how a fill whose color changes from bar to bar colors each stretch; how far an area fills; a cross's marker; whether a Style tab color overrides an input's.
+
+**The open engines:** PineTS (AGPL-3.0, with a paid licence), OpenPineScript (GPL-3.0), and two MIT ones started in 2026, without tests against TradingView. None is used.
+
+**Your screenshot of 27 October, measured** (downscaled, sRGB; the code is a read-only built-in's, which TradingView greys):
+
+| Part | Color |
+|---|---|
+| Editor and panel background | `#000000` |
+| Current line | `#142043` |
+| Line numbers, the current one | `#6B6B6B`, `#ACACAC` |
+| Names | `#D1D1D1` |
+| Built-in functions (`ta.rma`, `plot`) | `#7189B0` |
+| Numbers | `#C9AE97` |
+| Strings | `#567257` |
+| Keywords (`switch`, `var`, `and`) | `#6E9A8E` |
+| Operators | `#628177` |
+| Constants and the bar's values (`na`, `false`, `color.red`, `display.none`, `close`) | `#B08386` |
+| Comments | `#797979` |
+| Banner: background, its first words, its text, its mark | `#34261B`, `#C9813A`, `#AAA096`, `#F67E05` |
+
+**Measured here** (the cloud's machine, Node 26):
+
+| What | Result |
+|---|---|
+| RSI's code against the built-in, 20,000 bars, 7 smoothings × 2 sources | Identical on every bar |
+| RSI's code, one run over 20,000 bars | 20–35 ms (the built-in: 7 ms) |
+| The same with the warm-up checks | 81–85 ms |
+| A live tick with the checks | 6–11 µs |
+| Panning and zooming 20,000 bars with Volume and RSI, P1 against `main` on the same machine, three runs each | Median frame 2.7–3.1 ms (`main` 2.0–3.0); 95th percentile 13.8–14.5 ms (`main` 14.4–14.5): no slower |
+
+**The warm-up rule for scripts, measured** on RSI's code: bars 3,000–5,999 as ours, against a run over all 6,000 standing in for TradingView's longer history:
+
+| Plot | Ours from bar | Largest difference from there | The built-in from bar | Largest difference from there |
+|---|---|---|---|---|
+| RSI | 293 | 5.7 × 10⁻⁹ | 294 | 5.1 × 10⁻⁹ |
+| MA (SMA) | 306 | 3.6 × 10⁻⁹ | 307 | 3.3 × 10⁻⁹ |
+| Bands | 295–304 | 5.5 × 10⁻⁹ | 307 | 5.0 × 10⁻⁹ |
+| MA (EMA) | 314 | 2.5 × 10⁻⁹ | 452 | 8.5 × 10⁻¹⁴ |
+| MA (SMMA) | 349 | 2.3 × 10⁻⁹ | 587 | 0 |
+
+Both rules keep their values within a hundred-millionth of an RSI point of the longer history's, where the legend shows two decimals. The built-in's rule for a smoothed MA adds the average's whole settling after the RSI's, which the measurement shows isn't needed (§11, item 76).
+
+**Still unknown, searched and not found:** the editor's colors on code being edited, and its sizes at a known scale (§11, item 74).
 
 ## 5. Requirements (v1)
 
@@ -704,17 +796,35 @@ Read from TradingView's public pages (never scripted), Pine's reference and manu
 - **Done when:** hand checks H1–H7 against TradingView pass (RSI and its MA to the last digit on closed bars of BINANCE:XRPUSDT 1D, Volume on 5 days), every test passes on the Mac, the budgets hold, the chart page's screenshot is renewed for the new Indicators button (looked at first) and the other twelve are unchanged.
 - **Status (27 October):** built in a cloud session and committed on `claude/keen-allen-7wubfe` (`01cbe33`); its gaps (the output and input values, RSI's gradient fills, browser tests for formulas, ticks, a stock's session and a reconnect) closed on 27 October, not yet committed. Unit and browser tests pass there (the browser's platform-only failures aside); the Mac's run, its budgets, the hand checks and the screenshots asked for in §11 (item 62) remain.
 
+### 5.16 Pine Script and the Pine Editor (P1)
+
+- **The right toolbar:** Watchlist and Pine Editor buttons at the window's right edge; the lit one's panel shows on the right, at its own width (the splitter between); a click on the lit one closes it and the chart takes the room. The watchlist stays loaded while the editor shows.
+- **Opening code:** the legend's Source code button (`{}`, between Settings and Remove) on RSI and on every script; Create new → Indicator, or Built-in: Relative Strength Index, and Open script (My scripts) in the name's menu. With nothing open, the editor starts a new indicator (`indicator("My script")`, `plot(close)`).
+- **A built-in's code:** editable at once, under the banner "Built-in script. Your edits make a copy; the original stays as it is."; once edited, Reset to original puts the built-in's code back as one edit (Undo takes it back). The built-in on the chart never changes.
+- **The editor:** Monaco with Pine's colors (§7.5), line numbers, the minimap, Monaco's own keys (F1, find, multiple cursors); 4-space indents; errors underlined red and warnings orange, a moment after typing stops; the console lists them ("Error at 3:6 Undeclared identifier "nothing""), a click goes to the line; its button counts the errors.
+- **Add to chart** (Ctrl/Cmd + Enter): code that compiles goes on the chart as a script of its own, beside any built-in; then the button reads Update on chart and replaces that script's code, its inputs and looks kept where the new code has them. Code with errors stays off the chart and the console opens.
+- **Save** (Ctrl/Cmd + S, or Save script): a built-in's copy or a new script asks for its name (the `indicator()` title suggested) and becomes one of My scripts, version 1; then each save that changes the code is the next version. The status bar shows the version and when it was saved ("2 · Oct 31, 10:20"), the cursor's line and column, and "Pine Script® v6". A chart script added from the code follows it into My scripts.
+- **Unsaved code** is kept in this browser as typed, through closing the editor and reloading, until it's saved or reset; the name shows a dot while it differs from the last save.
+- **My scripts:** in the Indicators dialog under Personal, newest first; search finds them by name; a click puts one on the chart (its latest saved code). Kept by the gateway in `data/scripts.json`.
+- **A script on the chart:** a pane of its own, or the price pane with `overlay = true`; its legend row with its title, the inputs it shows, its values in their bars' colors; its settings' Inputs (numbers, menus, text, colors, sources, bools; tooltips; greyed out by `active`) and Style (each plot, hline, fill and background with `editable`). Pine's plot styles (line, broken line, steps, histogram, columns, area, circles, crosses), per-bar colors, backgrounds, gradient fills, hlines, offsets, `show_last`, `trackprice`, formats (price, percent, volume) and precision. A runtime error stops it: nothing drawn, a red "!" in its row with the message.
+- **The language:** Pine v6's syntax, types, qualifiers and execution model (§4.16); `ta.*` (sma, ema, rma, wma, vwma, swma, rsi, stdev, variance, dev, cci, stoch, macd, bb, atr, tr, highest, lowest and their offsets, change, mom, roc, cross, crossover, crossunder, barssince, valuewhen, pivothigh, pivotlow, rising, falling, cum), `math.*`, `color.*`, `str.tostring`, inputs, `barstate.*`, `syminfo.*`, `timeframe.*`. What comes later says so when used ("Drawings come later (P3)").
+- **Never wrong, never hidden:** a script's values are drawn from where they no longer depend on bars we haven't loaded, by the check runs (§3); from the first bar where the history starts at the listing.
+- **Done when:** a built-in's copy and its saved script run on your Mac with your data, the hand checks against TradingView pass (RSI's copy reading as the built-in; a moving average script against TradingView's), every test passes on the Mac, and the screenshots are renewed for the right toolbar (looked at first).
+- **Status (31 October):** built in a cloud session on `claude/keen-allen-7wubfe`, not yet committed. Unit tests pass; the browser tests pass there, but the platform's own failures; the Mac's run, the screenshots and the hand checks remain (§11, item 74).
+
 ## 6. Architecture
 
 ### 6.1 Overview
 
 ```
  Browser: React web app (Vite, 127.0.0.1:5173)
- ┌──────────┬───────────────────────────────┬──────────────────────┐
- │ Top bar  │ Chart: Lightweight Charts     │ Watchlists, flags,   │
- │          │ + our gestures and plugins    │ symbol search, logos │
- └──────────┴───────────────┬───────────────┴──────────────────────┘
-   REST (history /api/bars, search, lists, keys) + one WebSocket (live bars, quotes, book)
+ ┌──────────┬───────────────────────────────┬──────────────────────┬──────┐
+ │ Top bar, │ Chart: Lightweight Charts     │ Right panel: the     │ Right│
+ │ Indica-  │ + our gestures and plugins,   │ watchlists (flags,   │ tool-│
+ │ tors     │ indicators, Pine scripts and  │ search, logos) or    │ bar  │
+ │          │ their panes                   │ the Pine Editor      │      │
+ └──────────┴───────────────┬───────────────┴──────────────────────┴──────┘
+   REST (history /api/bars, search, lists, scripts, keys) + one WebSocket (live bars, quotes, book)
  Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only)
  ┌──────────────────────────▼───────────────────────────────────────┐
  │ MarketService: history paging, resampling, the whole-bar rule,   │
@@ -724,6 +834,7 @@ Read from TradingView's public pages (never scripted), Pine's reference and manu
  │ CRYPTOCAP: market caps from CoinGecko's coins × exchange prices; │
  │ older years from Live Coin Watch and ETH Zurich's dataset        │
  │ Formulas (spreads) · symbol catalog and search · logos           │
+ │ My scripts: the Pine Editor's saved scripts and their versions   │
  │ Storage: JSON files in data/ (gitignored, owner-only)            │
  └──────────────────────────┬───────────────────────────────────────┘
                             ▼ HTTPS and WebSockets to the providers only
@@ -964,6 +1075,19 @@ In `packages/core/src/formula.ts` and `apps/gateway/src/formula/`:
 - **Gateway:** `fromListing` comes from `MarketService` (native and resampled pages, through the exchange's `historyFromListing`), stays on a cached latest page until newer bars push its first bar out, and on tick history means the page reached trade 0. Formulas and CRYPTOCAP don't vouch yet.
 - **`apps/web/src/indicators/`:** `indicatorStore.ts` (the chart's indicators and favorites, sanitized on read; settings kept before the output values existed read as their defaults), `IndicatorsButton.tsx`, `IndicatorsDialog.tsx`, `IndicatorLegend.tsx` (rows updated imperatively, like the OHLC legend; values at the Style tab's Precision, left out with "Values in status line" off, inputs with "Inputs in status line" off), `IndicatorSettingsDialog.tsx` (the Style tab ends with the output and input values), `symbolVolume.ts` (`hasRealVolume`, in one place). `ChartPane.tsx` hands the store to the chart and the chart's values to the legend; `ChartSession.ts` passes `fromListing`, the symbol's volume, and each shown bar's index.
 
+### 6.17 Pine scripts (P1)
+
+- **`packages/pine`** (TypeScript, no DOM, Vitest): Pine v6 from text to values.
+  - `lexer.ts`, `parser.ts`, `ast.ts`: logical lines (Pine's wrapping and blocks), then statements and expressions by Pine's precedence; features for later stop with a message naming their milestone.
+  - `compiler.ts`, `types.ts`, `builtins.ts`: types and qualifiers checked in passes until every variable's is known (a later `:=` can make one a series), then the script is turned into closures over a `Runtime`. Inputs, plots, hlines, fills, backgrounds and the declaration become definitions worked out from the inputs alone (`describe`).
+  - `runtime.ts`: a variable's history and a `var`'s value, rolled back before each update of the live bar and committed by its closing one (`varip` excepted); outputs written straight into a typed array per output; the 500 ms loop limit per bar.
+  - `ta.ts`: each `ta.*` call's own state, the averages on I1's kernels.
+  - `script.ts`: `compileScript` (and `compileCached`); `ScriptProgram` (inputs, `describe`, `sanitize`); `ScriptRun`, the script over the chart's bars, following ticks, new bars and corrections as `IndicatorRun` does, with the warm-up check runs and their verdicts (`warmup.ts`, kept up to date as bars close, the live bar looked at each time).
+- **`packages/indicators`:** RSI's Pine code (`rsi.pine.ts`); the model's additions: a definition of kind `script`, inputs for text, colors and numbers with options, tooltips; a plot's `look` (Pine's style, per-bar colors, offset, `show_last`, `trackprice`, `histbase`, display flags, `editable`); backgrounds; the `price` placement; the percent format; `styleOverrides` with `styleOf`.
+- **`packages/chart`:** `indicators/script.ts` reads a compiled script as a definition (inputs by place, `in_0`; outputs by kind and place, `plot_0`, `hline_0`, `fill_0`, `bg_0`) and runs it as a `ScriptLayerRun`. The layer draws scripts with the built-ins' paths, plus Pine's plot styles, per-bar colors, backgrounds (`plugins/BackgroundPrimitive.ts`), fills colored bar by bar, offsets, `show_last` and `trackprice`; an overlay's series sit on the candles' scale; a script that stops draws nothing. `ChartController` passes the symbol's `syminfo.*` and `timeframe.*` and reports each script's error.
+- **Gateway:** `storage/ScriptsStore.ts` keeps My scripts in `data/scripts.json`, written whole, changes one at a time, an unreadable file moved aside; `routes/scripts.ts`: `GET /api/scripts` (newest first), `POST /api/scripts`, `GET|PUT|PATCH|DELETE /api/scripts/:id`, `GET /api/scripts/:id/versions/:version`. Their types and checks in `packages/core/src/scripts.ts`. Protocol v11.
+- **`apps/web`:** `pine/` (the panel `PineEditor.tsx`, `CodeEditor.tsx` around Monaco, `language.ts` for Pine's tokens and colors, `monaco.ts` and `features.ts` loading Monaco the first time, `pineStore.ts` keeping the open script and its unsaved code in this browser, `SaveScriptDialog.tsx`); `layout/RightToolbar.tsx` and `usePanelWidth.ts`; `indicators/definitions.ts` (any indicator's definition, a script's compiled once); the indicator store's version 2; the legend's Source code button and error mark; the settings dialog's new inputs; My scripts in the Indicators dialog; `data/api.ts`'s `scriptsApi`.
+
 ## 7. UI and visual spec
 
 ### 7.1 Tokens
@@ -1068,6 +1192,11 @@ Reference viewport is 1634 px wide.
   - Watchlist cells update per row, once per frame.
   - Splitter drags write a CSS variable per frame and commit on release.
 
+### 7.5 The Pine Editor and the right toolbar
+
+- **Measured** from your screenshot of 27 October (§4.16): the panel and editor black; the current line `#142043`; the token colors; the banner `#34261B` with its first words `#C9813A`, its text `#AAA096` and its mark `#F67E05`. These are a read-only built-in's colors, which TradingView greys: provisional until measured on code being edited (§11, item 74).
+- **Ours, provisional:** the panel's rows (40 px title, 48 px name row, 28 px status bar), its 13 px text and 16 px semibold name, outlined 30 px buttons with 6 px corners; the right toolbar 48 px wide with 44 px buttons, the lit one on the chip color; the editor's 13 px monospace on 20 px lines; the Save dialog in the app's dialog idiom; the Pine and panel icons ours.
+
 ## 8. Delivery plan
 
 | | Milestone | Done when |
@@ -1102,6 +1231,9 @@ Reference viewport is 1634 px wide.
 | I3 | Panes and oscillators: the "…" menu with Move to, pane buttons, maximize and collapse, dragging between panes; MACD, Stochastic, ATR; RSI's Calculate Divergence | Your pane screenshots reproduced; hand checks pass |
 | I4 | Templates and defaults: save and apply templates (Remember symbol), Defaults → Save as default, Chart settings → Status line | As TradingView's |
 | I5+ | More built-ins, a plan each | — |
+| P1 | Pine Script: our own Pine v6 engine, the Pine Editor (Monaco) with the right toolbar, a built-in's code editable as a copy with Reset to original, Add to chart and Update on chart, Save into My scripts with versions (`data/scripts.json`, protocol v11), drafts kept, My scripts in the Indicators dialog, the legend's Source code button | RSI's copy reads as the built-in on your chart; a script of yours runs as on TradingView; every test passes on the Mac; screenshots renewed for the right toolbar. **Built 2026-10-31** in a cloud session, not yet committed; the Mac's checks remain (§5.16) |
+| P2 | More of the editor and the language: Version history with differences, unsaved-change marks in the gutter, Rename, Make a copy, Delete, Open script's dialog; Pine Logs; `plotshape`, `plotchar`, `barcolor`, arrays, `request.security` (RSI's Timeframe), strings; Volume's code; RSI's divergence | Their hand checks pass |
+| P3 | Drawings in scripts (labels, lines, boxes, tables), libraries, strategies with the Strategy Tester, alerts; the editor at the bottom, floating or detached; the Profiler | A plan each |
 
 ## 9. Testing strategy
 
@@ -1204,6 +1336,11 @@ Reference viewport is 1634 px wide.
     | H8 (I2) | The same new pair | Where EMA 9 starts, and its first values | Confirms the SMA seed |
     | H9 | CRYPTOCAP:TOTAL 1D | RSI on 5 days; Volume's look | A measured difference, not a pass mark |
 - **Gesture settings** (`tests/e2e/gesture-settings.spec.ts`): opening and closing; each setting reaching the chart at once, measured on the chart; the chart in use while open, and the lit setting per gesture; kept across visits, the changed dot, Reset; values carried over from the old panel; Copy values.
+- **Pine (P1):**
+  - The engine (`packages/pine`, 128 tests): the language (arithmetic, precedence, structures, loops, `var` and `varip`, history, functions, tuples), compile errors in Pine's words with where they are, runtime errors, every `ta.*` against the reference's formulas written out plainly, `math.*`, `color.*`, bar states and the symbol, `describe` and `sanitize`, live ticks, new bars and corrections against a fresh run, the warm-up rule's cases (a window, a recursive average, bar counts, running extremes, a regime, the listing), and speed (20,000 bars with the checks under 1.5 s, a tick under 5 ms; measured 85 ms and 10 µs).
+  - RSI's Pine code against the built-in (27 tests): identical over 20,000 bars for every smoothing and two sources, with and without volume; through 100 bars of ticks, new bars and corrections; its warm-up within a hundred-millionth of a run with 3,000 more bars of history; its inputs, plots, levels, fills and colors the built-in's.
+  - The chart's reading of scripts (`packages/chart`, 11 tests); My scripts in core (6) and the gateway (14, the server's own guards among them); the web app's store of scripts on the chart, and a script's definition kept per price precision (`apps/web`, 5).
+  - In the browser (`tests/e2e/pine.spec.ts`): the right toolbar; RSI's code from the legend, editable, Reset to original and Undo; Add to chart beside the built-in with the same values, then Update on chart; an error kept off the chart and shown in the console; Save, its name and versions; unsaved code through a reload; My scripts in the Indicators dialog and an overlay on the price pane; a runtime error in the legend.
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
   - Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars rebuilt exactly from smaller intervals.
@@ -1336,8 +1473,16 @@ Reference viewport is 1634 px wide.
 69. ~~**The current built-in RSI may draw gradient fills** beyond 70 and 30.~~ Confirmed by your screenshot of its code (27 October) and built: green beyond 70, red beyond 30 (§4.15).
 70. **Provisional in I1's gaps (27 October):** Precision's choices (Default, 0 to 8; Pine allows up to 16); "Inputs in status line" as a per-indicator setting (TradingView documents only the chart's Status line setting for inputs); Volume's Precision keeping its unit (TradingView once wrote it out in full at 0, a third-party guide says, and no longer does); Volume without a label on the price scale, and so without "Labels on price scale"; the gradient fills' Style rows (a top and a bottom color); the inputs' dimmer color. Your screenshots of RSI's and Volume's Style tabs (item 62, 5 and 6) and of the chart with Volume (1) settle them.
 71. **RSI's Timeframe:** the built-in's code declares `timeframe = ""`, which gives it TradingView's "Timeframe" input and "Wait for timeframe closes" (computing it on a higher interval than the chart's). Not built; it needs a higher interval's bars beside the chart's, as Pine's `request.security` does.
-72. **The legend's Source code button (`{}`)** opens the script's code in the Pine Editor; we have no Pine Editor yet (§2), so the button isn't built. The plan for it is with you.
+72. **The legend's Source code button (`{}`)** opens the script's code in the Pine Editor: built with P1 (§5.16), for RSI and every script; Volume's code comes with P2.
 73. **The script's own title is "Relative strength index"** in TradingView's code today (sentence case); our dialog and settings use "Relative Strength Index". Whether its Indicators dialog writes it so is in screenshot 7 (item 62).
+74. **The Pine Editor's look (provisional):** its colors were measured on a read-only built-in's code, which TradingView greys; its sizes are ours. A screenshot of TradingView's editor on code you're editing (say, a copy of RSI) at full size, and one of its right toolbar, settle them; the 13 screenshots (`visual.spec.ts`) are renewed on the Mac for the right toolbar, after looking at them.
+75. **The warm-up checks for scripts (ours, provisional):** the three check runs, a billionth of the largest difference, rounding at 10⁻¹² of the values' size, and "remembered" at a thousandth of the far-off bars' effect by the last bar. A script whose values depend on older history only through rare events (a running maximum set before our first bar) can't be told from one that doesn't by any finite check; the far-off first bars catch the common cases. Measured on RSI (§4.16).
+76. **The built-in RSI's smoothed MA (EMA, SMMA) waits longer than it needs** (452 and 587 bars, against 314 and 349 for its script, as accurate: §4.16). Making the built-in follow the measured rule is your call.
+77. **A script's Style tab against its inputs:** a color the Style tab sets replaces the script's for good, including per-bar colors and an input's; until then the code's colors show. TradingView doesn't document which wins.
+78. **Pine defaults not in TradingView's docs:** an hline's color (gray) and style (dashed); a fill's color (blue at 90% transparency); an untitled plot's name ("Plot"); an input's step (1); `syminfo.type` for preferred shares, units and notes ("stock") and for formulas ("spread").
+79. **Drawing details not in TradingView's docs:** a fill whose color changes from bar to bar colors each stretch in its later bar's color; areas fill to the pane's bottom (Pine: to `histbase`?); crosses draw as circles; a value an offset puts past the last bar isn't drawn (TradingView draws it ahead).
+80. **Saving a name already taken** numbers it ("My RSI 2"), as copies are named; TradingView's own rule isn't documented. Versions beyond 1,000 a script let the oldest go.
+81. **The script's `ta.rsi` without falls:** 100 when the average fall is 0 and the rise isn't, na when both are 0 (the reference's formula leaves it open); the built-in's own code says 100 for both, which RSI's Pine copy keeps.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -1390,6 +1535,8 @@ Reference viewport is 1634 px wide.
 - Indicators (I1), third-party: the built-in RSI's code https://github.com/tkittich/tradingview/blob/main/sto%20&%20rsi.pine · Tulip Indicators' tests https://github.com/TulipCharts/tulipindicators/blob/master/tests/untest.txt · TA-Lib's RMA https://ta-lib.org/functions/rma.html · TradeLocker on TradingView's panes https://tradelocker.com/how-to/add-remove-tradingview-indicators/ · Lightweight Charts' panes, price-and-volume and bands examples https://github.com/tradingview/lightweight-charts
 - I1's gaps (27 October), TradingView's own: Help Center, I want to hide the values of individual indicators https://www.tradingview.com/support/solutions/43000659666-i-want-to-hide-the-values-of-individual-indicators/ · blog, Hide individual indicator values https://www.tradingview.com/blog/en/hide-individual-indicator-values-29316 · blog, Pine Script vertical gradients https://www.tradingview.com/blog/en/pine-script-vertical-gradients-33586 · Pine docs, Visuals overview (display, z-order) https://www.tradingview.com/pine-script-docs/visuals/overview/ (read through https://github.com/codenamedevan/pinescriptv6) · your screenshot of the built-in RSI's code in the Pine Editor (27 October)
 - I1's gaps, third-party: the gradient fills' titles in a copy of the built-in's code https://github.com/bill-mccormick-dg/alpaca-hackathon/issues/250 · Zeiierman's guide ("Output Values") https://www.zeiierman.com/blog/hide-indicator-labels-values-inputs-in-tradingview · Quant Nomad on Precision https://quantnomad.com/faq-how-to-change-the-precision-for-an-indicator-in-tradingview/ · marketview.jp on Precision and Volume https://marketview.jp/tradingview-indicator-precision · https://marketview.jp/tradingview-volume-precision
+- Pine Script and the Pine Editor (P1), TradingView's own (read on its public pages; titles where its address wasn't kept): Help Center, "How to work with Pine Editor", "Useful Pine Editor commands", "How to create a new script", "How to apply an older version of an indicator", "I want to see the source code of a built-in script" https://www.tradingview.com/support/solutions/43000481659-i-want-to-see-the-source-code-of-a-built-in-script/ · Blog, "Pine Script has a new VSC-style editor" (2022), "Track unsaved changes in the Pine Editor" (2023), "Updated detach mode" (2024) · Pine release notes (August 2025's side panel) · Pine docs https://www.tradingview.com/pine-script-docs/ (Execution model, Operators, Type system, Conditional structures, Loops, User-defined functions, Plots, Levels, Fills, Backgrounds, Colors, Errors, Limitations, the v6 migration guide; Inputs https://tradingview.com/pine-script-docs/concepts/inputs/) and the v6 reference https://www.tradingview.com/pine-script-reference/v6/, read through https://github.com/AndreHeinecke/pinescript_user_manual (the manual as of March 2025) and https://github.com/codenamedevan/pinescriptv6 · your screenshot of the Pine Editor on the built-in RSI (27 October)
+- Pine Script and the Pine Editor (P1), third-party: Traders Post on inputs' `display` https://blog.traderspost.io/article/professional-pine-script-input-ui · TradingCode on a script's name and title · ChartWiseHub's 2026 guide and Proea's guides (the editor's placements) · the engines read and not used: LuxAlgo's PineTS (AGPL-3.0), OpenPineScript (GPL-3.0) · Monaco https://github.com/microsoft/monaco-editor (MIT)
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

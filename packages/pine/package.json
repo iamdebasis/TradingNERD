@@ -1,0 +1,18 @@
+{
+  "name": "@tradingnerd/pine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Our own Pine Script v6 engine: reads a script, checks it, and runs it bar by bar the way TradingView's Pine runs it",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tradingnerd/core": "workspace:*",
+    "@tradingnerd/indicators": "workspace:*"
+  }
+}

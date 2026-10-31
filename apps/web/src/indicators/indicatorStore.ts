@@ -1,21 +1,29 @@
-import type { ChartIndicator } from '@tradingnerd/chart';
+import { type ChartIndicator, type ChartScript, scriptDefaultInputs } from '@tradingnerd/chart';
+import { isScriptId, MAX_SCRIPT_SOURCE, parseScriptOrigin } from '@tradingnerd/core';
 import {
+  DEFAULT_DISPLAY,
   defaultSettings,
   type IndicatorKind,
   type IndicatorSettings,
+  type InputValue,
   indicatorDefinition,
   isIndicatorKind,
+  type StyleValue,
   sanitizeSettings,
 } from '@tradingnerd/indicators';
 import { useSyncExternalStore } from 'react';
 import { readJson, removeKey, writeJson } from '../lib/storage';
+import { compiled, definitionOf } from './definitions';
 
 /** Where the chart's indicators are kept in this browser, like Chart settings (§6.16). */
 export const INDICATORS_KEY = 'tn.chart.indicators';
 /** The indicators starred in the Indicators dialog. */
 export const FAVORITES_KEY = 'tn.indicators.favorites';
-/** The stored shape's version: a stored value of another shape is set aside, not misread. */
-export const INDICATORS_VERSION = 1;
+/**
+ * The stored shape's version: a stored value of another shape is set aside, not misread.
+ * 2: Pine scripts on the chart (docs/SPEC.md §6.17); a version 1 list reads as it is.
+ */
+export const INDICATORS_VERSION = 2;
 
 /**
  * A pane's height kept between a twentieth and twenty times the price pane's: dragging can't go
@@ -32,17 +40,74 @@ export interface ChartIndicators {
 
 const EMPTY: ChartIndicators = { list: [], folded: false };
 
+/** A script instance's code and where it came from; null if malformed. */
+function sanitizeScript(value: unknown): ChartScript | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { source, scriptId, from } = value as Record<string, unknown>;
+  if (typeof source !== 'string' || source.length > MAX_SCRIPT_SOURCE) return null;
+  const origin = parseScriptOrigin(from);
+  if (origin === undefined) return null;
+  return { source, scriptId: isScriptId(scriptId) ? scriptId : null, from: origin };
+}
+
+/**
+ * Settings kept as they are, as far as they look like settings: for a script that doesn't
+ * compile now, so nothing is lost before its code is fixed.
+ */
+function looseSettings(value: unknown): IndicatorSettings {
+  const raw = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const inputs: Record<string, InputValue> = {};
+  for (const [key, item] of Object.entries((raw.inputs as Record<string, unknown>) ?? {})) {
+    if (typeof item === 'number' || typeof item === 'string' || typeof item === 'boolean') {
+      inputs[key] = item;
+    }
+  }
+  const styles: Record<string, StyleValue> = {};
+  for (const [key, item] of Object.entries((raw.styles as Record<string, unknown>) ?? {})) {
+    if (typeof item === 'object' && item !== null) styles[key] = item as StyleValue;
+  }
+  return { inputs, styles, display: { ...DEFAULT_DISPLAY } };
+}
+
+/** A script instance's settings, checked against its code as it compiles now. */
+function scriptSettings(script: ChartScript, value: unknown): IndicatorSettings {
+  if (!compiled(script.source).program) return looseSettings(value);
+  const probe: ChartIndicator = {
+    id: '',
+    kind: 'script',
+    script,
+    settings: looseSettings(value),
+    hidden: false,
+  };
+  return sanitizeSettings(definitionOf(probe), value);
+}
+
 function sanitizeIndicator(value: unknown, taken: Set<string>): ChartIndicator | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { id, kind, settings, hidden, paneStretch } = value as Record<string, unknown>;
-  if (typeof id !== 'string' || id === '' || taken.has(id) || !isIndicatorKind(kind)) return null;
+  const { id, kind, settings, hidden, paneStretch, script } = value as Record<string, unknown>;
+  if (typeof id !== 'string' || id === '' || taken.has(id)) return null;
+  let indicator: ChartIndicator;
+  if (kind === 'script') {
+    const code = sanitizeScript(script);
+    if (!code) return null;
+    indicator = {
+      id,
+      kind,
+      script: code,
+      settings: scriptSettings(code, settings),
+      hidden: hidden === true,
+    };
+  } else if (isIndicatorKind(kind)) {
+    indicator = {
+      id,
+      kind,
+      settings: sanitizeSettings(indicatorDefinition(kind), settings),
+      hidden: hidden === true,
+    };
+  } else {
+    return null;
+  }
   taken.add(id);
-  const indicator: ChartIndicator = {
-    id,
-    kind,
-    settings: sanitizeSettings(indicatorDefinition(kind), settings),
-    hidden: hidden === true,
-  };
   if (typeof paneStretch === 'number' && Number.isFinite(paneStretch)) {
     indicator.paneStretch = Math.min(STRETCH_RANGE.max, Math.max(STRETCH_RANGE.min, paneStretch));
   }
@@ -53,7 +118,9 @@ function sanitizeIndicator(value: unknown, taken: Set<string>): ChartIndicator |
 export function sanitizeIndicators(value: unknown): ChartIndicators {
   if (typeof value !== 'object' || value === null) return EMPTY;
   const raw = value as Record<string, unknown>;
-  if (raw.version !== INDICATORS_VERSION || !Array.isArray(raw.list)) return EMPTY;
+  if ((raw.version !== 1 && raw.version !== INDICATORS_VERSION) || !Array.isArray(raw.list)) {
+    return EMPTY;
+  }
   const taken = new Set<string>();
   const list: ChartIndicator[] = [];
   for (const item of raw.list) {
@@ -63,8 +130,8 @@ export function sanitizeIndicators(value: unknown): ChartIndicators {
   return { list, folded: raw.folded === true };
 }
 
-/** A new instance's id: its kind and the next number free ("rsi-2"). */
-export function nextId(kind: IndicatorKind, list: readonly ChartIndicator[]): string {
+/** A new instance's id: its kind and the next number free ("rsi-2", "script-1"). */
+export function nextId(kind: IndicatorKind | 'script', list: readonly ChartIndicator[]): string {
   let n = 1;
   const ids = new Set(list.map((indicator) => indicator.id));
   while (ids.has(`${kind}-${n}`)) n++;
@@ -103,6 +170,48 @@ export class IndicatorStore {
     return id;
   }
 
+  /**
+   * Puts a script on the chart (the Pine Editor's Add to chart, or My scripts), after the
+   * others, with its defaults; returns its id.
+   */
+  addScript(script: ChartScript): string {
+    const id = nextId('script', this.value.list);
+    const indicator: ChartIndicator = {
+      id,
+      kind: 'script',
+      script,
+      settings: scriptSettings(script, null),
+      hidden: false,
+    };
+    this.commit({ ...this.value, list: [...this.value.list, indicator] });
+    return id;
+  }
+
+  /**
+   * New code for a script on the chart (Update on chart): its inputs and changed looks stay
+   * where the new code still has them.
+   */
+  updateScript(id: string, change: Partial<ChartScript>): void {
+    this.update(id, (indicator) => {
+      if (indicator.kind !== 'script' || !indicator.script) return indicator;
+      const script = { ...indicator.script, ...change };
+      const inputs: Record<string, InputValue> = { ...indicator.settings.inputs };
+      const before = compiled(indicator.script.source).program;
+      if (before && script.source !== indicator.script.source) {
+        // Inputs left at the old code's defaults take the new code's, as a script reloads with
+        // its defaults; the ones changed in its settings stay.
+        for (const [key, value] of Object.entries(scriptDefaultInputs(before))) {
+          if (inputs[key] === value) delete inputs[key];
+        }
+      }
+      return {
+        ...indicator,
+        script,
+        settings: scriptSettings(script, { ...indicator.settings, inputs }),
+      };
+    });
+  }
+
   remove(id: string): void {
     this.commit({ ...this.value, list: this.value.list.filter((item) => item.id !== id) });
   }
@@ -114,7 +223,10 @@ export class IndicatorStore {
   setSettings(id: string, settings: IndicatorSettings): void {
     this.update(id, (indicator) => ({
       ...indicator,
-      settings: sanitizeSettings(indicatorDefinition(indicator.kind), settings),
+      settings:
+        indicator.kind === 'script' && indicator.script
+          ? scriptSettings(indicator.script, settings)
+          : sanitizeSettings(definitionOf(indicator), settings),
     }));
   }
 

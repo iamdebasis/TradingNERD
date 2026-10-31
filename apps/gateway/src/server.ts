@@ -18,12 +18,14 @@ import { registerFlagRoutes } from './routes/flags.ts';
 import { registerLogoRoutes } from './routes/logos.ts';
 import { registerMarketRoutes } from './routes/market.ts';
 import { registerOlderCapsRoutes } from './routes/olderCaps.ts';
+import { registerScriptRoutes } from './routes/scripts.ts';
 import { registerStockRoutes } from './routes/stocks.ts';
 import { registerSymbolRoutes } from './routes/symbols.ts';
 import { registerWatchlistRoutes } from './routes/watchlist.ts';
 import { isAllowedOrigin, isLoopbackHost } from './security.ts';
 import type { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import type { FlagStore } from './storage/FlagStore.ts';
+import type { ScriptsStore } from './storage/ScriptsStore.ts';
 import type { WatchlistsStore } from './storage/WatchlistsStore.ts';
 import { attachSession } from './ws/session.ts';
 
@@ -33,6 +35,8 @@ export interface GatewayDeps {
   watchlist: WatchlistsStore;
   flags: FlagStore;
   logos: LogoService;
+  /** The user's Pine scripts (absent in tests that don't need them). */
+  scripts?: ScriptsStore;
   /** US stocks' Alpaca key routes (absent in tests that don't need them). */
   stocks?: UsStocksMarket;
   /** Older market caps' Live Coin Watch key routes (absent in tests that don't need them). */
@@ -94,6 +98,7 @@ export async function buildServer(
   registerSymbolRoutes(app, deps.catalog);
   registerWatchlistRoutes(app, deps.watchlist);
   registerFlagRoutes(app, deps.flags);
+  if (deps.scripts) registerScriptRoutes(app, deps.scripts);
   registerLogoRoutes(app, deps.logos);
   if (deps.stocks) registerStockRoutes(app, deps.stocks);
   if (deps.olderCaps) registerOlderCapsRoutes(app, deps.olderCaps);

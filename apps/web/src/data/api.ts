@@ -6,6 +6,7 @@ import {
   type FlagState,
   type LogoStatus,
   type NamedWatchlist,
+  type NewScript,
   type OlderCapsStatus,
   parseApiError,
   parseBarsResponse,
@@ -14,11 +15,17 @@ import {
   parseLogoStatus,
   parseNamedWatchlist,
   parseOlderCapsStatus,
+  parseSavedScript,
+  parseScriptsIndex,
+  parseScriptVersionSource,
   parseStockKeyStatus,
   parseSymbolInfo,
   parseSymbolSearchResponse,
   parseWatchlistSummary,
   parseWatchlistsIndex,
+  type SavedScript,
+  type ScriptsIndex,
+  type ScriptVersionSource,
   type SearchCategory,
   type SessionHours,
   type StockKeyStatus,
@@ -187,6 +194,44 @@ export const watchlistsApi = {
 };
 
 export type WatchlistsApi = typeof watchlistsApi;
+
+const scriptPath = (id: string) => `${API_PREFIX}/scripts/${encodeURIComponent(id)}`;
+
+function checked<T>(value: T | null, what: string): T {
+  if (value === null) throw new ApiError('internal_error', `The gateway sent a malformed ${what}`);
+  return value;
+}
+
+const savedScript = (body: unknown): SavedScript => checked(parseSavedScript(body), 'script');
+const scriptsIndex = (body: unknown): ScriptsIndex =>
+  checked(parseScriptsIndex(body), 'script list');
+
+/** The user's Pine scripts ("My scripts"), which the gateway keeps in data/scripts.json. */
+export const scriptsApi = {
+  index: async (signal?: AbortSignal) =>
+    scriptsIndex(await getJson(`${API_PREFIX}/scripts`, signal)),
+  get: async (id: string, signal?: AbortSignal) =>
+    savedScript(await getJson(scriptPath(id), signal)),
+  version: async (
+    id: string,
+    version: number,
+    signal?: AbortSignal,
+  ): Promise<ScriptVersionSource> =>
+    checked(
+      parseScriptVersionSource(await getJson(`${scriptPath(id)}/versions/${version}`, signal)),
+      'script version',
+    ),
+  create: async (script: NewScript) =>
+    savedScript(await getJson(`${API_PREFIX}/scripts`, undefined, sendJson('POST', script))),
+  save: async (id: string, source: string) =>
+    savedScript(await getJson(scriptPath(id), undefined, sendJson('PUT', { source }))),
+  rename: async (id: string, name: string) =>
+    savedScript(await getJson(scriptPath(id), undefined, sendJson('PATCH', { name }))),
+  remove: async (id: string) =>
+    scriptsIndex(await getJson(scriptPath(id), undefined, sendJson('DELETE'))),
+};
+
+export type ScriptsApi = typeof scriptsApi;
 
 /** Flagged symbols, kept by the gateway in data/flags.json. */
 export const flagsApi = {

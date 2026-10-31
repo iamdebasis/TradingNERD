@@ -1,5 +1,6 @@
 export * from './kernels.ts';
 export * from './registry.ts';
+export * from './rsi.pine.ts';
 export * from './rsi.ts';
 export * from './run.ts';
 export * from './settings.ts';

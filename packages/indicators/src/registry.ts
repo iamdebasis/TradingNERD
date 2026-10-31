@@ -7,7 +7,9 @@ export const INDICATORS: readonly IndicatorDefinition[] = [RSI, VOLUME].sort((a,
   a.name.localeCompare(b.name),
 );
 
-const BY_KIND = new Map<IndicatorKind, IndicatorDefinition>(INDICATORS.map((d) => [d.kind, d]));
+const BY_KIND = new Map<IndicatorKind, IndicatorDefinition>(
+  INDICATORS.map((d) => [d.kind as IndicatorKind, d]),
+);
 
 export const isIndicatorKind = (value: unknown): value is IndicatorKind =>
   BY_KIND.has(value as IndicatorKind);

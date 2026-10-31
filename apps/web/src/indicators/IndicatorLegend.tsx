@@ -4,17 +4,32 @@ import {
   formatIndicatorValue,
   NO_VALUE,
 } from '@tradingnerd/chart';
-import { displayFormat, indicatorDefinition, type SymbolContext } from '@tradingnerd/indicators';
+import { displayFormat, type SymbolContext, styleOf } from '@tradingnerd/indicators';
 import { useLayoutEffect } from 'react';
+import { BUILTIN_CODE, definitionOf } from './definitions';
 import styles from './IndicatorLegend.module.css';
-import { EyeCrossedIcon, EyeIcon, FoldIcon, GearIcon, TrashIcon } from './icons';
+import {
+  CodeIcon,
+  ErrorIcon,
+  EyeCrossedIcon,
+  EyeIcon,
+  FoldIcon,
+  GearIcon,
+  TrashIcon,
+} from './icons';
 
 /** What a row's buttons do. */
 export interface RowActions {
   onHide(id: string, hidden: boolean): void;
   onSettings(id: string): void;
   onRemove(id: string): void;
+  /** Its code in the Pine Editor: a script's, or a built-in's own (Source code, { }). */
+  onSource(id: string): void;
 }
+
+/** Whether an indicator has code to show: a script, or a built-in whose code we have. */
+export const hasSource = (indicator: ChartIndicator) =>
+  indicator.kind === 'script' || BUILTIN_CODE[indicator.kind] !== undefined;
 
 /** One row's value elements: a span per plot (null for a plot the legend doesn't show). */
 interface RowValues {
@@ -30,6 +45,8 @@ export class LegendValues {
   chart: ChartController | null = null;
   /** Whether the chart's symbol has real volume: Volume shows "n/a" otherwise. */
   hasVolume = true;
+  /** Decimals the chart writes prices with: a script's inherited format. */
+  priceDecimals = 2;
   private readonly rows = new Map<string, RowValues>();
   private index: number | null = null;
 
@@ -44,24 +61,24 @@ export class LegendValues {
     this.index = index;
     const { chart } = this;
     if (!chart) return;
-    for (const { id, values, growing } of chart.indicatorValues(index)) {
+    for (const { id, values, growing, colors } of chart.indicatorValues(index)) {
       const row = this.rows.get(id);
       if (!row) continue;
       const { indicator, spans } = row;
-      const definition = indicatorDefinition(indicator.kind);
+      const definition = definitionOf(indicator, this.priceDecimals);
       const format = displayFormat(definition.format, indicator.settings.display.precision);
       definition.plots.forEach((plot, p) => {
         const span = spans[p];
         if (!span) return;
-        const style = indicator.settings.styles[plot.id];
+        const style = styleOf(indicator.settings, plot);
         const noVolume = definition.kind === 'volume' && !this.hasVolume;
         const text = noVolume ? 'n/a' : formatIndicatorValue(values[p] ?? Number.NaN, format);
         if (span.textContent !== text) span.textContent = text;
-        // Columns colored by direction show their bar's color; lines their own.
+        // A script's plot shows its bar's color; columns colored by direction theirs; lines
+        // their own.
         const color =
-          plot.kind === 'columns' && !growing
-            ? (style?.fallingColor ?? style?.color)
-            : style?.color;
+          colors[p] ??
+          (plot.kind === 'columns' && !growing ? (style.fallingColor ?? style.color) : style.color);
         if (color && span.style.color !== color) span.style.color = color;
       });
     }
@@ -78,13 +95,15 @@ export class LegendValues {
  * Style tab's "Values in status line" is off.
  */
 function shownPlots(indicator: ChartIndicator): boolean[] {
-  const definition = indicatorDefinition(indicator.kind);
-  const { inputs, styles, display } = indicator.settings;
+  const definition = definitionOf(indicator);
+  const { inputs, display } = indicator.settings;
   return definition.plots.map(
     (plot) =>
       display.statusValues &&
       (plot.shownWhen?.(inputs) ?? true) &&
-      styles[plot.id]?.visible === true,
+      styleOf(indicator.settings, plot).visible &&
+      // A script's plot shows in the status line only with display.status_line.
+      (plot.look === undefined || (plot.look.display & 4) !== 0),
   );
 }
 
@@ -101,13 +120,16 @@ export function IndicatorRow({
   symbol,
   values,
   actions,
+  error,
 }: {
   indicator: ChartIndicator;
   symbol: SymbolContext;
   values: LegendValues;
   actions: RowActions;
+  /** What stopped a script, if something did: it draws nothing and says why. */
+  error?: string | undefined;
 }) {
-  const definition = indicatorDefinition(indicator.kind);
+  const definition = definitionOf(indicator);
   const name = definition.legendName(symbol);
   const inputs = indicator.settings.display.statusInputs
     ? definition.legendInputs(indicator.settings.inputs)
@@ -141,7 +163,11 @@ export function IndicatorRow({
           </>
         )}
       </button>
-      {indicator.hidden ? (
+      {error !== undefined && !indicator.hidden ? (
+        <span className={styles.error} role="img" aria-label={`Error: ${error}`} title={error}>
+          <ErrorIcon />
+        </span>
+      ) : indicator.hidden ? (
         <button
           type="button"
           className={styles.hiddenEye}
@@ -188,6 +214,17 @@ export function IndicatorRow({
         >
           <GearIcon />
         </button>
+        {hasSource(indicator) && (
+          <button
+            type="button"
+            className={styles.button}
+            aria-label="Source code"
+            title="Source code"
+            onClick={() => actions.onSource(indicator.id)}
+          >
+            <CodeIcon />
+          </button>
+        )}
         <button
           type="button"
           className={styles.button}
@@ -207,6 +244,7 @@ export function PriceLegendRows({
   indicators,
   folded,
   onFold,
+  errors,
   ...row
 }: {
   indicators: readonly ChartIndicator[];
@@ -215,13 +253,19 @@ export function PriceLegendRows({
   symbol: SymbolContext;
   values: LegendValues;
   actions: RowActions;
+  errors: ReadonlyMap<string, string>;
 }) {
   if (indicators.length === 0) return null;
   return (
     <div className={styles.rows} data-field="indicators">
       {!folded &&
         indicators.map((indicator) => (
-          <IndicatorRow key={indicator.id} indicator={indicator} {...row} />
+          <IndicatorRow
+            key={indicator.id}
+            indicator={indicator}
+            error={errors.get(indicator.id)}
+            {...row}
+          />
         ))}
       <button
         type="button"
@@ -247,6 +291,7 @@ export interface PaneBox {
 export function PaneLegends({
   panes,
   indicators,
+  errors,
   ...row
 }: {
   panes: readonly PaneBox[];
@@ -254,6 +299,7 @@ export function PaneLegends({
   symbol: SymbolContext;
   values: LegendValues;
   actions: RowActions;
+  errors: ReadonlyMap<string, string>;
 }) {
   return (
     <>
@@ -267,7 +313,7 @@ export function PaneLegends({
             style={{ top: pane.top }}
             data-pane-legend={indicator.id}
           >
-            <IndicatorRow indicator={indicator} {...row} />
+            <IndicatorRow indicator={indicator} error={errors.get(indicator.id)} {...row} />
           </div>
         );
       })}

@@ -1,8 +1,12 @@
 import { defineConfig, type Project } from '@playwright/test';
 import { GATEWAY_DEFAULT_PORT, WEB_DEV_PORT } from '@tradingnerd/core';
 
-/** Matches the reference screenshot's layout width (docs/SPEC.md §7.2), at Retina scale. */
-const viewport = { width: 1634, height: 1000 };
+/**
+ * The reference screenshot's layout width (docs/SPEC.md §7.2), 1,634 px, plus our right toolbar's
+ * 48 px, which the reference doesn't show: everything left of the toolbar sits where the
+ * reference has it. At Retina scale.
+ */
+const viewport = { width: 1634 + 48, height: 1000 };
 
 /**
  * Normal runs mock all market data in the browser and must never reach an exchange: a gateway

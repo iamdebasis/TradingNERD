@@ -1,10 +1,11 @@
 import { ChartController } from '@tradingnerd/chart';
 import type { SymbolInfo } from '@tradingnerd/core';
-import { indicatorDefinition, type SymbolContext } from '@tradingnerd/indicators';
+import type { SymbolContext } from '@tradingnerd/indicators';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { marketApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
 import { gestureSettings } from '../gestures/gestureSettings';
+import { definitionOf } from '../indicators/definitions';
 import {
   LegendValues,
   type PaneBox,
@@ -15,6 +16,7 @@ import {
 import { IndicatorSettingsDialog } from '../indicators/IndicatorSettingsDialog';
 import { indicatorStore, useIndicators } from '../indicators/indicatorStore';
 import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
+import { pineStore } from '../pine/pineStore';
 import { useStockKeys } from '../stocks/stockKeys';
 import { darkTheme } from '../theme/tokens';
 import styles from './ChartPane.module.css';
@@ -28,7 +30,11 @@ const chartTheme = toChartTheme(darkTheme);
 declare global {
   interface Window {
     /** Dev-only handle for end-to-end tests and debugging. */
-    __tradingNerd?: { chart: ChartController | null };
+    __tradingNerd?: {
+      chart: ChartController | null;
+      /** The Pine Editor's code: replaced as one edit, as a paste replaces it. */
+      code?: { set(text: string): void };
+    };
   }
 }
 
@@ -67,6 +73,8 @@ export function ChartPane({
   const [symbolContext, setSymbolContext] = useState<SymbolContext>(NO_SYMBOL);
   /** The indicator whose settings are open. */
   const [editing, setEditing] = useState<string | null>(null);
+  /** Why each script on the chart draws nothing, for its legend row. */
+  const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map());
 
   // The session talks to the legend; the indicators' rows follow the same bar.
   const legendView = useMemo(
@@ -75,6 +83,9 @@ export function ChartPane({
       showBar: (bar, previous, index) => {
         legend.current?.showBar(bar, previous, index);
         values.show(index);
+        // A script can stop on a live bar: its row says so.
+        const now = values.chart?.indicatorErrors();
+        if (now) setErrors((before) => (sameErrors(before, now) ? before : now));
       },
       setBook: (bid, ask) => legend.current?.setBook(bid, ask),
       setStatus: (status, message) => legend.current?.setStatus(status, message),
@@ -100,13 +111,13 @@ export function ChartPane({
       created.setGestureTuning(gestureSettings.get()),
     );
     setChart(created);
-    if (import.meta.env.DEV) window.__tradingNerd = { chart: created };
+    if (import.meta.env.DEV) window.__tradingNerd = { ...window.__tradingNerd, chart: created };
     return () => {
       stopSettings();
       values.chart = null;
       created.destroy();
       setChart(null);
-      if (import.meta.env.DEV) window.__tradingNerd = { chart: null };
+      if (import.meta.env.DEV) window.__tradingNerd = { ...window.__tradingNerd, chart: null };
     };
   }, [values]);
 
@@ -114,6 +125,7 @@ export function ChartPane({
   useEffect(() => {
     chart?.setIndicators(indicators.list);
     values.refresh();
+    if (chart) setErrors(chart.indicatorErrors());
   }, [chart, indicators.list, values]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new key, session or time zone restarts the session
@@ -129,6 +141,7 @@ export function ChartPane({
       settings: chartSettings.get(),
       onInfo: (info) => {
         values.hasVolume = hasRealVolume(info);
+        values.priceDecimals = info.pricePrecision;
         setSymbolContext({ base: volumeUnit(info), hasVolume: hasRealVolume(info) });
         onInfoRef.current?.(info);
       },
@@ -162,13 +175,16 @@ export function ChartPane({
       onHide: (id, hidden) => indicatorStore.setHidden(id, hidden),
       onSettings: (id) => setEditing(id),
       onRemove: (id) => indicatorStore.remove(id),
+      onSource: (id) => {
+        const indicator = indicatorStore.get().list.find((item) => item.id === id);
+        if (indicator) pineStore.openIndicator(indicator);
+      },
     }),
     [],
   );
-  // Volume sits in the price pane: its row joins the legend's; the others' panes have their own.
-  const inPricePane = indicators.list.filter(
-    (item) => indicatorDefinition(item.kind).placement !== 'pane',
-  );
+  // Volume and overlays sit in the price pane: their rows join the legend's; the others' panes
+  // have their own.
+  const inPricePane = indicators.list.filter((item) => definitionOf(item).placement !== 'pane');
 
   return (
     <div className={styles.pane}>
@@ -181,6 +197,7 @@ export function ChartPane({
           symbol={symbolContext}
           values={values}
           actions={actions}
+          errors={errors}
         />
       </Legend>
       <PaneLegends
@@ -189,6 +206,7 @@ export function ChartPane({
         symbol={symbolContext}
         values={values}
         actions={actions}
+        errors={errors}
       />
       {editing !== null && (
         <IndicatorSettingsDialog id={editing} onClose={() => setEditing(null)} />
@@ -196,3 +214,6 @@ export function ChartPane({
     </div>
   );
 }
+
+const sameErrors = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>) =>
+  a.size === b.size && [...a].every(([id, message]) => b.get(id) === message);
