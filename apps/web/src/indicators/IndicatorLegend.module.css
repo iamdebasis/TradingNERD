@@ -47,6 +47,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A script that stopped: a red "!" after its name, its message on hover (provisional, §11). */
+.error {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  cursor: default;
+}
+
 .hiddenEye {
   display: flex;
   align-items: center;

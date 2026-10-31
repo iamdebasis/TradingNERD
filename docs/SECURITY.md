@@ -16,7 +16,7 @@ tradingNerd runs on one person's Mac, for that person only.
 
 That is the whole list. Each provider also sees the Mac's IP address and which symbols are looked at; live data can't be fetched without that.
 
-**Never leaves:** the watchlists, flags, chart settings, the downloaded history, the keys (except each to its own provider), and anything in `data/`. ETH Zurich's dataset is put in place by hand; the app never contacts Zenodo.
+**Never leaves:** the watchlists, flags, chart settings, the downloaded history, the keys (except each to its own provider), the user's Pine scripts (My scripts and their versions in `data/scripts.json`, and the open script's unsaved code, kept in the browser), and anything in `data/`. ETH Zurich's dataset is put in place by hand; the app never contacts Zenodo.
 
 ## How the app keeps it so
 
@@ -31,6 +31,8 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
   - **On the wire:** keys go only in request headers, each to its own provider, never in a web address.
   - **Logs:** no log line prints a key, and logs stay on the user's terminal, at "warn" level.
 - **The browser loads nothing from outside.** No web fonts, CDNs, analytics or trackers. Logos are fetched by the gateway, only from CoinGecko's two image hosts, and served from `data/logos/`. Outside links open only when clicked, without a referrer (`rel="noopener noreferrer"`).
+  - **The Pine Editor** (P1) is Monaco, installed as a package (`monaco-editor`, Microsoft's, MIT) and bundled with the app: its code, worker, styles and icon font come from the web app's own server, never from Monaco's CDN.
+  - **Pine scripts run in the browser,** in our own engine (`packages/pine`): a script can read only the chart's bars and the symbol's details, and has no way to reach the network, files or the page. A runaway loop stops at 500 ms per bar.
 - **No telemetry** in the code or its dependencies.
 - **Git:**
   - `data/`, `.env` files and test output are ignored (`.gitignore`), and `data/` has never been committed.
@@ -49,7 +51,7 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **Commit only as the project's identity, in UTC** (AGENTS.md, "Git"), and check before any push. Never put a personal email, name, home folder or time zone into a commit or a file.
 - **Screenshots** added to the repository have account names, avatars and anything identifying covered first. Keep the pixels the tests measure, and prove nothing else changed.
 - **Never get around a block** (bot checks, rate limits, refused requests). Back off, or ask the user.
-- **Live checks against the user's app are read-only** (AGENTS.md).
+- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts: a check never saves, renames or deletes one (the browser tests fake `/api/scripts`).
 
 ## Checks to run before a hand-over
 

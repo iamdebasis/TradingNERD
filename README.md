@@ -34,8 +34,9 @@ TradingView sets the bar for charting: smooth trackpad gestures, a dense but cal
 | **History** | Deep scroll-back with resampling to any interval, seconds and ticks, and only whole bars. Market caps go back to 2013 through a resumable, rate-limit-aware download and a CC0 academic dataset |
 | **Watchlists** | Several lists, sections, flags, multi-select, drag and drop, and TradingView's own `.txt` import and export |
 | **Indicators** | TradingView's Indicators button and dialog with favorites; Volume and RSI computed as Pine computes them, live and through history, with their legend rows, settings (inputs, styles, and the Style tab's output and input values) and panes, RSI's gradient fills included. A value is drawn only where the loaded bars settle it, never one that differs from TradingView's for want of older bars |
+| **Pine Script** | A Pine Editor in a side panel, as on TradingView, with Pine Script® v6 run in the browser by our own engine. A built-in's code is editable at once as your copy, with Reset to original. Add to chart and Update on chart; errors underlined and listed in the console; My scripts saved with every version. RSI's Pine code gives the built-in's values exactly, bar for bar |
 | **Performance** | 60 fps panning and zooming through 20,000 bars; under 2 ms a frame with 50 rows ticking; symbol and interval switches under 150 ms, all enforced by tests |
-| **Quality** | About 1,170 unit and integration tests and 217 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
+| **Quality** | About 1,330 unit and integration tests and 225 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
 | **Security** | A loopback-only gateway with Host and Origin checks, owner-only key storage, keys masked to the browser, and no outside requests from the browser |
 
 ## Architecture
@@ -46,8 +47,9 @@ A browser app and a local gateway, both bound to `127.0.0.1`. The gateway is the
 flowchart LR
   subgraph Browser["Browser: React 19 + Vite on 127.0.0.1:5173"]
     TB["Top bar and intervals"]
-    CH["Chart pane<br/>Lightweight Charts + gesture layer<br/>+ indicators and their panes"]
+    CH["Chart pane<br/>Lightweight Charts + gesture layer<br/>+ indicators, Pine scripts and their panes"]
     WL["Watchlists, flags, symbol search"]
+    PE["Pine Editor<br/>Monaco + our Pine v6 engine"]
   end
   subgraph Gateway["Local gateway: Node 26 + Fastify on 127.0.0.1:5180"]
     MS["MarketService<br/>paging, resampling, whole bars,<br/>live candles, quotes, cache"]
@@ -55,7 +57,8 @@ flowchart LR
     US["US stocks<br/>Alpaca, market clock"]
     CC["CRYPTOCAP<br/>market caps, dominance, older years"]
     FX["Formulas"]
-    ST[("data/<br/>lists, keys, kept history")]
+    SC["My scripts<br/>every saved version"]
+    ST[("data/<br/>lists, scripts, keys, kept history")]
   end
   subgraph Providers["Data providers"]
     EX["Exchanges' public APIs"]
@@ -75,14 +78,18 @@ flowchart LR
   US <--> AL
   CC <--> CG
   CC <--> LW
+  PE -->|"Add to chart"| CH
+  PE <-->|"REST: My scripts"| SC
   MS --- ST
+  SC --- ST
 ```
 
 | Part | Responsibility |
 |---|---|
-| [`apps/web`](apps/web) | The screen: app shell, chart pane, interval bar, watchlists, symbol search, dialogs |
+| [`apps/web`](apps/web) | The screen: app shell and right toolbar, chart pane, interval bar, watchlists, symbol search, the Pine Editor, dialogs |
 | [`packages/chart`](packages/chart) | The chart engine around Lightweight Charts: the gesture layer (wheel, trackpad, keyboard, drag), plugins (crosshair, last price, extended hours, session shading), indicators' series and panes |
 | [`packages/indicators`](packages/indicators) | TradingView's built-in indicators as Pine computes them: the `ta.*` functions, Volume and RSI, bar by bar and live |
+| [`packages/pine`](packages/pine) | Pine Script® v6, our own engine: the parser, the type and qualifier checks, the runtime with Pine's execution model, the built-ins, and the warm-up checks that keep unsettled values off the chart |
 | [`packages/core`](packages/core) | Shared by both sides: the protocol, intervals and the resampler, the market clock, formulas, watchlist files |
 | [`apps/gateway`](apps/gateway) | Exchange adapters, the market service and its cache, search, US stocks, CRYPTOCAP, formulas, logos, storage |
 
@@ -201,8 +208,8 @@ flowchart LR
   - the browser sees them only masked;
   - they're sent only in request headers, each to its own provider;
   - no log line prints one.
-- **The browser loads nothing from outside:** no fonts, CDNs, analytics or trackers. Logos are fetched by the gateway and served from disk.
-- **Your data stays local.** Watchlists, settings and downloaded history live in `data/`, which is git-ignored and has never been committed.
+- **The browser loads nothing from outside:** no fonts, CDNs, analytics or trackers. Logos are fetched by the gateway and served from disk. The Pine Editor's Monaco is bundled with the app, and scripts run in our own engine, which can't reach the network.
+- **Your data stays local.** Watchlists, scripts, settings and downloaded history live in `data/`, which is git-ignored and has never been committed.
 
 The full model and the checks to run are in [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -237,6 +244,7 @@ flowchart LR
 | Layer | Choice |
 |---|---|
 | Chart | [Lightweight Charts](https://github.com/tradingview/lightweight-charts) 5.2 with our own plugins and gesture layer |
+| Code editor | [Monaco Editor](https://github.com/microsoft/monaco-editor) 0.57, bundled, with our own Pine v6 engine and colors |
 | UI | React 19, TypeScript 7, Vite 8, CSS Modules and CSS variables |
 | Gateway | Node 26 (TypeScript run directly, no build step), Fastify 5, ws |
 | Storage | JSON files written atomically, an in-memory history cache |
@@ -251,6 +259,7 @@ apps/gateway         Local server: exchanges, market service, CRYPTOCAP, US stoc
 packages/core        Shared protocol, intervals, resampling, market clock, formulas
 packages/chart       Chart engine: Lightweight Charts wrapper, gestures, plugins, indicator panes
 packages/indicators  Built-in indicators as Pine computes them (Volume, RSI)
+packages/pine        Pine Script v6: our own parser, compiler, runtime and built-ins
 docs/                SPEC (source of truth), architecture, security, hand-over
 docs/reference/      TradingView screenshots used for pixel comparisons
 tools/accuracy/      The screenshot ruler for checking older history
@@ -288,18 +297,20 @@ pnpm test:live      # opt-in checks against the real exchanges
 
 | Suite | Tests |
 |---|---|
-| `packages/core` | 339 |
+| `packages/core` | 345 |
 | `packages/indicators` | 78 |
-| `packages/chart` | 65 |
-| `apps/web` (unit) | 166 |
-| `apps/gateway` | 517, plus 66 live tests |
-| End to end (Playwright) | 217 |
+| `packages/pine` | 128 |
+| `packages/chart` | 76 |
+| `apps/web` (unit) | 171 |
+| `apps/gateway` | 531, plus 66 live tests |
+| End to end (Playwright) | 225 |
 
 The end-to-end suite runs against a fake gateway and fakes every write. It includes pixel comparisons against TradingView's own screenshots and performance budgets.
 
 ## Roadmap
 
 - **Each coin's older days (M9f, under way):** every CRYPTOCAP symbol back to 2013, switched on once the accuracy test passes.
+- **More of the Pine Editor:** version history with differences, Rename, Make a copy and Delete, Pine Logs, and more of the language (`plotshape`, `barcolor`, arrays, `request.security`) (P2); then drawings, libraries, strategies and alerts (P3).
 - **More indicators:** moving averages, Bollinger Bands and VWAP (I2); MACD, Stochastic, ATR and TradingView's pane controls (I3); templates and saved defaults (I4).
 - Kraken's full history from its downloadable files.
 - Gold and silver for spreads such as BTCUSD/XAUUSD.
@@ -311,6 +322,7 @@ The full list, with every provisional choice, is in [docs/SPEC.md §11](docs/SPE
 ## Acknowledgements and data sources
 
 - **Charts:** [Lightweight Charts™](https://github.com/tradingview/lightweight-charts) by TradingView, Apache 2.0.
+- **Code editor:** [Monaco Editor](https://github.com/microsoft/monaco-editor) by Microsoft, MIT.
 - **Market data:** the public APIs of Binance, Bybit, OKX, Coinbase, Kraken and Bitstamp; [Alpaca](https://alpaca.markets) for US stocks; [Nasdaq Trader](https://www.nasdaqtrader.com)'s symbol directory.
 - **Coin data:** [CoinGecko](https://www.coingecko.com) and [Live Coin Watch](https://www.livecoinwatch.com), both credited in the app.
 - **Historical market caps:** Wu, Wheatley and Sornette's dataset of CoinMarketCap's daily figures ([Zenodo 4946058](https://zenodo.org/records/4946058), CC0; *Royal Society Open Science*, 2018).
@@ -319,4 +331,4 @@ Data is fetched on your machine with your own keys and isn't redistributed by th
 
 ## Disclaimer
 
-tradingNerd is a personal, non-commercial engineering project, built to learn and to demonstrate. It isn't affiliated with, endorsed by or connected to TradingView, Inc. "TradingView" is a trademark of TradingView, Inc.; it's referred to here only to describe what the project measures itself against. tradingNerd uses no TradingView data and no TradingView code, apart from the open-source Lightweight Charts library. The screenshots in `docs/reference/` are used only for side-by-side measurement. Nothing here is financial advice.
+tradingNerd is a personal, non-commercial engineering project, built to learn and to demonstrate. It isn't affiliated with, endorsed by or connected to TradingView, Inc. "TradingView" is a trademark of TradingView, Inc.; it's referred to here only to describe what the project measures itself against. tradingNerd uses no TradingView data and no TradingView code, apart from the open-source Lightweight Charts library. "Pine Script" is a trademark of TradingView, Inc. tradingNerd's Pine engine, and the Pine code of its built-ins, are its own, written from TradingView's public Pine Script documentation. The screenshots in `docs/reference/` are used only for side-by-side measurement. Nothing here is financial advice.

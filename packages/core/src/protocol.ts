@@ -16,8 +16,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 9: formulas (spreads): the `spread` kind, symbols up to 256 characters, and an unknown
  *    symbol's `suggestion`.
  * 10: indicators: a history page's `fromListing`.
+ * 11: Pine scripts: My scripts and their versions (/api/scripts).
  */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {

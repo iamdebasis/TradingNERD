@@ -28,6 +28,7 @@ import { LogoService } from '../src/logos/LogoService.ts';
 import { MarketService } from '../src/market/MarketService.ts';
 import { buildServer } from '../src/server.ts';
 import { FlagStore } from '../src/storage/FlagStore.ts';
+import { ScriptsStore } from '../src/storage/ScriptsStore.ts';
 import { SecretStore } from '../src/storage/secrets.ts';
 import { WatchlistsStore } from '../src/storage/WatchlistsStore.ts';
 import { FakeCatalogSource, pair } from './helpers/FakeCatalog.ts';
@@ -91,6 +92,7 @@ async function start() {
       watchlist: new WatchlistsStore(dataDir),
       flags: new FlagStore(dataDir),
       logos,
+      scripts: new ScriptsStore(dataDir),
     },
   );
   app.addHook('onClose', async () => catalog.close());
@@ -121,6 +123,20 @@ describe('gateway HTTP', () => {
     const res = await get('/api/health', { origin: 'https://evil.example' });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ error: 'forbidden_origin' });
+  });
+
+  it('saves a Pine script and serves it back, only to the UI', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/scripts',
+      headers: { host: '127.0.0.1:5180', origin: UI_ORIGIN },
+      payload: { name: 'My RSI', source: 'plot(close)', from: 'rsi' },
+    });
+    expect(res.statusCode).toBe(200);
+    const { id } = res.json();
+    expect((await get(`/api/scripts/${id}`)).json()).toMatchObject({ name: 'My RSI', version: 1 });
+    expect((await get('/api/scripts/s-unknown')).statusCode).toBe(404);
+    expect((await get('/api/scripts', { origin: 'https://evil.example' })).statusCode).toBe(403);
   });
 
   it('rejects a non-loopback Host header (DNS rebinding)', async () => {

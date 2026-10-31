@@ -18,6 +18,7 @@ import { buildServer } from './server.ts';
 import { DIRECTORY_URLS, UsListings } from './stocks/UsListings.ts';
 import { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import { FlagStore } from './storage/FlagStore.ts';
+import { ScriptsStore } from './storage/ScriptsStore.ts';
 import { SecretStore } from './storage/secrets.ts';
 import { WatchlistsStore } from './storage/WatchlistsStore.ts';
 
@@ -100,6 +101,7 @@ const catalog = new SymbolCatalog({
 
 const watchlist = new WatchlistsStore(config.dataDir, warn('data'));
 const flags = new FlagStore(config.dataDir, warn('data'));
+const scripts = new ScriptsStore(config.dataDir, warn('data'));
 
 const logos = new LogoService({
   client: coingecko,
@@ -113,6 +115,7 @@ const app = await buildServer(config, {
   watchlist,
   flags,
   logos,
+  scripts,
   stocks,
   olderCaps: { older: cryptocap.older, coins: cryptocap.olderCoins },
 });

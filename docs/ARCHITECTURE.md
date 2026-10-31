@@ -6,12 +6,13 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 
 ```
  Browser: React web app (Vite, 127.0.0.1:5173)
- ┌──────────┬───────────────────────────────┬──────────────────────┐
- │ Top bar, │ Chart: Lightweight Charts     │ Watchlists, flags,   │
- │ Indica-  │ + our gestures and plugins,   │ symbol search, logos │
- │ tors     │ indicators and their panes    │                      │
- └──────────┴───────────────┬───────────────┴──────────────────────┘
-   REST (history /api/bars, search, lists, keys) + one WebSocket (live bars, quotes, book)
+ ┌──────────┬───────────────────────────────┬──────────────────────┬──────┐
+ │ Top bar, │ Chart: Lightweight Charts     │ Right panel: the     │ Right│
+ │ Indica-  │ + our gestures and plugins,   │ watchlists (flags,   │ tool-│
+ │ tors     │ indicators, Pine scripts and  │ search, logos) or    │ bar  │
+ │          │ their panes                   │ the Pine Editor      │      │
+ └──────────┴───────────────┬───────────────┴──────────────────────┴──────┘
+   REST (history /api/bars, search, lists, scripts, keys) + one WebSocket (live bars, quotes, book)
  Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only)
  ┌──────────────────────────▼───────────────────────────────────────┐
  │ MarketService: history paging, resampling, the whole-bar rule,   │
@@ -21,6 +22,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
  │ CRYPTOCAP: market caps from CoinGecko's coins × exchange prices; │
  │ older years from Live Coin Watch and ETH Zurich's dataset        │
  │ Formulas (spreads) · symbol catalog and search · logos           │
+ │ My scripts: the Pine Editor's saved scripts and their versions   │
  │ Storage: JSON files in data/ (gitignored, owner-only)            │
  └──────────────────────────┬───────────────────────────────────────┘
                             ▼ HTTPS and WebSockets to the providers only
@@ -30,10 +32,11 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 
 | Package | What it holds |
 |---|---|
-| `packages/core` | Shared by both sides: the protocol (`protocol.ts`, `market.ts`), resolutions and intervals, the resampler (`resample.ts`), the market clock and status (`clock.ts`, `schedule.ts`, `marketStatus.ts`, `timezone.ts`), formulas (`formula.ts`), watchlists and their TradingView `.txt` files, flags, logos, stocks and older-caps status types |
-| `packages/indicators` | TradingView's built-in indicators as Pine computes them (I1: Volume and RSI): the `ta.*` kernels (`kernels.ts`), the definitions (`volume.ts`, `rsi.ts`: inputs, plots, levels, fills, defaults), `IndicatorRun` (`run.ts`: closed bars committed, the live bar tentative, a correction redone), the warm-up rule (`warmup.ts`), settings and the registry. No DOM |
-| `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels, fills, value labels), `indicators/` (`IndicatorLayer.ts`: the indicators' series, panes, levels and labels), `tuning.ts` for the feel's constants |
-| `apps/web` | The screen: `layout/AppShell.tsx`, `chart/` (pane, legend, interval prompt, chart settings), `toolbar/` (intervals), `indicators/` (the store, the Indicators button and dialog, legend rows, the settings dialog), `watchlist/` (lists, sections, flags, row menus, drag), `search/` (symbol search and typed formulas), `logos/`, `stocks/` (the Alpaca key dialog), `olderCaps/` (the Live Coin Watch dialog), `gestures/` (the tuning popup), `theme/` (tokens), `data/` (the gateway connection and REST client) |
+| `packages/core` | Shared by both sides: the protocol (`protocol.ts`, `market.ts`), resolutions and intervals, the resampler (`resample.ts`), the market clock and status (`clock.ts`, `schedule.ts`, `marketStatus.ts`, `timezone.ts`), formulas (`formula.ts`), watchlists and their TradingView `.txt` files, flags, logos, stocks and older-caps status types, My scripts' types and checks (`scripts.ts`, P1) |
+| `packages/pine` | **P1:** Pine Script® v6 from text to values (SPEC §6.17). `lexer.ts`, `parser.ts`, `ast.ts` read the code; `compiler.ts`, `types.ts`, `builtins.ts` check its types and qualifiers and turn it into closures over a `Runtime` (`runtime.ts`: each variable's history, the live bar rolled back and committed, outputs in typed arrays, the 500 ms loop limit); `ta.ts` holds each `ta.*` call's state; `script.ts` has `compileScript`, `ScriptProgram` (inputs, `describe`) and `ScriptRun` (the script over the chart's bars, ticks, new bars and corrections); `warmup.ts` is the warm-up rule for scripts. No DOM |
+| `packages/indicators` | TradingView's built-in indicators as Pine computes them (I1: Volume and RSI): the `ta.*` kernels (`kernels.ts`), the definitions (`volume.ts`, `rsi.ts`: inputs, plots, levels, fills, defaults), `IndicatorRun` (`run.ts`: closed bars committed, the live bar tentative, a correction redone), the warm-up rule (`warmup.ts`), settings and the registry; RSI's own Pine code for the Pine Editor (`rsi.pine.ts`). No DOM |
+| `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels, fills, backgrounds, value labels), `indicators/` (`IndicatorLayer.ts`: the indicators' series, panes, levels and labels; `script.ts`: a Pine script read as an indicator and run), `tuning.ts` for the feel's constants |
+| `apps/web` | The screen: `layout/` (`AppShell.tsx`, the right toolbar `RightToolbar.tsx`, the panels' widths), `chart/` (pane, legend, interval prompt, chart settings), `toolbar/` (intervals), `indicators/` (the store, the Indicators button and dialog, legend rows, the settings dialog, `definitions.ts`), `pine/` (the Pine Editor: the panel, Monaco and Pine's colors, the open script, Save script), `watchlist/` (lists, sections, flags, row menus, drag), `search/` (symbol search and typed formulas), `logos/`, `stocks/` (the Alpaca key dialog), `olderCaps/` (the Live Coin Watch dialog), `gestures/` (the tuning popup), `theme/` (tokens), `data/` (the gateway connection and REST client) |
 | `apps/gateway` | The local server (below) |
 
 ## The gateway
@@ -49,8 +52,8 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 | `cryptocap/` | CRYPTOCAP's symbols: see below |
 | `formula/` | `FormulaExchange.ts`: a typed formula (TOTAL2/XRPUSD) as its own exchange, built from its symbols' bars; serves up to a day, and the market service builds longer bars from its days (A6) |
 | `logos/` | CoinGecko's coin and exchange logos, cached in `data/logos/`; CoinGecko's client and its monthly call count |
-| `storage/` | Watchlists, flags, secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
-| `routes/` | REST: bars, symbols, watchlists, flags, logos, the stock key, older caps |
+| `storage/` | Watchlists, flags, My scripts (`ScriptsStore.ts`, P1), secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
+| `routes/` | REST: bars, symbols, watchlists, flags, scripts (`scripts.ts`), logos, the stock key, older caps |
 | `ws/session.ts` | One WebSocket per browser tab: subscriptions to bars, quotes and live candles |
 
 ## How data flows
@@ -68,6 +71,12 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   3. Every change to the bars reaches it: a page of history (computed afresh), a live tick (the last bar again), a new bar, an exchange's correction.
   4. The legend reads the values on the bar it shows (`indicatorValues`), written at the Style tab's Precision; its "Output values" and "Input values" (`DisplaySettings` in `settings.ts`) only change how values show, so they apply in place, the series and values kept.
   5. The warm-up rule: a value that still depends on bars not loaded isn't drawn; the chart asks for older pages until it's settled, or the gateway says the history starts at the listing (`fromListing` on a page, protocol v10).
+- **Pine scripts** (P1) run in the browser the same way:
+  1. The Pine Editor (`apps/web/src/pine/`) keeps the open script and its unsaved code in this browser (`pineStore.ts`). A built-in's code opens editable, its original kept for Reset to original.
+  2. Add to chart puts the code itself in the indicator store as an indicator of kind `script` (`addScript`); Update on chart replaces it (`updateScript`), and inputs left at the old code's defaults take the new ones.
+  3. `IndicatorLayer` reads the compiled script as a definition (`packages/chart/src/indicators/script.ts`: inputs `in_0…`, outputs `plot_0…`, `hline_0…`, `fill_0…`, `bg_0…`), so the legend, the settings dialog and the panes treat it as any indicator, and runs it with `ScriptRun` (`packages/pine`).
+  4. The warm-up rule for scripts: beside the script's own run, three check runs (one bar later; bar 0 one percent higher; bars 0 and 1 a thousand times apart) show where a value still depends on bars not loaded (`warmup.ts`, SPEC §6.17).
+  5. Save script sends the code to the gateway (`POST /api/scripts`, then `PUT` for each new version), which keeps it in `data/scripts.json`. My scripts are listed in the Indicators dialog and the editor's menu.
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 
 ## CRYPTOCAP (`apps/gateway/src/cryptocap/`)
@@ -92,6 +101,7 @@ TradingView's crypto market caps (TOTAL, TOTAL2, TOTAL3, OTHERS, the ES ones, TO
 SPEC §6.8 lists every file. The ones to protect:
 - `secrets.json`: the keys.
 - `watchlists.json` and `flags.json`: the user's own lists.
+- `scripts.json`: My scripts and every saved version of each (P1).
 - `cryptocap/anchors.json`: the kept days, which can't be downloaded again.
 - `cryptocap/older-coins/`: M9f's downloads, a few days of free requests.
 
@@ -121,6 +131,9 @@ SPEC §6.8 lists every file. The ones to protect:
 - **Each price scale formats its own numbers.** The symbol's format is the candle series' own (`priceFormat: custom`), not the chart's localization, which would override every pane's. Indicator panes format theirs.
 - **The library lays out a new pane a frame later:** read a pane's height from the pane (`getHeight()`), not `chart.paneSize(i)`, which throws until then.
 - **Fills go under plots, levels over them** (Pine's z-order). A gradient fill is a canvas gradient placed at its two prices each frame, so it follows the pane's scale; beyond those prices it keeps its end colors.
+- **Monaco is imported by its exports map** (`monaco-editor/editor/editor.api.js`, `…/editor.worker.js?worker`), loaded the first time the Pine Editor opens, and bundled: nothing comes from a CDN. Its codicon CSS is imported by relative path, and its side-effect imports are declared in `pine/monaco-features.d.ts`.
+- **Code Node runs as it is** (the gateway, or a benchmark run with `node` on `packages/pine`) must be erasable TypeScript: no enums or parameter properties (`erasableSyntaxOnly`). Node's type stripping also reads `private declare(` as a declaration, not a method (checked on Node 26, 2026-10-31), hence the compiler's `define`.
+- **A script's outputs are numbered by kind and place** (`plot_0`, `hline_0`…, inputs `in_0`…). Its settings follow those ids, so an edit that reorders plots or inputs moves the settings along with the places, not the titles.
 
 ## Adding things
 
@@ -136,3 +149,5 @@ SPEC §6.8 lists every file. The ones to protect:
   2. Add its definition to `packages/indicators` (inputs, plots, levels, fills with their edges and any gradient, format, `legendName` and `legendInputs`, `settledFrom`) with any new kernels, and register it.
   3. Test it against published values and hand-built cases, bar by bar against one pass (`run.test.ts`).
   4. Hand-check it against TradingView on the user's screenshots (SPEC §9).
+  5. Write its Pine code (our own, as `rsi.pine.ts`), add it to `BUILTIN_CODE` in `apps/web/src/indicators/definitions.ts` and the editor's Create new menu, and test the code against the TypeScript definition bar by bar (`packages/pine/src/rsi.test.ts`).
+- **A Pine built-in** (`packages/pine/src/builtins.ts`): its signature and qualifiers from Pine's v6 reference, a test of its values and its errors, and its removal from the `LATER` list, which names what isn't built yet.

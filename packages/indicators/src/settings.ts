@@ -53,17 +53,32 @@ export function displayFormat(format: ValueFormat, precision: number | null): Va
     : { kind: 'decimals', decimals: precision };
 }
 
-/** Everything that has a look, by id: plots, levels, then fills. */
+/** Everything that has a look, by id: plots, levels, fills, then backgrounds. */
 export function styleSpecs(definition: IndicatorDefinition) {
-  return [...definition.plots, ...definition.levels, ...definition.fills];
+  return [
+    ...definition.plots,
+    ...definition.levels,
+    ...definition.fills,
+    ...(definition.backgrounds ?? []),
+  ];
 }
 
 export function defaultSettings(definition: IndicatorDefinition): IndicatorSettings {
   const inputs: Record<string, InputValue> = {};
   for (const input of definition.inputs) inputs[input.id] = input.default;
   const styles: Record<string, StyleValue> = {};
-  for (const spec of styleSpecs(definition)) styles[spec.id] = { ...spec.style };
+  if (!definition.styleOverrides) {
+    for (const spec of styleSpecs(definition)) styles[spec.id] = { ...spec.style };
+  }
   return { inputs, styles, display: { ...DEFAULT_DISPLAY } };
+}
+
+/** The look an output is drawn with: the settings', or for a script the code's unless changed. */
+export function styleOf(
+  settings: IndicatorSettings,
+  spec: { id: string; style: StyleValue },
+): StyleValue {
+  return settings.styles[spec.id] ?? spec.style;
 }
 
 const isColor = (value: unknown): value is string =>
@@ -90,6 +105,14 @@ function sanitizeInput(spec: InputSpec, value: unknown): InputValue {
       return typeof value === 'string' && spec.options.includes(value) ? value : spec.default;
     case 'bool':
       return typeof value === 'boolean' ? value : spec.default;
+    case 'string':
+      return typeof value === 'string' ? value : spec.default;
+    case 'color':
+      return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 2 ** 32
+        ? value
+        : spec.default;
+    case 'numbers':
+      return typeof value === 'number' && spec.options.includes(value) ? value : spec.default;
   }
 }
 
@@ -163,6 +186,8 @@ export function sanitizeSettings(
   for (const spec of definition.inputs) inputs[spec.id] = sanitizeInput(spec, rawInputs[spec.id]);
   const styles: Record<string, StyleValue> = {};
   for (const spec of styleSpecs(definition)) {
+    // A script keeps only the looks its Style tab changed.
+    if (definition.styleOverrides && rawStyles[spec.id] === undefined) continue;
     styles[spec.id] = sanitizeStyle(spec.style, rawStyles[spec.id]);
   }
   return { inputs, styles, display: sanitizeDisplay(raw.display) };

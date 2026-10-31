@@ -5,16 +5,18 @@ import {
   type IndicatorSettings,
   type InputSpec,
   type InputValue,
-  indicatorDefinition,
   type LineDash,
   PRECISIONS,
   SOURCES,
   type StyleValue,
+  styleOf,
 } from '@tradingnerd/indicators';
+import { colorHex, hexColor, unpackColor, withTransparency } from '@tradingnerd/pine';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Dropdown } from '../chart/Dropdown';
 import { CloseIcon } from '../toolbar/icons';
+import { definitionOf } from './definitions';
 import styles from './IndicatorSettingsDialog.module.css';
 import { indicatorStore, useIndicators } from './indicatorStore';
 
@@ -44,7 +46,7 @@ export function IndicatorSettingsDialog({ id, onClose }: { id: string; onClose()
   const { list } = useIndicators();
   const indicator = list.find((item) => item.id === id);
   const [initial] = useState(() => indicator?.settings);
-  const definition = indicator ? indicatorDefinition(indicator.kind) : null;
+  const definition = indicator ? definitionOf(indicator) : null;
   const [tab, setTab] = useState<Tab>(
     definition && definition.inputs.length > 0 ? 'inputs' : 'style',
   );
@@ -240,32 +242,101 @@ function InputRow({
     <div className={styles.row} data-disabled={disabled || undefined}>
       <label className={styles.label} htmlFor={id}>
         {spec.title}
+        {spec.tooltip && (
+          <span
+            className={styles.tooltip}
+            role="img"
+            title={spec.tooltip}
+            aria-label={spec.tooltip}
+          >
+            ⓘ
+          </span>
+        )}
       </label>
       <div className={styles.control}>
-        {spec.kind === 'int' || spec.kind === 'float' ? (
-          <NumberField
-            id={id}
-            value={value as number}
-            min={spec.min}
-            max={spec.max}
-            step={spec.kind === 'float' ? spec.step : 1}
-            disabled={disabled}
-            onChange={onChange}
-          />
-        ) : (
-          <Dropdown
-            label={spec.title}
-            value={String(value)}
-            options={(spec.kind === 'source' ? SOURCES : spec.options).map((option) => ({
-              value: option,
-              label: option,
-            }))}
-            onChange={onChange}
-          />
-        )}
+        <InputControl id={id} spec={spec} value={value} disabled={disabled} onChange={onChange} />
       </div>
     </div>
   );
+}
+
+/** The field for one input, by its kind: a number, a menu, text, or a color. */
+function InputControl({
+  id,
+  spec,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  spec: Exclude<InputSpec, { kind: 'bool' }>;
+  value: InputValue;
+  disabled: boolean;
+  onChange(value: InputValue): void;
+}) {
+  switch (spec.kind) {
+    case 'int':
+    case 'float':
+      return (
+        <NumberField
+          id={id}
+          value={value as number}
+          min={spec.min}
+          max={spec.max}
+          step={spec.kind === 'float' ? spec.step : 1}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
+    case 'string':
+      return (
+        <input
+          id={id}
+          type="text"
+          className={styles.text}
+          value={String(value)}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      );
+    case 'color': {
+      // A script's color input: its color here, its transparency kept as the script gave it.
+      const packed = value as number;
+      return (
+        <input
+          id={id}
+          type="color"
+          className={styles.colorInput}
+          value={colorHex(packed).toLowerCase()}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange(withTransparency(hexColor(event.target.value), unpackColor(packed).t))
+          }
+        />
+      );
+    }
+    case 'numbers':
+      return (
+        <Dropdown
+          label={spec.title}
+          value={String(value)}
+          options={spec.options.map((option) => ({ value: String(option), label: String(option) }))}
+          onChange={(next) => onChange(Number(next))}
+        />
+      );
+    default:
+      return (
+        <Dropdown
+          label={spec.title}
+          value={String(value)}
+          options={(spec.kind === 'source' ? SOURCES : spec.options).map((option) => ({
+            value: option,
+            label: option,
+          }))}
+          onChange={onChange}
+        />
+      );
+  }
 }
 
 /**
@@ -330,27 +401,31 @@ function StyleTab({
   onStyle(id: string, style: StyleValue): void;
   onDisplay(display: DisplaySettings): void;
 }) {
-  const { inputs, styles: looks, display } = settings;
-  const plots = definition.plots.filter((plot) => plot.shownWhen?.(inputs) ?? true);
-  const fills = definition.fills.filter((fill) => fill.shownWhen?.(inputs) ?? true);
-  const row = (id: string, title: string, kind: StyleKind) => {
-    const style = looks[id];
-    if (!style) return null;
-    return (
-      <StyleRow
-        key={id}
-        title={title}
-        kind={kind}
-        style={style}
-        onChange={(next) => onStyle(id, next)}
-      />
-    );
-  };
+  const { inputs, display } = settings;
+  // A script's outputs with editable = false aren't listed (the v6 reference's `editable`).
+  const plots = definition.plots.filter(
+    (plot) => (plot.shownWhen?.(inputs) ?? true) && plot.look?.editable !== false,
+  );
+  const fills = definition.fills.filter(
+    (fill) => (fill.shownWhen?.(inputs) ?? true) && fill.editable !== false,
+  );
+  const levels = definition.levels.filter((level) => level.editable !== false);
+  const backgrounds = (definition.backgrounds ?? []).filter((background) => background.editable);
+  const row = (spec: { id: string; title: string; style: StyleValue }, kind: StyleKind) => (
+    <StyleRow
+      key={spec.id}
+      title={spec.title}
+      kind={kind}
+      style={styleOf(settings, spec)}
+      onChange={(next) => onStyle(spec.id, next)}
+    />
+  );
   return (
     <>
-      {plots.map((plot) => row(plot.id, plot.title, plot.kind))}
-      {definition.levels.map((level) => row(level.id, level.title, 'level'))}
-      {fills.map((fill) => row(fill.id, fill.title, fill.gradient ? 'gradient' : 'fill'))}
+      {plots.map((plot) => row(plot, plot.kind))}
+      {levels.map((level) => row(level, 'level'))}
+      {fills.map((fill) => row(fill, fill.gradient ? 'gradient' : 'fill'))}
+      {backgrounds.map((background) => row(background, 'fill'))}
       <DisplaySection definition={definition} display={display} onChange={onDisplay} />
     </>
   );
@@ -372,7 +447,7 @@ function DisplaySection({
   display: DisplaySettings;
   onChange(display: DisplaySettings): void;
 }) {
-  const labelsOnScale = definition.placement === 'pane';
+  const labelsOnScale = definition.placement !== 'volume';
   const inputsInLegend = definition.legendInputs(defaultSettings(definition).inputs) !== '';
   const check = (key: 'priceLabels' | 'statusValues' | 'statusInputs', title: string) => (
     <label className={styles.row}>

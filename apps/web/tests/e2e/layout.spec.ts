@@ -6,6 +6,10 @@ const chart = (page: Page) => page.getByRole('main', { name: 'Chart' });
 const watchlist = (page: Page) => page.getByRole('complementary', { name: 'Watchlist' });
 const splitter = (page: Page) => page.getByRole('separator', { name: 'Resize watchlist' });
 
+/** The window (playwright.config.ts): the reference's 1,634 px plus the right toolbar's 48. */
+const WINDOW = 1634 + 48;
+const RIGHT_TOOLBAR = 48;
+
 async function boxOf(locator: Locator) {
   const box = await locator.boundingBox();
   if (!box) throw new Error('Element is not visible');
@@ -30,8 +34,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('layout geometry matches the reference screenshot', async ({ page }) => {
-  // Viewport 1634 × 1000 (playwright.config.ts); numbers from docs/SPEC.md §7.2.
-  expect(await boxOf(toolbar(page))).toEqual({ x: 0, y: 0, width: 1634, height: 38 });
+  // The reference's 1,634 × 1000 (docs/SPEC.md §7.2), the right toolbar beside it.
+  expect(await boxOf(toolbar(page))).toEqual({ x: 0, y: 0, width: WINDOW, height: 38 });
   expect(await boxOf(chart(page))).toEqual({ x: 4, y: 42, width: 1307, height: 954 });
   expect(await boxOf(splitter(page))).toEqual({ x: 1311, y: 42, width: 4, height: 954 });
   expect(await boxOf(watchlist(page))).toEqual({ x: 1315, y: 42, width: 315, height: 954 });
@@ -69,8 +73,8 @@ test('the splitter stops at the minimum and maximum widths', async ({ page }) =>
   expect(await widthOf(watchlist(page))).toBe(240);
 
   await dragSplitter(page, -3000);
-  // Window − workspace padding − splitter − minimum chart width.
-  expect(await widthOf(watchlist(page))).toBe(1634 - 2 * 4 - 4 - 320);
+  // Window − right toolbar − workspace padding − splitter − minimum chart width.
+  expect(await widthOf(watchlist(page))).toBe(WINDOW - RIGHT_TOOLBAR - 2 * 4 - 4 - 320);
   expect(await widthOf(chart(page))).toBe(320);
 });
 
@@ -90,9 +94,9 @@ test('a narrow window squeezes the watchlist without forgetting its width', asyn
   expect(await widthOf(watchlist(page))).toBe(800);
 
   await page.setViewportSize({ width: 1000, height: 1000 });
-  await expect.poll(() => widthOf(watchlist(page))).toBe(1000 - 2 * 4 - 4 - 320);
+  await expect.poll(() => widthOf(watchlist(page))).toBe(1000 - RIGHT_TOOLBAR - 2 * 4 - 4 - 320);
 
-  await page.setViewportSize({ width: 1634, height: 1000 });
+  await page.setViewportSize({ width: WINDOW, height: 1000 });
   await expect.poll(() => widthOf(watchlist(page))).toBe(800);
 });
 

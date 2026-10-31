@@ -14,9 +14,21 @@ export const WATCHLIST_LIMITS = {
 
 /** Widest the watchlist may be inside a workspace whose content box is `available` px wide. */
 export function watchlistMaxWidth(available: number): number {
-  const { min, chartMin, splitter } = WATCHLIST_LIMITS;
+  return panelMaxWidth(available, WATCHLIST_LIMITS.min);
+}
+
+/** Widest a right-hand panel at least `min` wide may be, leaving the chart its minimum. */
+export function panelMaxWidth(available: number, min: number): number {
+  const { chartMin, splitter } = WATCHLIST_LIMITS;
   return Math.max(min, Math.floor(available - splitter - chartMin));
 }
+
+/**
+ * The Pine Editor's width: about half a 1,425 px window, as in the user's screenshot of 27
+ * October 2026 (provisional, docs/SPEC.md §11), and no narrower than its header needs.
+ */
+export const PINE_DEFAULT_WIDTH = 680;
+export const PINE_MIN_WIDTH = 420;
 
 /** Clamps a width to [min, max] and rounds to whole CSS pixels. */
 export function clampWidth(value: number, min: number, max: number): number {

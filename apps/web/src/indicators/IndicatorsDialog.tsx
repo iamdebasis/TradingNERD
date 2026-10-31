@@ -1,3 +1,4 @@
+import type { ScriptSummary } from '@tradingnerd/core';
 import {
   INDICATORS,
   type IndicatorDefinition,
@@ -13,13 +14,30 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { scriptsApi } from '../data/api';
 import { CloseIcon, StarIcon } from '../toolbar/icons';
 import styles from './IndicatorsDialog.module.css';
 import { SearchIcon } from './icons';
-import { favoriteIndicators, useFavoriteIndicators } from './indicatorStore';
+import { favoriteIndicators, indicatorStore, useFavoriteIndicators } from './indicatorStore';
 
-/** The side list: TradingView's Favorites, and its built-ins under Technicals → Indicators. */
-type Section = 'favorites' | 'technicals';
+/**
+ * The side list: TradingView's Favorites, My scripts under Personal, and its built-ins under
+ * Technicals → Indicators.
+ */
+type Section = 'favorites' | 'mine' | 'technicals';
+
+/** A row: a built-in, or one of My scripts. */
+type Row =
+  | { kind: 'builtin'; definition: IndicatorDefinition }
+  | { kind: 'script'; script: ScriptSummary };
+
+const kindOf = (definition: IndicatorDefinition) => definition.kind as IndicatorKind;
+
+/** Puts one of My scripts on the chart, its latest saved code. */
+async function addSaved(script: ScriptSummary): Promise<void> {
+  const saved = await scriptsApi.get(script.id);
+  indicatorStore.addScript({ source: saved.source, scriptId: saved.id, from: saved.from });
+}
 
 /**
  * TradingView's "Indicators, metrics, and strategies" dialog (Pine docs, First steps): a search
@@ -43,14 +61,34 @@ export function IndicatorsDialog({
   );
   const [active, setActive] = useState(0);
   const [added, setAdded] = useState<string | null>(null);
+  /** My scripts, from the gateway; null until they come. */
+  const [mine, setMine] = useState<readonly ScriptSummary[] | null>(null);
 
-  const rows = useMemo((): readonly IndicatorDefinition[] => {
-    if (query.trim() !== '') return searchIndicators(query);
-    if (section === 'favorites') {
-      return INDICATORS.filter((definition) => favorites.includes(definition.kind));
+  useEffect(() => {
+    const abort = new AbortController();
+    scriptsApi.index(abort.signal).then(
+      (index) => setMine(index.scripts),
+      () => setMine([]),
+    );
+    return () => abort.abort();
+  }, []);
+
+  const rows = useMemo((): readonly Row[] => {
+    const builtins = (list: readonly IndicatorDefinition[]): Row[] =>
+      list.map((definition) => ({ kind: 'builtin', definition }));
+    const scripts = (list: readonly ScriptSummary[]): Row[] =>
+      list.map((script) => ({ kind: 'script', script }));
+    const text = query.trim().toLowerCase();
+    if (text !== '') {
+      const matching = (mine ?? []).filter((script) => script.name.toLowerCase().includes(text));
+      return [...builtins(searchIndicators(query)), ...scripts(matching)];
     }
-    return INDICATORS;
-  }, [query, section, favorites]);
+    if (section === 'favorites') {
+      return builtins(INDICATORS.filter((definition) => favorites.includes(kindOf(definition))));
+    }
+    if (section === 'mine') return scripts(mine ?? []);
+    return builtins(INDICATORS);
+  }, [query, section, favorites, mine]);
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -65,10 +103,17 @@ export function IndicatorsDialog({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const add = (definition: IndicatorDefinition) => {
-    onAdd(definition.kind);
-    // A short note that it was added, as the dialog stays open for more.
-    setAdded(definition.name);
+  const add = (row: Row) => {
+    if (row.kind === 'builtin') {
+      onAdd(kindOf(row.definition));
+      // A short note that it was added, as the dialog stays open for more.
+      setAdded(row.definition.name);
+      return;
+    }
+    addSaved(row.script).then(
+      () => setAdded(row.script.name),
+      () => setAdded(null),
+    );
   };
 
   const onInputKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -90,7 +135,11 @@ export function IndicatorsDialog({
       ? 'Star an indicator to see it here'
       : showing === 'search'
         ? 'No indicators match your criteria'
-        : '';
+        : showing === 'mine'
+          ? mine === null
+            ? 'Loading…'
+            : 'Save a script in the Pine Editor to see it here'
+          : '';
 
   return createPortal(
     <div className={styles.backdrop}>
@@ -146,6 +195,21 @@ export function IndicatorsDialog({
               <StarIcon filled={false} />
               Favorites
             </button>
+            <h3 className={styles.sideHeading}>Personal</h3>
+            <button
+              type="button"
+              className={styles.sideItem}
+              aria-current={showing === 'mine' ? 'page' : undefined}
+              onClick={() => {
+                setQuery('');
+                setSection('mine');
+                setActive(0);
+                input.current?.focus();
+              }}
+            >
+              <ScriptIcon />
+              My scripts
+            </button>
             <h3 className={styles.sideHeading}>Built-in</h3>
             <button
               type="button"
@@ -172,37 +236,43 @@ export function IndicatorsDialog({
             )}
             <div className={styles.header}>Script name</div>
             <div id={`${id}-list`} className={styles.list} role="listbox" aria-label="Indicators">
-              {rows.map((definition, i) => {
-                const starred = favorites.includes(definition.kind);
+              {rows.map((row, i) => {
+                const builtin = row.kind === 'builtin' ? kindOf(row.definition) : null;
+                const starred = builtin !== null && favorites.includes(builtin);
+                const name = row.kind === 'builtin' ? row.definition.name : row.script.name;
                 return (
                   <div
-                    key={definition.kind}
+                    key={builtin ?? (row.kind === 'script' ? row.script.id : name)}
                     id={`${id}-row-${i}`}
                     className={styles.row}
                     role="option"
                     aria-selected={i === active}
                     tabIndex={-1}
                     onMouseEnter={() => setActive(i)}
-                    onClick={() => add(definition)}
+                    onClick={() => add(row)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') add(definition);
+                      if (event.key === 'Enter') add(row);
                     }}
                   >
-                    <button
-                      type="button"
-                      className={styles.star}
-                      data-starred={starred || undefined}
-                      aria-label={starred ? 'Remove from favorites' : 'Add to favorites'}
-                      aria-pressed={starred}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        favoriteIndicators.toggle(definition.kind);
-                        input.current?.focus();
-                      }}
-                    >
-                      <StarIcon filled={starred} />
-                    </button>
-                    <span className={styles.name}>{definition.name}</span>
+                    {builtin ? (
+                      <button
+                        type="button"
+                        className={styles.star}
+                        data-starred={starred || undefined}
+                        aria-label={starred ? 'Remove from favorites' : 'Add to favorites'}
+                        aria-pressed={starred}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          favoriteIndicators.toggle(builtin);
+                          input.current?.focus();
+                        }}
+                      >
+                        <StarIcon filled={starred} />
+                      </button>
+                    ) : (
+                      <span className={styles.star} aria-hidden />
+                    )}
+                    <span className={styles.name}>{name}</span>
                   </div>
                 );
               })}
@@ -216,6 +286,24 @@ export function IndicatorsDialog({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** My scripts: a page of code. */
+function ScriptIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4.5 1.5h6l3 3v12h-9zM10.5 1.5v3h3M7.5 8.5 6 10l1.5 1.5M10.5 8.5 12 10l-1.5 1.5" />
+    </svg>
   );
 }
 

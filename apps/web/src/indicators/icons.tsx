@@ -83,6 +83,35 @@ export function GearIcon() {
   );
 }
 
+/** Source code ({ }), on a legend row's hover: opens the indicator's code in the Pine Editor. */
+export function CodeIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 2.5c-1.4 0-2 .6-2 2v2.3c0 1-.6 1.7-1.5 2.2.9.5 1.5 1.2 1.5 2.2v2.3c0 1.4.6 2 2 2M12 2.5c1.4 0 2 .6 2 2v2.3c0 1 .6 1.7 1.5 2.2-.9.5-1.5 1.2-1.5 2.2v2.3c0 1.4-.6 2-2 2" />
+    </svg>
+  );
+}
+
+/** A script's error on its legend row (a circled "!"). */
+export function ErrorIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+      <circle cx="8" cy="8" r="7" fill="#F23645" />
+      <path d="M8 4v5" stroke="#FFFFFF" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="8" cy="11.6" r="0.9" fill="#FFFFFF" />
+    </svg>
+  );
+}
+
 /** Remove (a bin), on a legend row's hover. */
 export function TrashIcon() {
   return (

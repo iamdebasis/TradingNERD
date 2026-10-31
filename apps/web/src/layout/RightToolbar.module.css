@@ -1,0 +1,40 @@
+/* Provisional: TradingView's right toolbar in the app's dark idiom, 44 px buttons (§11). */
+.toolbar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 48px;
+  padding: 4px 0;
+  background: var(--color-bg);
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.button[aria-pressed="true"] {
+  background: var(--color-chip);
+  color: var(--color-text);
+}
+
+.button:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}

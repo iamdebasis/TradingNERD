@@ -647,7 +647,9 @@ test('a tick chart: RSI and Volume over bars numbered by trade, a live trade mov
   // The latest 1,000 of 1,500 tick bars: RSI waits its 294 bars, as on any history.
   const bars = await chartBars(page);
   expect(bars[0]?.time).toBe(FIRST_TICK_BAR + 500);
-  expect((await indicatorsOf(page))[0]?.plots[0]).toMatchObject({ start: 294, points: 706 });
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.plots[0])
+    .toMatchObject({ start: 294, points: 706 });
   const legend = row(page, 'rsi-1');
   await expect(legend.locator('[data-plot="rsi"]')).toHaveText(await latestRsi(page));
   await expect(row(page, 'volume-1').locator('[data-plot="volume"]')).toHaveText('100');

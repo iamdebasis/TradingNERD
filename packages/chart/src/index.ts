@@ -25,6 +25,18 @@ export {
   NEW_PANE_STRETCH,
   NO_VALUE,
 } from './indicators/model';
+export {
+  backgroundId,
+  type ChartScript,
+  fillId,
+  hlineId,
+  inputId,
+  plotId,
+  type ScriptContext,
+  scriptDefaultInputs,
+  scriptDefinition,
+  scriptInputs,
+} from './indicators/script';
 export type { SessionPart, SessionShading } from './plugins/SessionShadePrimitive';
 export type { ChartTheme } from './theme';
 export {

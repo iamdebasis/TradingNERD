@@ -9,6 +9,7 @@ import {
   type Resolution,
   type SessionHours,
   type SymbolInfo,
+  type SymbolKind,
   sessionClock,
   UTC_CLOCK,
 } from '@tradingnerd/core';
@@ -17,6 +18,28 @@ import type { LiveFeed } from '../data/GatewayConnection';
 import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type Fill } from './chartSettings';
 import { intlZone } from './timezones';
+
+/**
+ * Pine's syminfo.type for a symbol's kind: crypto, stock, dr, fund, warrant, right, index (the
+ * v6 reference's values). Preferred shares, units and notes read as stock, and a formula as
+ * spread (not in the reference: provisional, docs/SPEC.md §11).
+ */
+function pineType(kind: SymbolKind): string {
+  switch (kind) {
+    case 'spot':
+      return 'crypto';
+    case 'etf':
+      return 'fund';
+    case 'dr':
+    case 'warrant':
+    case 'right':
+    case 'index':
+    case 'spread':
+      return kind;
+    default:
+      return 'stock';
+  }
+}
 
 export type LegendStatus = 'loading' | 'live' | 'reconnecting' | 'error';
 
@@ -152,6 +175,11 @@ export class ChartSession {
         delayMs: info.delayMs,
         base: volumeUnit(info),
         hasVolume: hasRealVolume(info),
+        ticker: info.ticker,
+        tickerid: info.id,
+        description: info.description,
+        symbolType: pineType(info.type),
+        currency: info.quote,
       });
       chart.setSessionShading(this.shading());
       chart.setExtendedPrice(null);
