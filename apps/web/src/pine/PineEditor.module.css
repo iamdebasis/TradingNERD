@@ -270,6 +270,38 @@
   background: var(--color-gutter);
 }
 
+/* A console line with its action beside it (a missing library's "Add library…"). */
+.consoleRow {
+  display: flex;
+  align-items: baseline;
+}
+
+.consoleRow .consoleLine {
+  flex: 1;
+  min-width: 0;
+}
+
+.consoleAction {
+  flex: none;
+  margin-right: 8px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.consoleAction:hover {
+  background: var(--color-gutter);
+}
+
+.consoleAction:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
 .status {
   display: flex;
   flex: none;

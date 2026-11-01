@@ -601,9 +601,10 @@ export class Compiler {
     if (!module) {
       const source = this.options.resolveLibrary?.(stmt.publisher, stmt.library, stmt.version);
       if (source == null) {
-        this.fail(
+        throw new PineCompileError(
           `Could not find library "${path}". Add it in the Pine Editor with "Add library…": paste the library's code from its TradingView page.`,
           stmt.span,
+          { path, problem: 'missing' },
         );
       }
       let script = parsedLibraries.get(source);
@@ -612,14 +613,22 @@ export class Compiler {
           script = upgrade(parse(source));
         } catch (error) {
           if (error instanceof PineCompileError) {
-            this.fail(`The library "${path}" has an error: ${error.message}`, stmt.span);
+            throw new PineCompileError(
+              `The library "${path}" has an error: ${error.message}`,
+              stmt.span,
+              { path, problem: 'error' },
+            );
           }
           throw error;
         }
         parsedLibraries.set(source, script);
       }
       if (!script.statements.some(isLibraryDeclaration)) {
-        this.fail(`"${path}" isn't a library: its code must declare library()`, stmt.span);
+        throw new PineCompileError(
+          `"${path}" isn't a library: its code must declare library()`,
+          stmt.span,
+          { path, problem: 'error' },
+        );
       }
       module = new Module(path, versionOf(script), new Scope(null, 'global'));
       this.modules.set(path, module);
@@ -628,8 +637,15 @@ export class Compiler {
       try {
         this.declareAll(module, script.statements);
       } catch (error) {
-        if (error instanceof PineCompileError && !error.message.startsWith('The library')) {
-          this.fail(`The library "${path}" has an error: ${error.message}`, stmt.span);
+        // Trouble inside the library points at this import, keeping which library it's with:
+        // one the library imports may be the one to add.
+        if (error instanceof PineCompileError) {
+          const missing = error.library?.problem === 'missing';
+          throw new PineCompileError(
+            missing ? error.message : `The library "${path}" has an error: ${error.message}`,
+            stmt.span,
+            error.library ?? { path, problem: 'error' },
+          );
         }
         throw error;
       } finally {

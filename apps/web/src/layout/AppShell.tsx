@@ -13,6 +13,7 @@ import { readJson, writeJson } from '../lib/storage';
 import { useLogos } from '../logos/LogoContext';
 import { LogoDialog } from '../logos/LogoDialog';
 import { OlderCapsDialog } from '../olderCaps/OlderCapsDialog';
+import { librariesStore } from '../pine/librariesStore';
 import { PineEditor } from '../pine/PineEditor';
 import { pineStore, usePine } from '../pine/pineStore';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
@@ -68,6 +69,11 @@ export function AppShell({ route }: { route: ChartRoute }) {
     firstLaunchShown.current = true;
     if (!status.key && !status.promptDismissed) setLogoDialog('first-launch');
   }, [logos.status]);
+
+  // The Pine libraries scripts import: at hand before any script compiles (SPEC §5.17).
+  useEffect(() => {
+    void librariesStore.load();
+  }, []);
 
   useEffect(() => {
     let alive = true;

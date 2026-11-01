@@ -14,20 +14,26 @@ import {
   SaveIcon,
   WaveIcon,
 } from './icons';
+import { LibrariesDialog } from './LibrariesDialog';
+import { librariesStore, useLibraries } from './librariesStore';
 import styles from './PineEditor.module.css';
 import { documentName, type PineDocument, pineStore, usePine } from './pineStore';
 import { SaveScriptDialog } from './SaveScriptDialog';
 
-/** The compiler's messages for the code, worked out a moment after typing stops. */
-function useDiagnostics(text: string): readonly PineDiagnostic[] {
+/**
+ * The compiler's messages for the code, worked out a moment after typing stops, and again when a
+ * library is added or removed (`revision`).
+ */
+function useDiagnostics(text: string, revision: number): readonly PineDiagnostic[] {
   const [diagnostics, setDiagnostics] = useState<readonly PineDiagnostic[]>([]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the libraries' revision recompiles
   useEffect(() => {
     const timer = setTimeout(() => {
-      const result = compileCached(text);
+      const result = compileCached(text, librariesStore.compileOptions());
       setDiagnostics(result.ok ? result.warnings : [...result.errors, ...result.warnings]);
     }, 250);
     return () => clearTimeout(timer);
-  }, [text]);
+  }, [text, revision]);
   return diagnostics;
 }
 
@@ -45,7 +51,7 @@ const savedTime = (ms: number) => {
 
 /** The name Save script suggests: the script's indicator() title, else the header's name. */
 function suggestedName(document: PineDocument): string {
-  const result = compileCached(document.text);
+  const result = compileCached(document.text, librariesStore.compileOptions());
   const title = result.ok ? result.program.describe(result.program.defaults()).title : '';
   return title || documentName(document);
 }
@@ -68,7 +74,10 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   const [saving, setSaving] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [myScripts, setMyScripts] = useState<readonly ScriptSummary[] | null>(null);
-  const diagnostics = useDiagnostics(document?.text ?? '');
+  /** The Libraries dialog: closed (false), from the menu (null), or for an import's path. */
+  const [librariesFor, setLibrariesFor] = useState<string | null | false>(false);
+  const { revision } = useLibraries();
+  const diagnostics = useDiagnostics(document?.text ?? '', revision);
   const errors = diagnostics.filter((item) => item.severity === 'error').length;
 
   // The editor opens on a new indicator when it has nothing open, as TradingView's does.
@@ -170,9 +179,13 @@ export function PineEditor({ onClose }: { onClose(): void }) {
                   setMenuOpen(false);
                   save();
                 }}
-                onNew={() => {
+                onNew={(kind) => {
                   setMenuOpen(false);
-                  pineStore.openNew();
+                  pineStore.openNew(kind);
+                }}
+                onLibraries={() => {
+                  setMenuOpen(false);
+                  setLibrariesFor(null);
                 }}
                 onBuiltin={() => {
                   setMenuOpen(false);
@@ -252,18 +265,31 @@ export function PineEditor({ onClose }: { onClose(): void }) {
             <div className={styles.consoleLine}>No errors</div>
           ) : (
             diagnostics.map((item) => (
-              <button
+              <div
                 key={`${item.line}:${item.column}:${item.message}`}
-                type="button"
-                className={styles.consoleLine}
-                data-severity={item.severity}
-                onClick={() =>
-                  setReveal({ line: item.line, column: item.column, serial: Date.now() })
-                }
+                className={styles.consoleRow}
               >
-                {item.severity === 'error' ? 'Error' : 'Warning'} at {item.line}:{item.column}{' '}
-                {item.message}
-              </button>
+                <button
+                  type="button"
+                  className={styles.consoleLine}
+                  data-severity={item.severity}
+                  onClick={() =>
+                    setReveal({ line: item.line, column: item.column, serial: Date.now() })
+                  }
+                >
+                  {item.severity === 'error' ? 'Error' : 'Warning'} at {item.line}:{item.column}{' '}
+                  {item.message}
+                </button>
+                {item.library && (
+                  <button
+                    type="button"
+                    className={styles.consoleAction}
+                    onClick={() => setLibrariesFor(item.library?.path ?? null)}
+                  >
+                    {item.library.problem === 'missing' ? 'Add library…' : 'Replace library…'}
+                  </button>
+                )}
+              </div>
             ))
           )}
         </div>
@@ -291,6 +317,9 @@ export function PineEditor({ onClose }: { onClose(): void }) {
         </span>
         <span>Pine Script® v{PINE_VERSION}</span>
       </footer>
+      {librariesFor !== false && (
+        <LibrariesDialog initialPath={librariesFor} onClose={() => setLibrariesFor(false)} />
+      )}
       {saving && document && (
         <SaveScriptDialog
           initialName={suggestedName(document)}
@@ -307,20 +336,25 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   );
 }
 
-/** The script name's menu: Save script, Create new, a built-in's code, and My scripts to open. */
+/**
+ * The script name's menu: Save script, Create new, a built-in's code, My scripts to open, and the
+ * libraries scripts import.
+ */
 function ScriptMenu({
   scripts,
   onSave,
   onNew,
   onBuiltin,
   onOpen,
+  onLibraries,
   onDismiss,
 }: {
   scripts: readonly ScriptSummary[] | null;
   onSave(): void;
-  onNew(): void;
+  onNew(kind: 'indicator' | 'library'): void;
   onBuiltin(): void;
   onOpen(id: string): void;
+  onLibraries(): void;
   onDismiss(): void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
@@ -344,8 +378,21 @@ function ScriptMenu({
         Save script <span className={styles.shortcut}>Ctrl + S</span>
       </button>
       <div className={styles.menuHeading}>Create new</div>
-      <button type="button" role="menuitem" className={styles.menuItem} onClick={onNew}>
+      <button
+        type="button"
+        role="menuitem"
+        className={styles.menuItem}
+        onClick={() => onNew('indicator')}
+      >
         Indicator
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={styles.menuItem}
+        onClick={() => onNew('library')}
+      >
+        Library
       </button>
       <button type="button" role="menuitem" className={styles.menuItem} onClick={onBuiltin}>
         Built-in: Relative Strength Index
@@ -364,6 +411,10 @@ function ScriptMenu({
           {script.name}
         </button>
       ))}
+      <div className={styles.menuHeading}>Libraries</div>
+      <button type="button" role="menuitem" className={styles.menuItem} onClick={onLibraries}>
+        My libraries…
+      </button>
     </div>
   );
 }

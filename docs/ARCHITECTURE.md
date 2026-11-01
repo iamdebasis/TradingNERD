@@ -32,7 +32,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 
 | Package | What it holds |
 |---|---|
-| `packages/core` | Shared by both sides: the protocol (`protocol.ts`, `market.ts`), resolutions and intervals, the resampler (`resample.ts`), the market clock and status (`clock.ts`, `schedule.ts`, `marketStatus.ts`, `timezone.ts`), formulas (`formula.ts`), watchlists and their TradingView `.txt` files, flags, logos, stocks and older-caps status types, My scripts' types and checks (`scripts.ts`, P1) |
+| `packages/core` | Shared by both sides: the protocol (`protocol.ts`, `market.ts`), resolutions and intervals, the resampler (`resample.ts`), the market clock and status (`clock.ts`, `schedule.ts`, `marketStatus.ts`, `timezone.ts`), formulas (`formula.ts`), watchlists and their TradingView `.txt` files, flags, logos, stocks and older-caps status types, My scripts' types and checks (`scripts.ts`, P1), the Pine libraries' paths and checks (`libraries.ts`, P2) |
 | `packages/pine` | **P1:** Pine Script® v6 from text to values (SPEC §6.17). `lexer.ts`, `parser.ts`, `ast.ts` read the code; `compiler.ts`, `types.ts`, `builtins.ts` check its types and qualifiers and turn it into closures over a `Runtime` (`runtime.ts`: each variable's history, the live bar rolled back and committed, outputs in typed arrays, the 500 ms loop limit); `ta.ts` holds each `ta.*` call's state; `script.ts` has `compileScript`, `ScriptProgram` (inputs, `describe`) and `ScriptRun` (the script over the chart's bars, ticks, new bars and corrections); `warmup.ts` is the warm-up rule for scripts. No DOM |
 | `packages/indicators` | TradingView's built-in indicators as Pine computes them (I1: Volume and RSI): the `ta.*` kernels (`kernels.ts`), the definitions (`volume.ts`, `rsi.ts`: inputs, plots, levels, fills, defaults), `IndicatorRun` (`run.ts`: closed bars committed, the live bar tentative, a correction redone), the warm-up rule (`warmup.ts`), settings and the registry; RSI's own Pine code for the Pine Editor (`rsi.pine.ts`). No DOM |
 | `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels, fills, backgrounds, value labels, a script's marks), `indicators/` (`IndicatorLayer.ts`: the indicators' series, panes, levels and labels; `script.ts`: a Pine script read as an indicator and run), `tuning.ts` for the feel's constants |
@@ -52,8 +52,8 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 | `cryptocap/` | CRYPTOCAP's symbols: see below |
 | `formula/` | `FormulaExchange.ts`: a typed formula (TOTAL2/XRPUSD) as its own exchange, built from its symbols' bars; serves up to a day, and the market service builds longer bars from its days (A6) |
 | `logos/` | CoinGecko's coin and exchange logos, cached in `data/logos/`; CoinGecko's client and its monthly call count |
-| `storage/` | Watchlists, flags, My scripts (`ScriptsStore.ts`, P1), secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
-| `routes/` | REST: bars, symbols, watchlists, flags, scripts (`scripts.ts`), logos, the stock key, older caps |
+| `storage/` | Watchlists, flags, My scripts (`ScriptsStore.ts`, P1), the Pine libraries (`LibrariesStore.ts`, P2), secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
+| `routes/` | REST: bars, symbols, watchlists, flags, scripts (`scripts.ts`), libraries (`libraries.ts`), logos, the stock key, older caps |
 | `ws/session.ts` | One WebSocket per browser tab: subscriptions to bars, quotes and live candles |
 
 ## How data flows
@@ -75,9 +75,10 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   1. The Pine Editor (`apps/web/src/pine/`) keeps the open script and its unsaved code in this browser (`pineStore.ts`). A built-in's code opens editable, its original kept for Reset to original.
   2. Add to chart puts the code itself in the indicator store as an indicator of kind `script` (`addScript`); Update on chart replaces it (`updateScript`), and inputs left at the old code's defaults take the new ones.
   3. `IndicatorLayer` reads the compiled script as a definition (`packages/chart/src/indicators/script.ts`: inputs `in_0…`, outputs `plot_0…`, `hline_0…`, `fill_0…`, `bg_0…`), so the legend, the settings dialog and the panes treat it as any indicator, and runs it with `ScriptRun` (`packages/pine`).
-  4. The plotshape family (P2): marks (plotshape, plotchar, plotarrow) are drawn by `plugins/MarksPrimitive.ts` over a clear series that carries the prices they stand at; plotcandle and plotbar by Lightweight Charts' candles and bars, their high, low and close kept in hidden parts (`partOf`); barcolor() colors the chart's own candles' bodies (`ChartController.recolorBars`).
-  5. The warm-up rule for scripts: beside the script's own run, three check runs (one bar later; bar 0 one percent higher; bars 0 and 1 a thousand times apart) show where a value still depends on bars not loaded (`warmup.ts`, SPEC §6.17).
-  6. Save script sends the code to the gateway (`POST /api/scripts`, then `PUT` for each new version), which keeps it in `data/scripts.json`. My scripts are listed in the Indicators dialog and the editor's menu.
+  4. Libraries (P2): a script's `import` is resolved from My libraries (`apps/web/src/pine/librariesStore.ts`, loaded at start from `GET /api/libraries`; the gateway keeps them in `data/libraries.json`). Their revision makes scripts that import compile again, on the chart (`setLibraries`) and in the editor; the console's "Add library…" opens `LibrariesDialog.tsx`.
+  5. The plotshape family (P2): marks (plotshape, plotchar, plotarrow) are drawn by `plugins/MarksPrimitive.ts` over a clear series that carries the prices they stand at; plotcandle and plotbar by Lightweight Charts' candles and bars, their high, low and close kept in hidden parts (`partOf`); barcolor() colors the chart's own candles' bodies (`ChartController.recolorBars`).
+  6. The warm-up rule for scripts: beside the script's own run, three check runs (one bar later; bar 0 one percent higher; bars 0 and 1 a thousand times apart) show where a value still depends on bars not loaded (`warmup.ts`, SPEC §6.17).
+  7. Save script sends the code to the gateway (`POST /api/scripts`, then `PUT` for each new version), which keeps it in `data/scripts.json`. My scripts are listed in the Indicators dialog and the editor's menu.
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 
 ## CRYPTOCAP (`apps/gateway/src/cryptocap/`)

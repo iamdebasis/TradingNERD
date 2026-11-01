@@ -34,6 +34,7 @@ import {
   type IndicatorDebugState,
   IndicatorLayer,
   type IndicatorValues,
+  type ScriptLibraries,
 } from './indicators/IndicatorLayer';
 import { type ChartIndicator, paneAt } from './indicators/model';
 import { installKeyboard } from './interaction/keyboard';
@@ -484,6 +485,20 @@ export class ChartController {
    */
   setIndicators(indicators: readonly ChartIndicator[]): void {
     this.indicators.set(indicators);
+    this.afterIndicators();
+  }
+
+  /**
+   * The Pine libraries scripts import (docs/SPEC.md §5.17): the scripts that import compile again
+   * with them when they change.
+   */
+  setLibraries(libraries: ScriptLibraries): void {
+    this.indicators.setLibraries(libraries);
+    this.afterIndicators();
+  }
+
+  /** After the indicators changed: bar colors, pane heights, history and the panes' layout. */
+  private afterIndicators(): void {
     this.recolorBars();
     this.paneHeights = this.indicators.paneHeights();
     // A new indicator may wait on older bars than the chart has.

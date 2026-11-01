@@ -16,6 +16,7 @@ import {
 import { IndicatorSettingsDialog } from '../indicators/IndicatorSettingsDialog';
 import { indicatorStore, useIndicators } from '../indicators/indicatorStore';
 import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
+import { librariesStore, useLibraries } from '../pine/librariesStore';
 import { pineStore } from '../pine/pineStore';
 import { useStockKeys } from '../stocks/stockKeys';
 import { darkTheme } from '../theme/tokens';
@@ -68,6 +69,7 @@ export function ChartPane({
   const onInfoRef = useRef(onInfo);
   onInfoRef.current = onInfo;
   const indicators = useIndicators();
+  const libraries = useLibraries();
   const [values] = useState(() => new LegendValues());
   const [panes, setPanes] = useState<readonly PaneBox[]>([]);
   const [symbolContext, setSymbolContext] = useState<SymbolContext>(NO_SYMBOL);
@@ -127,6 +129,15 @@ export function ChartPane({
     values.refresh();
     if (chart) setErrors(chart.indicatorErrors());
   }, [chart, indicators.list, values]);
+
+  // Scripts that import compile again when a library is added or removed (SPEC §5.17).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the libraries' revision is the change
+  useEffect(() => {
+    if (!chart) return;
+    chart.setLibraries(librariesStore.compileOptions());
+    values.refresh();
+    setErrors(chart.indicatorErrors());
+  }, [chart, libraries.revision, values]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new key, session or time zone restarts the session
   useEffect(() => {

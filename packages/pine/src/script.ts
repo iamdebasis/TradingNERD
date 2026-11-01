@@ -67,7 +67,14 @@ export function compileScript(source: string, options: CompileOptions = {}): Com
     if (error instanceof PineCompileError) {
       return {
         ok: false,
-        errors: [{ severity: 'error', message: error.message, ...error.span }],
+        errors: [
+          {
+            severity: 'error',
+            message: error.message,
+            ...error.span,
+            ...(error.library ? { library: error.library } : {}),
+          },
+        ],
         warnings: [],
       };
     }

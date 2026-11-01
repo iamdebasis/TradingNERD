@@ -18,7 +18,11 @@ export {
   formatValue,
   formatVolume,
 } from './format';
-export type { IndicatorDebugState, IndicatorValues } from './indicators/IndicatorLayer';
+export type {
+  IndicatorDebugState,
+  IndicatorValues,
+  ScriptLibraries,
+} from './indicators/IndicatorLayer';
 export {
   type ChartIndicator,
   formatIndicatorValue,

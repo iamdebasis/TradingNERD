@@ -4,6 +4,8 @@ import {
   type ErrorCode,
   type ExchangeSummary,
   type FlagState,
+  type LibrariesIndex,
+  type LibraryRef,
   type LogoStatus,
   type NamedWatchlist,
   type NewScript,
@@ -12,9 +14,11 @@ import {
   parseBarsResponse,
   parseExchangeList,
   parseFlagState,
+  parseLibrariesIndex,
   parseLogoStatus,
   parseNamedWatchlist,
   parseOlderCapsStatus,
+  parseSavedLibrary,
   parseSavedScript,
   parseScriptsIndex,
   parseScriptVersionSource,
@@ -23,6 +27,7 @@ import {
   parseSymbolSearchResponse,
   parseWatchlistSummary,
   parseWatchlistsIndex,
+  type SavedLibrary,
   type SavedScript,
   type ScriptsIndex,
   type ScriptVersionSource,
@@ -232,6 +237,28 @@ export const scriptsApi = {
 };
 
 export type ScriptsApi = typeof scriptsApi;
+
+const libraryUrl = (ref: LibraryRef) =>
+  `${API_PREFIX}/libraries/${[ref.publisher, ref.name, String(ref.version)]
+    .map(encodeURIComponent)
+    .join('/')}`;
+const librariesIndex = (body: unknown): LibrariesIndex =>
+  checked(parseLibrariesIndex(body), 'library list');
+
+/** The Pine libraries the scripts import, their code pasted by the user (data/libraries.json). */
+export const librariesApi = {
+  index: async (signal?: AbortSignal) =>
+    librariesIndex(await getJson(`${API_PREFIX}/libraries`, signal)),
+  put: async (ref: LibraryRef, source: string): Promise<SavedLibrary> =>
+    checked(
+      parseSavedLibrary(await getJson(libraryUrl(ref), undefined, sendJson('PUT', { source }))),
+      'library',
+    ),
+  remove: async (ref: LibraryRef) =>
+    librariesIndex(await getJson(libraryUrl(ref), undefined, sendJson('DELETE'))),
+};
+
+export type LibrariesApi = typeof librariesApi;
 
 /** Flagged symbols, kept by the gateway in data/flags.json. */
 export const flagsApi = {

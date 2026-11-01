@@ -13,7 +13,13 @@ import {
   styleOf,
   type ValueFormat,
 } from '@tradingnerd/indicators';
-import { colorCss, compileCached, DEFAULT_SYMBOL, type ScriptProgram } from '@tradingnerd/pine';
+import {
+  type CompileOptions,
+  colorCss,
+  compileCached,
+  DEFAULT_SYMBOL,
+  type ScriptProgram,
+} from '@tradingnerd/pine';
 import {
   AreaSeries,
   type AutoscaleInfo,
@@ -69,6 +75,15 @@ const POINTS = new Set(['circles', 'cross']);
 /** What the layer reads of a run: a built-in's IndicatorRun or a script's ScriptLayerRun. */
 type LayerRun = IndicatorRun | ScriptLayerRun;
 
+/**
+ * What scripts compile with (docs/SPEC.md §5.17): the code of the libraries they import, and
+ * the libraries' revision, which moves on with each change.
+ */
+export type ScriptLibraries = CompileOptions & { revision: string };
+
+/** A script with an import statement: its code depends on the libraries'. */
+const IMPORTS = /^[ \t]*import\s/m;
+
 /** One plot on the chart. */
 interface DrawnPlot {
   spec: PlotSpec;
@@ -116,6 +131,8 @@ class IndicatorView {
   labels: ValueLabelsPrimitive | null = null;
   /** Prices of its pane's tick labels, so its labels can hide the ones they cover. */
   tickPrices: readonly number[] = [];
+  /** The libraries' revision a script was compiled with. */
+  librariesRevision = '';
 
   constructor(
     indicator: ChartIndicator,
@@ -216,13 +233,16 @@ const drawsSame = (a: ChartIndicator, b: ChartIndicator) =>
   sameJson(a.settings.styles, b.settings.styles);
 
 /** A definition that draws nothing: a script that doesn't compile. */
-function emptyDefinition(name: string): IndicatorDefinition {
+function emptyDefinition(
+  name: string,
+  placement: IndicatorDefinition['placement'] = 'pane',
+): IndicatorDefinition {
   return {
     kind: 'script',
     name,
     shortName: name,
     aliases: [],
-    placement: 'pane',
+    placement,
     format: { kind: 'decimals', decimals: 2 },
     inputs: [],
     plots: [],
@@ -260,6 +280,8 @@ export class IndicatorLayer {
   private crosshairPane: number | null = null;
   /** The chart's bars whose barcolor() color may have changed since the chart last asked. */
   private barColorChanges: 'all' | Set<number> = new Set();
+  /** The libraries scripts import. */
+  private libraries: ScriptLibraries = { revision: '' };
 
   constructor(chart: IChartApi, theme: ChartTheme, font: string) {
     this.chart = chart;
@@ -284,19 +306,27 @@ export class IndicatorLayer {
     const next: IndicatorView[] = [];
     for (const indicator of indicators) {
       const old = kept.get(indicator.id);
-      if (old && drawsSame(old.indicator, indicator)) {
+      if (old && drawsSame(old.indicator, indicator) && !this.stale(old)) {
         const display = !sameJson(old.indicator.settings.display, indicator.settings.display);
         old.indicator = indicator;
         if (display) this.applyDisplay(old);
         next.push(old);
         continue;
       }
-      const view = this.createView(indicator);
+      // A script that stops compiling (a library removed) stays where it was.
+      const view = this.createView(indicator, old?.definition.placement);
       // A hidden indicator isn't computed: showing it again builds it afresh.
       if (this.bars.length > 0 && !indicator.hidden && !view.compileError) this.runBars(view);
       if (old) {
         // Into the old one's pane, so the pane keeps its place and height; then the old one goes.
-        this.build(view, old.paneIndex());
+        // A script now drawn elsewhere (overlay changed) gets the pane its placement wants.
+        const pane =
+          view.ownPane === old.ownPane
+            ? old.paneIndex()
+            : view.ownPane
+              ? this.chart.panes().length
+              : 0;
+        this.build(view, pane);
         this.teardown(old);
       } else {
         this.build(view, view.ownPane ? this.chart.panes().length : 0);
@@ -307,6 +337,27 @@ export class IndicatorLayer {
     this.orderPanes();
     this.applyStretch();
     this.barColorChanges = 'all';
+  }
+
+  /**
+   * The libraries scripts import (docs/SPEC.md §5.17): a script that imports compiles again with
+   * them when they change, so a library just added makes its error go.
+   */
+  setLibraries(libraries: ScriptLibraries): void {
+    if (libraries.revision === this.libraries.revision) return;
+    this.libraries = libraries;
+    if (this.views.some((view) => this.stale(view))) {
+      this.set(this.views.map((view) => view.indicator));
+    }
+  }
+
+  /** A script that imports, compiled with libraries that have changed since. */
+  private stale(view: IndicatorView): boolean {
+    return (
+      view.indicator.kind === 'script' &&
+      view.librariesRevision !== this.libraries.revision &&
+      IMPORTS.test(view.indicator.script?.source ?? '')
+    );
   }
 
   /** New bars throughout: every run computed afresh, as Pine reloads a script. */
@@ -556,7 +607,10 @@ export class IndicatorLayer {
   }
 
   /** A view for an indicator: a built-in's definition, or a script's compiled code. */
-  private createView(indicator: ChartIndicator): IndicatorView {
+  private createView(
+    indicator: ChartIndicator,
+    placement?: IndicatorDefinition['placement'],
+  ): IndicatorView {
     if (indicator.kind !== 'script') {
       const definition = indicatorDefinition(indicator.kind);
       return new IndicatorView(
@@ -566,9 +620,9 @@ export class IndicatorLayer {
         this.makeRun(indicator, definition, null),
       );
     }
-    const compiled = compileCached(indicator.script?.source ?? '');
+    const compiled = compileCached(indicator.script?.source ?? '', this.libraries);
     if (!compiled.ok) {
-      const definition = emptyDefinition('Script');
+      const definition = emptyDefinition('Script', placement === 'price' ? 'price' : 'pane');
       const view = new IndicatorView(
         indicator,
         definition,
@@ -576,16 +630,19 @@ export class IndicatorLayer {
         this.makeRun(indicator, definition, null),
       );
       view.compileError = compiled.errors[0]?.message ?? 'The script has an error';
+      view.librariesRevision = this.libraries.revision;
       return view;
     }
     const { program } = compiled;
     const definition = scriptDefinition(program, indicator.settings.inputs, this.context);
-    return new IndicatorView(
+    const view = new IndicatorView(
       indicator,
       definition,
       program,
       this.makeRun(indicator, definition, program),
     );
+    view.librariesRevision = this.libraries.revision;
+    return view;
   }
 
   private makeRun(

@@ -16,7 +16,7 @@ tradingNerd runs on one person's Mac, for that person only.
 
 That is the whole list. Each provider also sees the Mac's IP address and which symbols are looked at; live data can't be fetched without that.
 
-**Never leaves:** the watchlists, flags, chart settings, the downloaded history, the keys (except each to its own provider), the user's Pine scripts (My scripts and their versions in `data/scripts.json`, and the open script's unsaved code, kept in the browser), and anything in `data/`. ETH Zurich's dataset is put in place by hand; the app never contacts Zenodo.
+**Never leaves:** the watchlists, flags, chart settings, the downloaded history, the keys (except each to its own provider), the user's Pine scripts (My scripts and their versions in `data/scripts.json`, and the open script's unsaved code, kept in the browser), the Pine libraries the user pasted (`data/libraries.json`: their code is copied by hand from TradingView's pages; the app never fetches it), and anything in `data/`. ETH Zurich's dataset is put in place by hand; the app never contacts Zenodo.
 
 ## How the app keeps it so
 
@@ -51,7 +51,7 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **Commit only as the project's identity, in UTC** (AGENTS.md, "Git"), and check before any push. Never put a personal email, name, home folder or time zone into a commit or a file.
 - **Screenshots** added to the repository have account names, avatars and anything identifying covered first. Keep the pixels the tests measure, and prove nothing else changed.
 - **Never get around a block** (bot checks, rate limits, refused requests). Back off, or ask the user.
-- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts: a check never saves, renames or deletes one (the browser tests fake `/api/scripts`).
+- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts and `data/libraries.json` the libraries they pasted: a check never saves, renames or deletes one (the browser tests fake `/api/scripts` and `/api/libraries`).
 
 ## Checks to run before a hand-over
 

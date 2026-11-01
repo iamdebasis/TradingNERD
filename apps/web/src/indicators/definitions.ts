@@ -11,6 +11,7 @@ import {
   type PineDiagnostic,
   type ScriptProgram,
 } from '@tradingnerd/pine';
+import { librariesStore } from '../pine/librariesStore';
 
 /** Decimals for a script's inherited format before the chart says (its symbol's own). */
 const DEFAULT_PRICE_DECIMALS = 2;
@@ -21,24 +22,30 @@ const DEFAULT_PRICE_DECIMALS = 2;
  */
 export const BUILTIN_CODE: Partial<Record<IndicatorKind, string>> = { rsi: RSI_PINE };
 
-/** A script's compiled code, or its first error. */
+/** A script's compiled code, with the libraries it imports, or its first error. */
 export function compiled(
   source: string,
 ): { program: ScriptProgram; error: null } | { program: null; error: PineDiagnostic } {
-  const result = compileCached(source);
+  const result = compileCached(source, librariesStore.compileOptions());
   if (result.ok) return { program: result.program, error: null };
   const error = result.errors[0] as PineDiagnostic;
   return { program: null, error };
 }
 
-/** A script that doesn't compile: a definition with nothing in it, named for the legend. */
-function brokenDefinition(name: string): IndicatorDefinition {
+/**
+ * A script that doesn't compile: a definition with nothing in it, named for the legend, where the
+ * script was drawn when it last compiled (its library removed, say), as the chart keeps it.
+ */
+function brokenDefinition(
+  name: string,
+  placement: IndicatorDefinition['placement'] = 'pane',
+): IndicatorDefinition {
   return {
     kind: 'script',
     name,
     shortName: name,
     aliases: [],
-    placement: 'pane',
+    placement,
     format: { kind: 'decimals', decimals: 2 },
     inputs: [],
     plots: [],
@@ -54,8 +61,10 @@ function brokenDefinition(name: string): IndicatorDefinition {
   };
 }
 
-/** Each script's definitions, one per price precision asked for. */
-const memo = new WeakMap<ChartIndicator, Map<number, IndicatorDefinition>>();
+/** Each script's definitions, one per price precision asked for and libraries' revision. */
+const memo = new WeakMap<ChartIndicator, Map<string, IndicatorDefinition>>();
+/** Where each script on the chart was drawn when it last compiled, by its id. */
+const lastPlacement = new Map<string, IndicatorDefinition['placement']>();
 
 /**
  * An indicator's definition, as the legend and the settings dialog read it: a built-in's, or its
@@ -73,7 +82,9 @@ export function definitionOf(
     byDecimals = new Map();
     memo.set(indicator, byDecimals);
   }
-  const hit = byDecimals.get(priceDecimals);
+  // A changed library compiles the script again (its revision moves on).
+  const key = `${priceDecimals}:${librariesStore.get().revision}`;
+  const hit = byDecimals.get(key);
   if (hit) return hit;
   const { program } = compiled(indicator.script?.source ?? '');
   const definition = program
@@ -81,7 +92,8 @@ export function definitionOf(
         symbol: DEFAULT_SYMBOL,
         priceDecimals,
       })
-    : brokenDefinition('Script');
-  byDecimals.set(priceDecimals, definition);
+    : brokenDefinition('Script', lastPlacement.get(indicator.id) === 'price' ? 'price' : 'pane');
+  if (program) lastPlacement.set(indicator.id, definition.placement);
+  byDecimals.set(key, definition);
   return definition;
 }

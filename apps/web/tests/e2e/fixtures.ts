@@ -639,6 +639,19 @@ export interface MockMarket {
   scripts: MockScript[];
   /** Every script save the page made: POST for a new one, PUT for a new version. */
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[];
+  /** The libraries scripts import, as /api/libraries serves them (routes/libraries.ts). */
+  libraries: MockLibrary[];
+  /** Every library change the page made: each PUT's path and code, each DELETE's path. */
+  readonly libraryChanges: { method: 'PUT' | 'DELETE'; path: string; source?: string }[];
+}
+
+/** A library in the mock: its import path's parts, its code and when it was added. */
+export interface MockLibrary {
+  publisher: string;
+  name: string;
+  version: number;
+  source: string;
+  addedAt: number;
 }
 
 /** One of My scripts in the mock, every version kept. */
@@ -745,6 +758,8 @@ class MockGateway implements MockMarket {
   readonly barSubscriptions: [string, string][] = [];
   scripts: MockScript[] = [];
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[] = [];
+  libraries: MockLibrary[] = [];
+  readonly libraryChanges: { method: 'PUT' | 'DELETE'; path: string; source?: string }[] = [];
   private nextScript = 1;
   private readonly page: Page;
   private socket: WebSocketRoute | null = null;
@@ -951,6 +966,41 @@ class MockGateway implements MockMarket {
         }
       }
       return route.fulfill({ json: savedScript(script) });
+    });
+    // The libraries scripts import, as the gateway keeps them (apps/gateway/src/routes/libraries.ts).
+    await this.page.route(/\/api\/libraries(\/[^?]*)?$/, (route) => {
+      const request = route.request();
+      const method = request.method();
+      const parts = new URL(request.url()).pathname.split('/').slice(3).map(decodeURIComponent);
+      const byPath = (item: MockLibrary) => `${item.publisher}/${item.name}/${item.version}`;
+      if (parts.length === 0 && method === 'GET') {
+        const libraries = [...this.libraries].sort((a, b) => byPath(a).localeCompare(byPath(b)));
+        return route.fulfill({ json: { libraries } });
+      }
+      const [publisher = '', name = '', version = ''] = parts;
+      const path = `${publisher}/${name}/${version}`;
+      const others = this.libraries.filter(
+        (item) => byPath(item).toLowerCase() !== path.toLowerCase(),
+      );
+      if (method === 'PUT') {
+        const source = String((request.postDataJSON() as { source?: unknown }).source);
+        this.libraryChanges.push({ method: 'PUT', path, source });
+        const library = { publisher, name, version: Number(version), source, addedAt: NOW };
+        this.libraries = [...others, library];
+        return route.fulfill({ json: library });
+      }
+      if (method === 'DELETE') {
+        this.libraryChanges.push({ method: 'DELETE', path });
+        if (others.length === this.libraries.length) {
+          return route.fulfill({
+            status: 404,
+            json: { error: 'not_found', message: `There's no library ${path}` },
+          });
+        }
+        this.libraries = others;
+        return route.fulfill({ json: { libraries: others } });
+      }
+      return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'Bad request' } });
     });
     await this.page.route(/\/api\/bars\?/, (route) => {
       const params = new URL(route.request().url()).searchParams;

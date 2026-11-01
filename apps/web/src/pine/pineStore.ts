@@ -13,6 +13,24 @@ export const PINE_KEY = 'tn.pine.editor';
 /** A new indicator's code, as Create new → Indicator starts it (our own words). */
 export const NEW_INDICATOR = '//@version=6\nindicator("My script")\nplot(close)\n';
 
+/**
+ * A new library's code, as Create new → Library starts it: one exported function with its
+ * annotations, as TradingView's starts one (Help Center, "How to create a new script"; our own
+ * words).
+ */
+export const NEW_LIBRARY = [
+  '//@version=6',
+  '// @description What this library offers.',
+  'library("MyLibrary")',
+  '',
+  '// @function Doubles a number.',
+  '// @param x The number.',
+  '// @returns x times 2.',
+  'export double(float x) =>',
+  '    x * 2',
+  '',
+].join('\n');
+
 /** What the editor has open. */
 export type PineOrigin =
   /** A built-in's code: edits make a copy, the original stays (the user's model). */
@@ -180,7 +198,9 @@ export class PineStore {
   }
 
   /** Create new → Indicator. */
-  openNew(): void {
+  /** A new indicator (Create new → Indicator), or a new library (Create new → Library). */
+  openNew(kind: 'indicator' | 'library' = 'indicator'): void {
+    const code = kind === 'library' ? NEW_LIBRARY : NEW_INDICATOR;
     this.commit({
       ...this.value,
       open: true,
@@ -188,8 +208,8 @@ export class PineStore {
       document: {
         key: nextKey(),
         origin: { kind: 'new' },
-        original: NEW_INDICATOR,
-        text: NEW_INDICATOR,
+        original: code,
+        text: code,
         chartId: null,
       },
     });

@@ -7,8 +7,13 @@ export {
   type PlotStyle,
   type ScriptFormat,
 } from './builtins.ts';
-export type { InputDef } from './compiler.ts';
-export { type PineDiagnostic, PineRuntimeError, type Span } from './diagnostics.ts';
+export type { CompileOptions, InputDef, LibraryResolver } from './compiler.ts';
+export {
+  type LibraryProblem,
+  type PineDiagnostic,
+  PineRuntimeError,
+  type Span,
+} from './diagnostics.ts';
 export { KEYWORDS } from './lexer.ts';
 export { DEFAULT_SYMBOL, type ScriptSymbol } from './runtime.ts';
 export {

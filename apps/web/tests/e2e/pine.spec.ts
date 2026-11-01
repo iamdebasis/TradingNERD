@@ -396,3 +396,110 @@ test('a script that stops takes its bar colors off the chart', async ({ page, ma
   await expect.poll(async () => (await indicatorsOf(page))[0]?.error).toBe('Stopped live');
   await expect.poll(async () => (await chartState(page)).barColors).toEqual([]);
 });
+
+/** A library of our own, as the user would paste one from its TradingView page. */
+const HLM_LIBRARY = [
+  '//@version=5',
+  '// @description Highs, lows and their middle.',
+  'library("lib_hlm")',
+  '// @function The middle of a high and a low.',
+  'export hl2(float h, float l) => (h + l) / 2',
+  '',
+].join('\n');
+
+/** A script importing it as the user's Ichimoku does (JollyWizard/lib_hlm/1 as hlm). */
+const USES_HLM = [
+  '//@version=5',
+  'indicator("Middle", overlay = true)',
+  'import JollyWizard/lib_hlm/1 as hlm',
+  'plot(hlm.hl2(high, low), "Middle")',
+  '',
+].join('\n');
+
+test('a missing library: "Add library…" in the console takes its code, and the script runs', async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(page, USES_HLM);
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  // Kept off the chart; the console says which library, and offers to add it.
+  const console = page.getByTestId('pine-console');
+  await expect(console).toContainText('Could not find library "JollyWizard/lib_hlm/1"');
+  expect(await indicatorsOf(page)).toEqual([]);
+  await console.getByRole('button', { name: 'Add library…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Libraries' });
+  await expect(dialog.getByRole('textbox', { name: 'Import path' })).toHaveValue(
+    'JollyWizard/lib_hlm/1',
+  );
+  // Code that isn't a library is refused, with the reason.
+  await dialog.getByRole('textbox', { name: /^Code/ }).fill(USES_HLM);
+  await dialog.getByRole('button', { name: 'Add library' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Line 3: Could not find library');
+  await dialog.getByRole('textbox', { name: /^Code/ }).fill(HLM_LIBRARY);
+  await dialog.getByRole('button', { name: 'Add library' }).click();
+  await expect(dialog.getByRole('list', { name: 'My libraries' })).toContainText(
+    'JollyWizard/lib_hlm/1',
+  );
+  expect(market.libraryChanges).toEqual([
+    { method: 'PUT', path: 'JollyWizard/lib_hlm/1', source: HLM_LIBRARY },
+  ]);
+  await dialog.getByRole('button', { name: 'Close' }).first().click();
+  await expect(console).toContainText('No errors');
+
+  // On the chart, the library's function gives the script's values.
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.error).toBeNull();
+  const last = market.bars.at(-1) as (typeof market.bars)[number];
+  const middle = row(page, 'script-1').locator('[data-plot="plot_0"]');
+  await expect(middle).toHaveText(((last.high + last.low) / 2).toFixed(4));
+
+  // After a reload, the library comes from the gateway again and the script still runs.
+  await page.reload();
+  await expect(row(page, 'script-1').locator('[data-plot="plot_0"]')).toHaveText(
+    ((last.high + last.low) / 2).toFixed(4),
+  );
+  expect((await indicatorsOf(page))[0]?.error).toBeNull();
+});
+
+test('removing a library brings back its import’s error, on the chart too', async ({
+  page,
+  market,
+}) => {
+  market.libraries = [
+    { publisher: 'JollyWizard', name: 'lib_hlm', version: 1, source: HLM_LIBRARY, addedAt: NOW },
+  ];
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(page, USES_HLM);
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.error).toBeNull();
+  // The script's menu: Create new → Library, and My libraries.
+  await page.getByTestId('pine-name').click();
+  await expect(page.getByRole('menuitem', { name: 'Library', exact: true })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'My libraries…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Libraries' });
+  await dialog.getByRole('button', { name: 'Remove JollyWizard/lib_hlm/1' }).click();
+  await expect(dialog.getByRole('list', { name: 'My libraries' })).toContainText(
+    'No libraries yet',
+  );
+  expect(market.libraryChanges).toEqual([{ method: 'DELETE', path: 'JollyWizard/lib_hlm/1' }]);
+  await dialog.getByRole('button', { name: 'Close' }).first().click();
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.error)
+    .toMatch(/^Could not find library "JollyWizard\/lib_hlm\/1"/);
+  // It stays where it was, in the price pane's legend, saying why it draws nothing.
+  expect((await indicatorsOf(page))[0]?.pane).toBe(0);
+  await expect(
+    row(page, 'script-1').getByRole('img', { name: /^Error: Could not find library/ }),
+  ).toBeVisible();
+});
