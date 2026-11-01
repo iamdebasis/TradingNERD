@@ -13,6 +13,8 @@ export interface CodeEditorEvents {
   onRun(): void;
   /** Ctrl/Cmd + S: Save script. */
   onSave(): void;
+  /** Ctrl/Cmd + O: Open script. */
+  onOpen(): void;
 }
 
 /** A change the panel makes to the code (Reset to original), as an edit Undo can take back. */
@@ -86,12 +88,40 @@ export function CodeEditor({
       created.onDidChangeCursorPosition(({ position }) =>
         eventsRef.current.onCursor(position.lineNumber, position.column),
       );
-      created.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () =>
-        eventsRef.current.onRun(),
+      // The panel's commands, with their keys, also in the command palette (F1, or Ctrl/Cmd +
+      // Shift + P: TradingView's Help Center, "Useful Pine Editor commands").
+      const { KeyMod, KeyCode } = monaco;
+      created.addAction({
+        id: 'tn.addToChart',
+        label: 'Add to chart',
+        keybindings: [KeyMod.CtrlCmd | KeyCode.Enter],
+        run: () => eventsRef.current.onRun(),
+      });
+      created.addAction({
+        id: 'tn.saveScript',
+        label: 'Save script',
+        keybindings: [KeyMod.CtrlCmd | KeyCode.KeyS],
+        run: () => eventsRef.current.onSave(),
+      });
+      created.addAction({
+        id: 'tn.openScript',
+        label: 'Open script…',
+        keybindings: [KeyMod.CtrlCmd | KeyCode.KeyO],
+        run: () => eventsRef.current.onOpen(),
+      });
+      created.addCommand(KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyP, () =>
+        created?.trigger('keyboard', 'editor.action.quickCommand', null),
       );
-      created.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () =>
-        eventsRef.current.onSave(),
-      );
+      // Alt/Option + Z: word wrap on and off (TradingView's Help Center).
+      created.addAction({
+        id: 'tn.toggleWordWrap',
+        label: 'Toggle word wrap',
+        keybindings: [KeyMod.Alt | KeyCode.KeyZ],
+        run: (current) => {
+          const wrap = current.getOption(monaco.editor.EditorOption.wordWrap);
+          current.updateOptions({ wordWrap: wrap === 'off' ? 'on' : 'off' });
+        },
+      });
       setLoading(false);
       created.focus();
       if (import.meta.env.DEV) {

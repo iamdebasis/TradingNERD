@@ -9,6 +9,36 @@ import { readJson, writeJson } from '../lib/storage';
 
 /** Where the editor's state and drafts are kept in this browser (docs/SPEC.md §5.16). */
 export const PINE_KEY = 'tn.pine.editor';
+/** The scripts opened lately, for the menu's Recently used (docs/SPEC.md §5.18). */
+export const RECENT_KEY = 'tn.pine.recent';
+/** How many the menu lists (provisional: TradingView's count isn't documented). */
+export const RECENT_COUNT = 5;
+
+/** A script opened lately: one of My scripts, or a built-in's code. */
+export type RecentScript =
+  | { kind: 'saved'; scriptId: string; name: string }
+  | { kind: 'builtin'; builtin: ScriptOrigin };
+
+/** The kept list, or none: a damaged entry is left out. */
+export function sanitizeRecent(value: unknown): RecentScript[] {
+  if (!Array.isArray(value)) return [];
+  const recent: RecentScript[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const raw = item as Record<string, unknown>;
+    if (raw.kind === 'saved' && isScriptId(raw.scriptId) && typeof raw.name === 'string') {
+      recent.push({ kind: 'saved', scriptId: raw.scriptId, name: raw.name });
+    } else if (raw.kind === 'builtin' && (raw.builtin === 'rsi' || raw.builtin === 'volume')) {
+      recent.push({ kind: 'builtin', builtin: raw.builtin });
+    }
+  }
+  return recent.slice(0, RECENT_COUNT);
+}
+
+const sameRecent = (a: RecentScript, b: RecentScript) =>
+  a.kind === 'saved'
+    ? b.kind === 'saved' && a.scriptId === b.scriptId
+    : b.kind === 'builtin' && a.builtin === b.builtin;
 
 /** A new indicator's code, as Create new → Indicator starts it (our own words). */
 export const NEW_INDICATOR = '//@version=6\nindicator("My script")\nplot(close)\n';
@@ -62,6 +92,8 @@ export interface PineDocument {
 export interface PineState {
   /** The panel is showing. */
   open: boolean;
+  /** The scripts opened lately, the latest first. */
+  recent: readonly RecentScript[];
   document: PineDocument | null;
   /** Loading a saved script, or saving one. */
   busy: boolean;
@@ -69,7 +101,7 @@ export interface PineState {
   notice: string | null;
 }
 
-const EMPTY: PineState = { open: false, document: null, busy: false, notice: null };
+const EMPTY: PineState = { open: false, recent: [], document: null, busy: false, notice: null };
 
 const isOrigin = (value: unknown): value is ScriptOrigin => value === 'rsi' || value === 'volume';
 
@@ -120,7 +152,7 @@ export function sanitizePineState(value: unknown): PineState {
       };
     }
   }
-  return { open: raw.open === true, document, busy: false, notice: null };
+  return { open: raw.open === true, recent: [], document, busy: false, notice: null };
 }
 
 /** The name the header shows: the built-in's, the saved script's, or a new one's. */
@@ -156,7 +188,10 @@ export class PineStore {
 
   constructor(api: ScriptsApi = scriptsApi) {
     this.api = api;
-    this.value = sanitizePineState(readJson(PINE_KEY));
+    this.value = {
+      ...sanitizePineState(readJson(PINE_KEY)),
+      recent: sanitizeRecent(readJson(RECENT_KEY)),
+    };
   }
 
   get = (): PineState => this.value;
@@ -172,6 +207,7 @@ export class PineStore {
 
   /** A built-in's code, to edit as a copy (the legend's Source code, Create new → Built-in). */
   openBuiltin(builtin: ScriptOrigin, chartId: string | null = null): void {
+    this.remember({ kind: 'builtin', builtin });
     const original = BUILTIN_CODE[builtin as IndicatorKind] ?? '';
     const current = this.value.document;
     // The built-in already open keeps its unsaved code.
@@ -220,6 +256,7 @@ export class PineStore {
     this.commit({ ...this.value, open: true, busy: true, notice: null });
     try {
       const script = await this.api.get(scriptId);
+      this.remember({ kind: 'saved', scriptId: script.id, name: script.name });
       this.commit({
         ...this.value,
         busy: false,
@@ -319,6 +356,7 @@ export class PineStore {
             });
       const current = this.value.document ?? document;
       const next = this.savedDocument(saved, current.chartId, current.key, current.text);
+      this.remember({ kind: 'saved', scriptId: saved.id, name: saved.name });
       // The chart script it put there now belongs to the saved script.
       if (next.chartId && indicatorStore.get().list.some((item) => item.id === next.chartId)) {
         indicatorStore.updateScript(next.chartId, { scriptId: saved.id, source: saved.source });
@@ -335,8 +373,97 @@ export class PineStore {
     }
   }
 
+  /**
+   * Make a copy… (the script name's menu): the code as it is now saved as a new script under
+   * `name` (a name taken gets a number), which the editor then holds; the original stays.
+   */
+  async makeCopy(name: string): Promise<boolean> {
+    const document = this.value.document;
+    if (!document) return false;
+    this.commit({ ...this.value, busy: true, notice: null });
+    try {
+      const copy = await this.api.create({
+        name,
+        source: document.text,
+        from: fromOf(document),
+      });
+      this.remember({ kind: 'saved', scriptId: copy.id, name: copy.name });
+      this.commit({
+        ...this.value,
+        busy: false,
+        document: this.savedDocument(copy, null, nextKey()),
+      });
+      return true;
+    } catch (error) {
+      this.commit({
+        ...this.value,
+        busy: false,
+        notice: messageOf(error, 'The copy could not be made'),
+      });
+      return false;
+    }
+  }
+
+  /** Rename… (the script name's menu): one of My scripts gets a new name; its code stays. */
+  async rename(name: string): Promise<boolean> {
+    const document = this.value.document;
+    if (document?.origin.kind !== 'saved') return false;
+    this.commit({ ...this.value, busy: true, notice: null });
+    try {
+      const renamed = await this.api.rename(document.origin.scriptId, name);
+      const current = this.value.document ?? document;
+      this.remember({ kind: 'saved', scriptId: renamed.id, name: renamed.name });
+      this.commit({
+        ...this.value,
+        busy: false,
+        document:
+          current.origin.kind === 'saved'
+            ? { ...current, origin: { ...current.origin, name: renamed.name } }
+            : current,
+      });
+      return true;
+    } catch (error) {
+      this.commit({
+        ...this.value,
+        busy: false,
+        notice: messageOf(error, 'The script could not be renamed'),
+      });
+      return false;
+    }
+  }
+
+  /** One of the menu's Recently used. */
+  openRecent(item: RecentScript): void {
+    if (item.kind === 'builtin') this.openBuiltin(item.builtin);
+    else void this.openSaved(item.scriptId);
+  }
+
+  /**
+   * Version history's "Add version to chart": an older version's code on the chart as a script of
+   * its own, in its own pane, the current one staying (TradingView's Help Center, "How to apply
+   * an older version of an indicator to the chart").
+   */
+  addVersionToChart(source: string): string {
+    const document = this.value.document;
+    return indicatorStore.addScript({
+      source,
+      scriptId: null,
+      from: document ? fromOf(document) : null,
+    });
+  }
+
   dismissNotice(): void {
     if (this.value.notice !== null) this.commit({ ...this.value, notice: null });
+  }
+
+  /** Puts a script first in Recently used, kept in this browser. */
+  private remember(item: RecentScript): void {
+    const recent = [item, ...this.value.recent.filter((other) => !sameRecent(other, item))].slice(
+      0,
+      RECENT_COUNT,
+    );
+    writeJson(RECENT_KEY, recent);
+    this.value = { ...this.value, recent };
   }
 
   private savedDocument(

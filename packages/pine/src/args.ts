@@ -86,6 +86,15 @@ export function bind(
   return bound;
 }
 
+/** Who hears each built-in's parameters as a call reads them (the editor's help, catalog.ts). */
+type ArgsListener = (callee: string, names: readonly string[], required: number) => void;
+let listener: ArgsListener | null = null;
+
+/** Hears every built-in call's parameter names while set; null stops. */
+export function recordArgs(next: ArgsListener | null): void {
+  listener = next;
+}
+
 export class Args {
   private readonly c: Compiler;
   private readonly call: Call;
@@ -99,6 +108,7 @@ export class Args {
     this.call = call;
     this.scope = scope;
     this.names = names;
+    listener?.(call.callee, names, required);
     this.bound = bind(c, call, names, required);
   }
 

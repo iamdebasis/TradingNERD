@@ -639,6 +639,8 @@ export interface MockMarket {
   scripts: MockScript[];
   /** Every script save the page made: POST for a new one, PUT for a new version. */
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[];
+  /** Every rename the page made (PATCH), the new name as sent. */
+  readonly scriptRenames: string[];
   /** The libraries scripts import, as /api/libraries serves them (routes/libraries.ts). */
   libraries: MockLibrary[];
   /** Every library change the page made: each PUT's path and code, each DELETE's path. */
@@ -758,6 +760,7 @@ class MockGateway implements MockMarket {
   readonly barSubscriptions: [string, string][] = [];
   scripts: MockScript[] = [];
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[] = [];
+  readonly scriptRenames: string[] = [];
   libraries: MockLibrary[] = [];
   readonly libraryChanges: { method: 'PUT' | 'DELETE'; path: string; source?: string }[] = [];
   private nextScript = 1;
@@ -952,6 +955,11 @@ class MockGateway implements MockMarket {
       if (versions === 'versions') {
         const found = script.versions.find((item) => item.version === Number(number));
         return found ? route.fulfill({ json: found }) : missing();
+      }
+      if (method === 'PATCH') {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        this.scriptRenames.push(String(body.name));
+        script.name = String(body.name).trim();
       }
       if (method === 'PUT') {
         const body = request.postDataJSON() as Record<string, unknown>;

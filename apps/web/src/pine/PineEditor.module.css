@@ -141,9 +141,7 @@
   display: flex;
   flex-direction: column;
   min-width: 240px;
-  max-height: 60vh;
   padding: 6px 0;
-  overflow-y: auto;
   border-radius: 6px;
   background: var(--color-popup);
   box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
@@ -168,6 +166,43 @@
 
 .menuItem:hover {
   background: var(--color-gutter);
+}
+
+.menuItem:disabled {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.menuItem:disabled:hover {
+  background: transparent;
+}
+
+/* Create new's own menu, beside its row (TradingView's "Create new ›"). */
+.submenuWrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.submenu {
+  position: absolute;
+  z-index: 31;
+  top: -6px;
+  left: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+}
+
+.menuSeparator {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--color-separator);
 }
 
 .shortcut {

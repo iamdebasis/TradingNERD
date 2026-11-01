@@ -1,7 +1,5 @@
-import type { ScriptSummary } from '@tradingnerd/core';
 import { compileCached, PINE_VERSION, type PineDiagnostic } from '@tradingnerd/pine';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { scriptsApi } from '../data/api';
 import { useIndicators } from '../indicators/indicatorStore';
 import { CloseIcon } from '../toolbar/icons';
 import { type CodeEdit, CodeEditor, type CodeEditorEvents, type CodeReveal } from './CodeEditor';
@@ -16,9 +14,17 @@ import {
 } from './icons';
 import { LibrariesDialog } from './LibrariesDialog';
 import { librariesStore, useLibraries } from './librariesStore';
+import { OpenScriptDialog } from './OpenScriptDialog';
 import styles from './PineEditor.module.css';
-import { documentName, type PineDocument, pineStore, usePine } from './pineStore';
+import {
+  documentName,
+  type PineDocument,
+  pineStore,
+  type RecentScript,
+  usePine,
+} from './pineStore';
 import { SaveScriptDialog } from './SaveScriptDialog';
+import { VersionHistoryDialog } from './VersionHistoryDialog';
 
 /**
  * The compiler's messages for the code, worked out a moment after typing stops, and again when a
@@ -71,9 +77,11 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   const [edit, setEdit] = useState<CodeEdit | null>(null);
   const [reveal, setReveal] = useState<CodeReveal | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
+  /** The dialog showing: naming a save, a copy or a rename, Open script, Version history. */
+  const [dialog, setDialog] = useState<'save' | 'copy' | 'rename' | 'open' | 'history' | null>(
+    null,
+  );
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [myScripts, setMyScripts] = useState<readonly ScriptSummary[] | null>(null);
   /** The Libraries dialog: closed (false), from the menu (null), or for an import's path. */
   const [librariesFor, setLibrariesFor] = useState<string | null | false>(false);
   const { revision } = useLibraries();
@@ -84,17 +92,6 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   useEffect(() => {
     if (!document && !state.busy) pineStore.openNew();
   }, [document, state.busy]);
-
-  // The script's menu lists My scripts, fresh each time it opens.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const abort = new AbortController();
-    scriptsApi.index(abort.signal).then(
-      (index) => setMyScripts(index.scripts),
-      () => setMyScripts([]),
-    );
-    return () => abort.abort();
-  }, [menuOpen]);
 
   const onChart = useMemo(
     () => document?.chartId != null && indicators.list.some((item) => item.id === document.chartId),
@@ -107,7 +104,7 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   const save = () => {
     if (!document || state.busy) return;
     if (document.origin.kind === 'saved') void pineStore.save();
-    else setSaving(true);
+    else setDialog('save');
   };
   const runRef = useRef(run);
   runRef.current = run;
@@ -120,6 +117,7 @@ export function PineEditor({ onClose }: { onClose(): void }) {
       onCursor: (line, column) => setCursor({ line, column }),
       onRun: () => runRef.current(),
       onSave: () => saveRef.current(),
+      onOpen: () => setDialog('open'),
     }),
     [],
   );
@@ -174,26 +172,18 @@ export function PineEditor({ onClose }: { onClose(): void }) {
             </button>
             {menuOpen && (
               <ScriptMenu
-                scripts={myScripts}
-                onSave={() => {
+                saved={document.origin.kind === 'saved'}
+                recent={state.recent}
+                onPick={(pick) => {
                   setMenuOpen(false);
-                  save();
+                  if (pick === 'save') save();
+                  else if (pick === 'indicator' || pick === 'library') pineStore.openNew(pick);
+                  else if (pick === 'libraries') setLibrariesFor(null);
+                  else setDialog(pick);
                 }}
-                onNew={(kind) => {
+                onRecent={(item) => {
                   setMenuOpen(false);
-                  pineStore.openNew(kind);
-                }}
-                onLibraries={() => {
-                  setMenuOpen(false);
-                  setLibrariesFor(null);
-                }}
-                onBuiltin={() => {
-                  setMenuOpen(false);
-                  pineStore.openBuiltin('rsi');
-                }}
-                onOpen={(id) => {
-                  setMenuOpen(false);
-                  void pineStore.openSaved(id);
+                  pineStore.openRecent(item);
                 }}
                 onDismiss={() => setMenuOpen(false)}
               />
@@ -320,44 +310,90 @@ export function PineEditor({ onClose }: { onClose(): void }) {
       {librariesFor !== false && (
         <LibrariesDialog initialPath={librariesFor} onClose={() => setLibrariesFor(false)} />
       )}
-      {saving && document && (
+      {(dialog === 'save' || dialog === 'copy' || dialog === 'rename') && document && (
         <SaveScriptDialog
-          initialName={suggestedName(document)}
+          title={
+            dialog === 'copy'
+              ? 'Make a copy'
+              : dialog === 'rename'
+                ? 'Rename script'
+                : 'Save script'
+          }
+          action={dialog === 'copy' ? 'Make a copy' : dialog === 'rename' ? 'Rename' : 'Save'}
+          initialName={dialog === 'save' ? suggestedName(document) : documentName(document)}
           busy={state.busy}
           onSave={(name) => {
-            void pineStore.save(name).then((ok) => {
-              if (ok) setSaving(false);
+            const done =
+              dialog === 'copy'
+                ? pineStore.makeCopy(name)
+                : dialog === 'rename'
+                  ? pineStore.rename(name)
+                  : pineStore.save(name);
+            void done.then((ok) => {
+              if (ok) setDialog(null);
             });
           }}
-          onClose={() => setSaving(false)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'open' && (
+        <OpenScriptDialog
+          onOpen={(id) => {
+            setDialog(null);
+            void pineStore.openSaved(id);
+          }}
+          onBuiltin={(builtin) => {
+            setDialog(null);
+            pineStore.openBuiltin(builtin);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'history' && document?.origin.kind === 'saved' && (
+        <VersionHistoryDialog
+          scriptId={document.origin.scriptId}
+          name={document.origin.name}
+          onAddToChart={(source) => pineStore.addVersionToChart(source)}
+          onClose={() => setDialog(null)}
         />
       )}
     </section>
   );
 }
 
+/** What the script name's menu picks. */
+type MenuPick =
+  | 'save'
+  | 'copy'
+  | 'rename'
+  | 'history'
+  | 'indicator'
+  | 'library'
+  | 'open'
+  | 'libraries';
+
 /**
- * The script name's menu: Save script, Create new, a built-in's code, My scripts to open, and the
- * libraries scripts import.
+ * The script name's menu, as TradingView's (the user's screenshot of 31 October; Help Center,
+ * "How to work with Pine Editor"): Save script, Make a copy…, Rename…, Version history…, Create
+ * new (Indicator, Strategy, Library, Built-in…), Recently used, Open script…; and My libraries,
+ * which TradingView doesn't need (§5.17). Make a copy, Rename and Version history are for one of
+ * My scripts. A strategy comes later (P5).
  */
 function ScriptMenu({
-  scripts,
-  onSave,
-  onNew,
-  onBuiltin,
-  onOpen,
-  onLibraries,
+  saved,
+  recent,
+  onPick,
+  onRecent,
   onDismiss,
 }: {
-  scripts: readonly ScriptSummary[] | null;
-  onSave(): void;
-  onNew(kind: 'indicator' | 'library'): void;
-  onBuiltin(): void;
-  onOpen(id: string): void;
-  onLibraries(): void;
+  saved: boolean;
+  recent: readonly RecentScript[];
+  onPick(pick: MenuPick): void;
+  onRecent(item: RecentScript): void;
   onDismiss(): void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       if (!menu.current?.parentElement?.contains(event.target as Node)) onDismiss();
@@ -372,49 +408,71 @@ function ScriptMenu({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [onDismiss]);
+  const item = (pick: MenuPick, label: string, shortcut?: string, disabled = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      className={styles.menuItem}
+      disabled={disabled}
+      onClick={() => onPick(pick)}
+    >
+      {label}
+      {shortcut && <span className={styles.shortcut}>{shortcut}</span>}
+    </button>
+  );
+  const builtinName = (builtin: string) =>
+    builtin === 'rsi' ? 'Relative Strength Index' : 'Volume';
   return (
     <div ref={menu} className={styles.menu} role="menu">
-      <button type="button" role="menuitem" className={styles.menuItem} onClick={onSave}>
-        Save script <span className={styles.shortcut}>Ctrl + S</span>
-      </button>
-      <div className={styles.menuHeading}>Create new</div>
-      <button
-        type="button"
-        role="menuitem"
-        className={styles.menuItem}
-        onClick={() => onNew('indicator')}
-      >
-        Indicator
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className={styles.menuItem}
-        onClick={() => onNew('library')}
-      >
-        Library
-      </button>
-      <button type="button" role="menuitem" className={styles.menuItem} onClick={onBuiltin}>
-        Built-in: Relative Strength Index
-      </button>
-      <div className={styles.menuHeading}>Open script</div>
-      {scripts === null && <div className={styles.menuNote}>Loading…</div>}
-      {scripts?.length === 0 && <div className={styles.menuNote}>No saved scripts yet</div>}
-      {scripts?.map((script) => (
+      {item('save', 'Save script', 'Ctrl + S')}
+      {item('copy', 'Make a copy…', undefined, !saved)}
+      {item('rename', 'Rename…', undefined, !saved)}
+      {item('history', 'Version history…', undefined, !saved)}
+      <div className={styles.submenuWrap}>
         <button
-          key={script.id}
           type="button"
           role="menuitem"
           className={styles.menuItem}
-          onClick={() => onOpen(script.id)}
+          aria-haspopup="menu"
+          aria-expanded={createOpen}
+          onClick={() => setCreateOpen(true)}
+          onMouseEnter={() => setCreateOpen(true)}
         >
-          {script.name}
+          Create new
+          <span className={styles.shortcut}>›</span>
+        </button>
+        {createOpen && (
+          <div className={styles.submenu} role="menu" aria-label="Create new">
+            {item('indicator', 'Indicator')}
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              disabled
+              title="Strategies come later, with the Strategy Tester"
+            >
+              Strategy
+            </button>
+            {item('library', 'Library')}
+            {item('open', 'Built-in…')}
+          </div>
+        )}
+      </div>
+      {recent.length > 0 && <div className={styles.menuHeading}>Recently used</div>}
+      {recent.map((script) => (
+        <button
+          key={script.kind === 'saved' ? script.scriptId : script.builtin}
+          type="button"
+          role="menuitem"
+          className={styles.menuItem}
+          onClick={() => onRecent(script)}
+        >
+          {script.kind === 'saved' ? script.name : builtinName(script.builtin)}
         </button>
       ))}
-      <div className={styles.menuHeading}>Libraries</div>
-      <button type="button" role="menuitem" className={styles.menuItem} onClick={onLibraries}>
-        My libraries…
-      </button>
+      <div className={styles.menuSeparator} />
+      {item('open', 'Open script…', 'Ctrl + O')}
+      {item('libraries', 'My libraries…')}
     </div>
   );
 }

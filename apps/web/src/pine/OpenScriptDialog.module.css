@@ -1,0 +1,68 @@
+/* Provisional styling in the app's dialog idiom (AddIntervalDialog.module.css); TradingView's
+   Open script dialog hasn't been measured (docs/SPEC.md §11). */
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.lists {
+  max-height: min(420px, calc(100vh - 220px));
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.heading {
+  margin: 12px 0 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: var(--color-gutter);
+  outline: none;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.note {
+  padding: 9px 10px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

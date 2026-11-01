@@ -1,4 +1,5 @@
 import type * as Monaco from 'monaco-editor';
+import { registerPineHelp } from './help';
 
 /** The Pine Editor's language id in Monaco. */
 export const PINE = 'pine';
@@ -281,4 +282,5 @@ export function registerPine(monaco: typeof Monaco): void {
   monaco.languages.setMonarchTokensProvider(PINE, pineTokens);
   monaco.languages.setLanguageConfiguration(PINE, pineConfiguration);
   monaco.editor.defineTheme('tn-pine-dark', PINE_DARK_THEME);
+  registerPineHelp(monaco, PINE);
 }

@@ -7,6 +7,16 @@ export {
   type PlotStyle,
   type ScriptFormat,
 } from './builtins.ts';
+export {
+  type CatalogEntry,
+  type CatalogKind,
+  catalog,
+  catalogEntry,
+  namespaceMembers,
+  referenceUrl,
+  type Signature,
+  signatureOf,
+} from './catalog.ts';
 export type { CompileOptions, InputDef, LibraryResolver } from './compiler.ts';
 export {
   type LibraryProblem,

@@ -750,6 +750,9 @@ const CALLS: Record<string, Handler> = {
 /** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
 export const isBuiltinNamespace = (name: string): boolean => name in CALLS;
 
+/** Every built-in function's full name (the editor's help, catalog.ts). */
+export const builtinCallNames = (): readonly string[] => Object.keys(CALLS);
+
 /** Where a value's built-in methods live: `arr.push()` is `array.push(arr)`. */
 export function methodNamespace(base: Base): string | null {
   if (base.startsWith('array<')) return 'array';
