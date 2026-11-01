@@ -198,7 +198,14 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-10-31 | **P2: real Pine scripts run, and the editor works as TradingView's** (§8): every version, the whole language without drawings and other symbols, the plotshape family, libraries and Pine Logs; the script menu, Version history, help while typing | Your feedback of 31 October (a v5 community Ichimoku that imports a library stopped at its import) and your YES to the plan. Measured first: our P1 engine ran 175 of TradingView's 1,010 manual examples and 1 of 271 community scripts (§4.17). |
 | 2026-10-31 | **Versions 1 to 6 all run, each by its own rules**, replacing "only v6 runs" (row above): a dialect renames older built-ins to v6's (`study`, `sma`, `security`, `input(type = …)`, `iff`, `transp`, v3's bare colors and styles), and the compiler keeps their behaviour (bool casting, both sides of `and`/`or`, integer division of constants, a `for` loop's end read once, v5's colors, `timeframe.period` without 1) | TradingView's migration guides list every change ("To Pine Script version 3" to "6"); 204 of the 271 community scripts are v4 or older. A script without `//@version` is v1, as Pine assumes. |
 | 2026-10-31 | **Library code comes from you, pasted, never fetched**: an import that isn't in My libraries offers "Add library…", where you paste the library's code from its TradingView page | Core value 3: never automate tradingview.com. TradingView publishes every library open-source, and its House Rules call library code public domain (Pine docs, Libraries). |
-| 2026-10-31 | **A corpus of 1,281 real scripts measures the engine** (`tools/pine-corpus/`, opt-in): TradingView's manual examples from its GitHub mirrors and nine community collections, downloaded into a folder git ignores; none is committed | Measure, don't guess; their licences don't let us publish them. |
+| 2026-10-31 | **A corpus of 1,281 real scripts measures the engine** (`tools/pine-corpus/`, opt-in): TradingView's manual examples from its GitHub mirrors and eight community collections, downloaded into a folder git ignores; none is committed | Measure, don't guess; their licences don't let us publish them. |
+| 2026-11-01 | **The `ta.*` rules TradingView doesn't write down follow its own values**, measured on PineTS's published data (third-party: TradingView's outputs on BINANCE:BTCUSDT 1h for 68 functions and variables, at the top level, inside `if`, ternaries, `switch`, loops and functions, and with `na` gaps). The data stays on the cloud's disk and out of the repository; our tests use our own small numbers | Measure, don't guess. 671 of 689 plots now equal TradingView's on every bar checked (§4.17); the 18 left are listed (§11, item 88). |
+| 2026-11-01 | **A call inside a condition keeps the history TradingView's does**, function by function: `ta.sma`, `ta.highest`, the percentiles and their kind over the calls; `ta.wma`, `ta.change`, `ta.alma`, `ta.swma`, `ta.percentrank` over bars, a skipped bar repeating the last call's value; `ta.linreg` and `ta.rci` in slots by bar; a pivot at the call `rightbars` bars back; a call run again on one bar (a loop) re-evaluates the bar | Matched on TradingView's values (§4.17). Before, every call kept its own history, which gave other numbers inside an `if`. |
+| 2026-11-01 | **`ta.rising` and `ta.falling` count rises (falls) in a row**, a pair with an na neither adding nor ending the run, replacing P1's "above each of the last `length` values" | TradingView's values on 192 bars: 0 differ this way, 22 of 120 the other (§4.17). The reference only says "rising for length bars long". |
+| 2026-11-01 | **An na string is the empty string**: `"a" + na` is "a", `na("")` is true, an empty array of strings joins as commas | TradingView's outputs, measured by PineTS (§4.17). |
+| 2026-11-01 | **Numbers are written by Java's DecimalFormat and MessageFormat rules, with TradingView's rounding**: `str.tostring` half up from the digits written, `str.format` half even on the exact value, at most 10 decimals by default, `format.percent` and `format.volume` as TradingView's | Pine's patterns are Java's (the reference's examples); TradingView's measured outputs reproduced exactly: 46 groups and 5 error messages (§4.17). |
+| 2026-11-01 | **A script knows the exchange's time zone, its sessions, the chart's bar clock and background**: calendar values and `timestamp()` in the exchange's zone, a date string without a zone in UTC, session strings as the manual writes them | Pine docs: Time; Sessions; the v6 reference (`timestamp`: "If no time zone is supplied, GMT+0 will be used"). |
+| 2026-11-01 | **Every input kind has its control**: `input.timeframe` a menu ("Chart", then the intervals in TradingView's words), `input.enum` its members by title, `input.session` two times, `input.time` a date and a time, `input.text_area` several lines, `input.price` a number; `input.symbol` stays text until other symbols' data comes (P4) | Pine docs, Inputs. |
 
 ## 4. Research findings
 
@@ -528,6 +535,51 @@ Read from TradingView's public pages (never scripted), Pine's v6 user manual and
 Both rules keep their values within a hundred-millionth of an RSI point of the longer history's, where the legend shows two decimals. The built-in's rule for a smoothed MA adds the average's whole settling after the RSI's, which the measurement shows isn't needed (§11, item 76).
 
 **Still unknown, searched and not found:** the editor's colors on code being edited, and its sizes at a known scale (§11, item 74).
+
+### 4.17 Real scripts, and TradingView's numbers for Pine's built-ins (researched 2026-10-31 and 2026-11-01)
+
+**The corpus** (`tools/pine-corpus/`, `pnpm test:corpus`): TradingView's manual examples from its GitHub mirrors, and eight community collections from GitHub, each compiled and run over 600 bars. "P2-only" counts the scripts that need nothing from P3 to P5 (drawings, other symbols and timeframes, strategies).
+
+| | P1's engine (31 Oct) | P2 step 1 | P2 step 3 |
+|---|---|---|---|
+| Manual examples that run, of all | 175 of 1,010 | 286 of 1,016 | 358 of 1,016 |
+| … of those needing only P2's features | not counted | 284 of 468 (60.7%) | 356 of 468 (76.1%) |
+| Community scripts that run, of all | 1 of 271 | 124 of 271 | 155 of 271 |
+| … of those needing only P2's features | not counted | 124 of 201 (61.7%) | 155 of 201 (77.1%) |
+
+P1's numbers come from the first, scratch version of the measurement, which gathered the manual's examples a little differently; the corpus tool's own are from step 1 on.
+
+What stops the rest (step 3): the plotshape family, 94 scripts (step 4); libraries not yet added, 7 (step 5); and code fences of the manual that hold two scripts, 11.
+
+**TradingView's own values for the built-ins.** TradingView's reference gives formulas but not how a function treats `na`, a length that changes, or a call that skips bars. PineTS (third-party, AGPL-3.0) publishes TradingView's outputs for its probes on BINANCE:BTCUSDT 1h; we run the same probe scripts through our engine on the same bars, locally, without copying the data into the repository.
+
+| Probes (TradingView's values on the last 60 bars; `na` gaps on the last 12) | Plots | Equal on every bar |
+|---|---|---|
+| The functions at the top level, in a ternary and in an `if`; `na` sources; lengths that change for pivots and `ta.rising` | 162 | 162 |
+| Lengths that change from bar to bar, at the top level and in an `if` | 182 | 172 |
+| Calls in ternaries, `and`/`or`, `switch`, loops and functions; `ta.stoch` with `na` | 162 | 156 |
+| Calls in `if` blocks, four patterns of skipped bars | 136 | 134 |
+| `na` gaps every 7th bar, every 3rd, in runs of three | 47 | 47 |
+| **All** | **689** | **671 (97.4%)** |
+
+What the measurements decided, where the reference is silent:
+
+| Rule | TradingView's | The reading it ruled out |
+|---|---|---|
+| `ta.rising(src, n)` | a rise on each of the last `n` bars, in a row | above each of the last `n` values: 22 of 120 differ |
+| `ta.percentile_linear_interpolation` | position `p / 100 × n − 0.5` from the smallest | `(n − 1)·p` and `(n + 1)·p − 1`: 32 to 40 of 60 differ |
+| A pivot inside an `if` | the call `rightbars` bars back, against the last `left + right + 1` calls | the middle of those calls: 47 of 420 differ |
+| `ta.vwap` without an anchor | afresh at the first call of each session; an na source makes it na until the next | skipping the na: 58 of 60 differ |
+| `ta.tr(true)` and `ta.atr` | the previous bar's close, inside an `if` too; `ta.dmi`'s own true range takes the previous call's | the previous call's close for both |
+| `ta.iii` | `(2·close − high − low) / (high − low) × volume` | the reference's example, which divides by the volume |
+
+PineTS's own notes give the other rules we follow (§3, 1 November); each matched TradingView's values here.
+
+**Strings and numbers.** TradingView's outputs as PineTS measured them (third-party; 129 lines logged on TradingView): the number-formatting ones, 46 groups of outputs and 5 error messages, reproduced by our `format.ts` exactly, from `str.tostring(1/3)` ("0.3333333333") to `str.format("{0, number, #.##}", 1.255)` (" 1.25", the space kept). The manual's own examples agree (`str.tostring(1.25, "#.#")` is "1.3"; midnight with "hh" is "12").
+
+**Time.** Pine's manual (Time; Sessions; Timeframes) and its reference: calendar values in `syminfo.timezone`; time zones as "UTC+3", "GMT-0530" or IANA names; session strings "0930-1600:23456", an overnight one belonging to the day it ends on; `timeframe.in_seconds("1M")` 2,628,003; `timeframe.from_seconds` rounding up to the next timeframe.
+
+**Still unknown, searched and not found:** `chart.fg_color`'s value; which week numbering `weekofyear` uses; how `str.tostring` writes a matrix; whether `timeframe.change` is true on the chart's first bar (§11, items 82–87).
 
 ## 5. Requirements (v1)
 
@@ -1489,6 +1541,13 @@ Reference viewport is 1634 px wide.
 79. **Drawing details not in TradingView's docs:** a fill whose color changes from bar to bar colors each stretch in its later bar's color; areas fill to the pane's bottom (Pine: to `histbase`?); crosses draw as circles; a value an offset puts past the last bar isn't drawn (TradingView draws it ahead).
 80. **Saving a name already taken** numbers it ("My RSI 2"), as copies are named; TradingView's own rule isn't documented. Versions beyond 1,000 a script let the oldest go.
 81. **The script's `ta.rsi` without falls:** 100 when the average fall is 0 and the rise isn't, na when both are 0 (the reference's formula leaves it open); the built-in's own code says 100 for both, which RSI's Pine copy keeps.
+82. **`chart.fg_color` (provisional):** white on our dark chart, black on a light one; TradingView says only "optimal contrast". A screenshot of a table using it would settle it.
+83. **`weekofyear` and the `w` token (provisional):** ISO 8601 weeks (Monday first); TradingView doesn't say.
+84. **`timeframe.change` on the chart's first bar (provisional):** true, as a new timeframe bar starts there for us.
+85. **`time_tradingday` (provisional for overnight sessions, which our markets don't have):** 00:00 UTC of the session's day.
+86. **Inputs (provisional):** `input.time`'s date and time are picked in UTC; `input.symbol` is a text field until P4; `input.price`'s step is 1.
+87. **Values TradingView doesn't document (provisional):** `str.tostring` of a matrix, one row per line; `syminfo.volumetype` "base" (or "n/a" without volume); `chart.left_visible_bar_time` and `right_visible_bar_time` are the loaded bars' first and last, not the visible ones; `math.random`'s sequence is ours, the same for the same seed.
+88. **Known differences from TradingView's values** (18 of 689 plots, §4.17): `ta.percentile_*` with a length that changes inside a condition (TradingView refills its array from the bars when the length grows), 11; `ta.linreg` at length 1, 6 plots (1 to 3 bars each); `ta.stoch` whose high and low are sources with na, 1; a value under 1e-10 written by `str.tostring` (5e-11 is "0" on TradingView, "0.0000000001" here).
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
@@ -1543,6 +1602,8 @@ Reference viewport is 1634 px wide.
 - I1's gaps, third-party: the gradient fills' titles in a copy of the built-in's code https://github.com/bill-mccormick-dg/alpaca-hackathon/issues/250 · Zeiierman's guide ("Output Values") https://www.zeiierman.com/blog/hide-indicator-labels-values-inputs-in-tradingview · Quant Nomad on Precision https://quantnomad.com/faq-how-to-change-the-precision-for-an-indicator-in-tradingview/ · marketview.jp on Precision and Volume https://marketview.jp/tradingview-indicator-precision · https://marketview.jp/tradingview-volume-precision
 - Pine Script and the Pine Editor (P1), TradingView's own (read on its public pages; titles where its address wasn't kept): Help Center, "How to work with Pine Editor", "Useful Pine Editor commands", "How to create a new script", "How to apply an older version of an indicator", "I want to see the source code of a built-in script" https://www.tradingview.com/support/solutions/43000481659-i-want-to-see-the-source-code-of-a-built-in-script/ · Blog, "Pine Script has a new VSC-style editor" (2022), "Track unsaved changes in the Pine Editor" (2023), "Updated detach mode" (2024) · Pine release notes (August 2025's side panel) · Pine docs https://www.tradingview.com/pine-script-docs/ (Execution model, Operators, Type system, Conditional structures, Loops, User-defined functions, Plots, Levels, Fills, Backgrounds, Colors, Errors, Limitations, the v6 migration guide; Inputs https://tradingview.com/pine-script-docs/concepts/inputs/) and the v6 reference https://www.tradingview.com/pine-script-reference/v6/, read through https://github.com/AndreHeinecke/pinescript_user_manual (the manual as of March 2025) and https://github.com/codenamedevan/pinescriptv6 · your screenshot of the Pine Editor on the built-in RSI (27 October)
 - Pine Script and the Pine Editor (P1), third-party: Traders Post on inputs' `display` https://blog.traderspost.io/article/professional-pine-script-input-ui · TradingCode on a script's name and title · ChartWiseHub's 2026 guide and Proea's guides (the editor's placements) · the engines read and not used: LuxAlgo's PineTS (AGPL-3.0), OpenPineScript (GPL-3.0) · Monaco https://github.com/microsoft/monaco-editor (MIT)
+- P2's built-ins, TradingView's own: Pine Script docs, Time https://www.tradingview.com/pine-script-docs/concepts/time/ · Sessions https://www.tradingview.com/pine-script-docs/concepts/sessions/ · Timeframes https://www.tradingview.com/pine-script-docs/concepts/timeframes/ · Inputs https://www.tradingview.com/pine-script-docs/concepts/inputs/ · Debugging (strings, Pine Logs) https://www.tradingview.com/pine-script-docs/writing/debugging/ · the v6 reference https://www.tradingview.com/pine-script-reference/v6/ (read through its GitHub copies: AndreHeinecke/pinescript_user_manual, codenamedevan/pinescriptv6)
+- P2's built-ins, third-party: PineTS (QuantForgeOrg/PineTS, AGPL-3.0), its published TradingView values (`tests/namespaces/ta/data`, BINANCE:BTCUSDT 1h) and its changelog's measured rules (0.11.0, 1 October 2026) https://github.com/QuantForgeOrg/PineTS, read and run locally, never copied into this repository
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
 - CCXT (incl. WebSocket "Pro" API): https://docs.ccxt.com/docs/pro-manual

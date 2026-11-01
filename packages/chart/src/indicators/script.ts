@@ -1,4 +1,4 @@
-import type { Bar } from '@tradingnerd/core';
+import { type Bar, menuLabel, parseResolution, STANDARD_INTERVALS } from '@tradingnerd/core';
 import {
   type BackgroundSpec,
   type BarChange,
@@ -123,10 +123,63 @@ function inputSpec(
       return { ...base, kind: 'color', default: input.defval as number };
     case 'source':
       return { ...base, kind: 'source', default: input.defval as 'close' };
+    case 'timeframe': {
+      // TradingView's menu: "Chart" for the chart's own, then its intervals (no ticks: Pine's
+      // timeframe strings have none), or the script's options.
+      const options = (input.options as string[] | undefined) ?? [
+        '',
+        ...STANDARD_INTERVALS.filter((tf) => !tf.endsWith('T')),
+      ];
+      return {
+        ...base,
+        kind: 'select',
+        default: String(input.defval ?? ''),
+        options,
+        labels: options.map(timeframeLabel),
+      };
+    }
+    case 'session':
+      return input.options
+        ? {
+            ...base,
+            kind: 'select',
+            default: input.defval as string,
+            options: input.options as string[],
+          }
+        : { ...base, kind: 'session', default: String(input.defval ?? '') };
+    case 'time':
+      return { ...base, kind: 'time', default: input.defval as number };
+    case 'price':
+      return {
+        ...base,
+        kind: 'float',
+        default: input.defval as number,
+        min: Number.NEGATIVE_INFINITY,
+        max: Number.POSITIVE_INFINITY,
+        step: 1,
+      };
+    case 'text_area':
+      return { ...base, kind: 'string', default: String(input.defval ?? ''), multiline: true };
+    case 'enum':
+      // Its members by their titles; the settings keep the member's name.
+      return {
+        ...base,
+        kind: 'select',
+        default: input.defval as string,
+        options: input.options as string[],
+        labels: input.optionTitles ?? (input.options as string[]),
+      };
     default:
-      // Inputs of the newer kinds as text until each has its own control (docs/SPEC.md §5.17).
+      // input.symbol, as text until data from other symbols comes (docs/SPEC.md §5.17).
       return { ...base, kind: 'string', default: String(input.defval ?? '') };
   }
+}
+
+/** A timeframe in the menu's words: "Chart" for the chart's own, else "1 hour" (core). */
+function timeframeLabel(tf: string): string {
+  if (tf === '') return 'Chart';
+  const resolution = parseResolution(tf);
+  return resolution ? menuLabel(resolution) : tf;
 }
 
 /** A fill's edge: the plot's or hline's id in the settings. */

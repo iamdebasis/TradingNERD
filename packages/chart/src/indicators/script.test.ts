@@ -127,6 +127,39 @@ describe('Scripts’ other inputs, placements and formats', () => {
     expect(definition.inputs[3]).toMatchObject({ tooltip: 'Turns it on', inline: 'row' });
   });
 
+  it('gives the newer input kinds TradingView’s controls', () => {
+    const p = script(
+      [
+        'enum Side',
+        '    long = "Long only"',
+        '    short = "Short only"',
+        'tf = input.timeframe("60", "Timeframe")',
+        'ses = input.session("0930-1600", "Session")',
+        't = input.time(timestamp("2024-01-01"), "From")',
+        'note = input.text_area("one\\ntwo", "Notes")',
+        'side = input.enum(Side.short, "Side")',
+        'plot(close)',
+      ].join('\n'),
+    );
+    const definition = scriptDefinition(p, scriptDefaultInputs(p), CONTEXT);
+    const [tf, ses, t, note, side] = definition.inputs;
+    // "Chart" first, then the intervals without ticks, in TradingView's words.
+    expect(tf).toMatchObject({ kind: 'select', default: '60' });
+    expect(tf?.kind === 'select' && tf.options.slice(0, 2)).toEqual(['', '1S']);
+    expect(tf?.kind === 'select' && tf.labels?.[0]).toBe('Chart');
+    expect(tf?.kind === 'select' && tf.labels?.[tf.options.indexOf('60')]).toBe('1 hour');
+    expect(ses).toMatchObject({ kind: 'session', default: '0930-1600' });
+    expect(t).toMatchObject({ kind: 'time', default: Date.UTC(2024, 0, 1) });
+    expect(note).toMatchObject({ kind: 'string', multiline: true });
+    // An enum: its members by title, the settings keeping the name.
+    expect(side).toMatchObject({
+      kind: 'select',
+      default: 'short',
+      options: ['long', 'short'],
+      labels: ['Long only', 'Short only'],
+    });
+  });
+
   it('puts an overlay on the price pane, writing values with the chart’s price decimals', () => {
     const p = script('plot(ta.sma(close, 3))', 'indicator("Average", overlay = true)');
     const definition = scriptDefinition(p, {}, CONTEXT);

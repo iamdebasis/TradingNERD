@@ -2,6 +2,7 @@ import { Args, type Call, type Handler, series } from './args.ts';
 import type { Compiler, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import type { Runtime } from './runtime.ts';
+import { joinText } from './strings.ts';
 import {
   arrayOf,
   assignable,
@@ -653,7 +654,7 @@ function arrayCalls(): Record<string, Handler> {
         'string',
         (rt) => {
           const x = id.ev(rt);
-          return x.items.map(joinText).join(String(separator(rt) ?? ''));
+          return x.items.map((item) => joinText(item, x.elem)).join(String(separator(rt) ?? ''));
         },
         call.span,
       );
@@ -802,14 +803,6 @@ function arrayCalls(): Record<string, Handler> {
   }
   return calls;
 }
-
-const joinText = (v: Value): string => {
-  if (v === null) return 'NaN';
-  if (typeof v === 'number') return Number.isNaN(v) ? 'NaN' : String(v);
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (typeof v === 'string') return v;
-  return '';
-};
 
 function searchCall(mode: 'exact' | 'left' | 'right'): Handler {
   return handler(['id', 'val'], 2, (c, a, call) => {

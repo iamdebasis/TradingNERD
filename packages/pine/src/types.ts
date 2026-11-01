@@ -196,6 +196,8 @@ export function assignable(from: Base, to: Base): boolean {
 export function naOf(base: Base): Value {
   if (base === 'bool') return false;
   if (base === 'int' || base === 'float' || base === 'color' || base === 'na') return Number.NaN;
+  // An na string is the empty string, as on TradingView (strings.ts).
+  if (base === 'string') return '';
   return null;
 }
 

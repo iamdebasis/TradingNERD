@@ -1388,7 +1388,8 @@ export class Compiler {
       return {
         base: 'string',
         qual,
-        ...both((x, y) => (x === null || y === null ? null : (x as string) + (y as string))),
+        // An na piece adds nothing: the na string is "" (measured on TradingView, strings.ts).
+        ...both((x, y) => naText(x) + naText(y)),
         span,
       };
     }
@@ -1574,8 +1575,16 @@ export class Compiler {
           span: expr.span,
         };
       }
-      const builtin = compileHistoryOfBuiltin(this, expr.target.name, offset, expr.span);
-      if (builtin) return builtin;
+    }
+    if (expr.target.kind === 'name') {
+      // Built-in series by name, dotted ones too (ta.obv[24]), unless the first part is one of
+      // the script's own variables (an object's field).
+      const name = expr.target.name;
+      const dot = name.indexOf('.');
+      if (dot < 0 || !scope.lookup(name.slice(0, dot))) {
+        const builtin = compileHistoryOfBuiltin(this, name, offset, expr.span);
+        if (builtin) return builtin;
+      }
     }
     // An expression's or a call's history: kept in a hidden variable of its own.
     const target = this.expr(expr.target, scope);
@@ -1706,8 +1715,10 @@ export class Compiler {
       false,
     );
     this.loops++;
+    this.rt.loopDepth = this.loops;
     const body = this.statements(expr.body.statements, inner);
     this.loops--;
+    this.rt.loopDepth = this.loops;
     const f = from.ev;
     const t = to.ev;
     const s = step?.ev ?? (() => 1);
@@ -1809,8 +1820,10 @@ export class Compiler {
       false,
     ).slot;
     this.loops++;
+    this.rt.loopDepth = this.loops;
     const body = this.statements(expr.body.statements, inner);
     this.loops--;
+    this.rt.loopDepth = this.loops;
     const run = body.run;
     const collection = target.ev;
     const empty = naOf(body.base);
@@ -1863,8 +1876,10 @@ export class Compiler {
   private whileLoop(expr: Extract<Expr, { kind: 'while' }>, scope: Scope): Compiled {
     const cond = this.condition(this.expr(expr.cond, scope)).ev;
     this.loops++;
+    this.rt.loopDepth = this.loops;
     const body = this.block(expr.body, scope);
     this.loops--;
+    this.rt.loopDepth = this.loops;
     const run = body.run;
     const empty = naOf(body.base);
     return {
@@ -1913,6 +1928,12 @@ export class Compiler {
       if (v && this.hasMethods(v.base, parts.at(-1) as string)) {
         const receiver = this.dotted(parts.slice(0, -1).join('.'), expr.calleeSpan, scope);
         if (receiver) return this.methodCall(receiver, parts.at(-1) as string, expr, scope);
+      }
+      // A user method on a built-in value: `close.msma(5)`, `ta.tr.half()` (Pine docs, Methods).
+      const method = parts.at(-1) as string;
+      if (!v && !isBuiltinNamespace(expr.callee) && this.findMethods(method).length > 0) {
+        const receiver = compileBuiltinName(this, parts.slice(0, -1).join('.'), expr.calleeSpan);
+        if (receiver) return this.methodCall(receiver, method, expr, scope);
       }
       // A type's constructor or copy: `Point.new(…)`, `lib.Point.new(…)`.
       const typeCall = this.typeCall(parts, expr, scope);
@@ -2331,3 +2352,6 @@ function stableKey(owner: object, part: unknown): object {
   }
   return key;
 }
+
+/** A string operand: na (the na literal, or a string that's na) is "". */
+const naText = (value: Value): string => (typeof value === 'string' ? value : '');

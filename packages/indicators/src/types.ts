@@ -56,10 +56,20 @@ export type InputSpec =
   | (InputBase & { kind: 'int'; default: number; min: number; max: number })
   | (InputBase & { kind: 'float'; default: number; min: number; max: number; step: number })
   | (InputBase & { kind: 'source'; default: SourceName })
-  | (InputBase & { kind: 'select'; default: string; options: readonly string[] })
+  | (InputBase & {
+      kind: 'select';
+      default: string;
+      options: readonly string[];
+      /** What the menu shows for each option, when it isn't the value: "1 hour" for "60". */
+      labels?: readonly string[];
+    })
   | (InputBase & { kind: 'bool'; default: boolean })
-  /** A script's free text (input.string without options). */
-  | (InputBase & { kind: 'string'; default: string })
+  /** A script's free text (input.string without options; input.text_area's on several lines). */
+  | (InputBase & { kind: 'string'; default: string; multiline?: boolean })
+  /** A script's input.session: "0930-1600", its days kept (":23456"). */
+  | (InputBase & { kind: 'session'; default: string })
+  /** A script's input.time: a UNIX time in ms, picked as a date and a time in UTC. */
+  | (InputBase & { kind: 'time'; default: number })
   /** A script's color (input.color): Pine's packed color, red to transparency (packages/pine). */
   | (InputBase & { kind: 'color'; default: number })
   /** A script's input.int or input.float with options: a menu of numbers. */

@@ -12,9 +12,10 @@ import {
 } from './args.ts';
 import type { Arg } from './ast.ts';
 import { collectionCalls } from './collections.ts';
-import type { Compiler, Scope } from './compiler.ts';
+import type { Compiler, EnumDef, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
-import type { Runtime } from './runtime.ts';
+import { DEFAULT_SYMBOL, type Runtime } from './runtime.ts';
+import { stringCalls } from './strings.ts';
 import {
   AtrFn,
   BarssinceFn,
@@ -26,6 +27,7 @@ import {
   CumFn,
   DevFn,
   DynamicSma,
+  DynamicVwma,
   ExtremeFn,
   emaFn,
   FixnanFn,
@@ -42,8 +44,40 @@ import {
   TrFn,
   ValuewhenFn,
   VwmaFn,
-  wmaFn,
+  WindowStdevFn,
+  WmaFn,
 } from './ta.ts';
+import {
+  AllTimeFn,
+  AlmaFn,
+  CogFn,
+  CorrelationFn,
+  LinregFn,
+  MedianFn,
+  ModeFn,
+  PercentileLinearFn,
+  PercentileNearestFn,
+  PercentrankFn,
+  RangeFn,
+  RciFn,
+} from './taStats.ts';
+import {
+  BAR_STEPS,
+  BarSeriesFn,
+  BbwFn,
+  CmoFn,
+  DmiFn,
+  HmaFn,
+  KcFn,
+  MfiFn,
+  PivotLevelsFn,
+  SarFn,
+  SupertrendFn,
+  TsiFn,
+  VwapFn,
+  WprFn,
+} from './taTrend.ts';
+import { barCloseTime, calendarValue, sessionOf, timeCalls, timeName } from './timeBuiltins.ts';
 import {
   type Base,
   CONST,
@@ -66,6 +100,8 @@ import {
   hexColor,
   isOutputRef,
   type OutputRef,
+  PineArray,
+  PineEnum,
   packColor,
   unpackColor,
   type Value,
@@ -126,19 +162,6 @@ const LATER: readonly [RegExp, string][] = [
     /^strategy(\.|$)/,
     "isn't supported in tradingNerd yet: strategies come with the Strategy Tester in a later update",
   ],
-  [/^log\./, "isn't supported in tradingNerd yet"],
-  [
-    /^(str\.(format|split|replace|replace_all|contains|substring|length|lower|upper|pos|match|repeat|trim|startswith|endswith|tonumber)|str\.format_time)$/,
-    "isn't supported in tradingNerd yet",
-  ],
-  [
-    /^input\.(timeframe|symbol|session|time|price|text_area|enum)$/,
-    "isn't supported in tradingNerd yet",
-  ],
-  [
-    /^(time|time_close|timestamp|year|month|weekofyear|dayofmonth|dayofweek|hour|minute|second)$/,
-    "isn't supported in tradingNerd yet",
-  ],
 ];
 
 /** A bar's value by name: open … hlcc4, time, bar_index. */
@@ -160,8 +183,24 @@ function barValue(name: string): ((rt: Runtime, k: number) => number) | null {
   if (name === 'bar_index') {
     return (rt, k) => (rt.index - k >= rt.start ? rt.index - k - rt.start : Number.NaN);
   }
-  return null;
+  if (name === 'time_close') return barCloseTime;
+  return calendarValue(name);
 }
+
+/** The int ones among the bar values: times, bar_index and the calendar's. */
+const INT_BAR_VALUES = new Set([
+  'time',
+  'time_close',
+  'bar_index',
+  'year',
+  'month',
+  'weekofyear',
+  'dayofmonth',
+  'dayofweek',
+  'hour',
+  'minute',
+  'second',
+]);
 
 const isIntraday = (tf: string) => /^\d+$/.test(tf) || /S$/.test(tf) || /T$/.test(tf);
 
@@ -175,10 +214,9 @@ const V5_COLORS: Readonly<Record<string, number>> = {
 /** Built-in variables and constants by name; null when the name isn't one. */
 export function compileBuiltinName(c: Compiler, name: string, span: Span): Compiled | null {
   const bar = barValue(name);
-  if (bar) {
-    const base: Base = name === 'time' || name === 'bar_index' ? 'int' : 'float';
-    return series(base, (rt) => bar(rt, 0), span);
-  }
+  if (bar) return series(INT_BAR_VALUES.has(name) ? 'int' : 'float', (rt) => bar(rt, 0), span);
+  const time = timeName(c, name, span);
+  if (time) return time;
   const dot = name.indexOf('.');
   const space = dot < 0 ? '' : name.slice(0, dot);
   const member = dot < 0 ? name : name.slice(dot + 1);
@@ -238,6 +276,22 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
       return timeframe(member, span, c.version);
     case 'syminfo':
       return syminfo(member, span);
+    case 'chart':
+      return chart(member, span);
+    case 'scale':
+      if (member === 'right' || member === 'left' || member === 'none') {
+        return constant('scale_style', member, span);
+      }
+      break;
+    case 'alert':
+      if (
+        member === 'freq_all' ||
+        member === 'freq_once_per_bar' ||
+        member === 'freq_once_per_bar_close'
+      ) {
+        return constant('string', member.slice(5), span);
+      }
+      break;
     case 'ta':
       if (member === 'tr') {
         // The true range against the bar before; na on the first (ta.tr(false)).
@@ -253,6 +307,26 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
               Math.abs(bar.low - before.close),
             );
           },
+          span,
+        );
+      }
+      if (name in BAR_STEPS) {
+        const fn = barSeries(c, name);
+        return series('float', (rt) => readBarSeries(fn, rt, 0), span);
+      }
+      if (member === 'vwap') {
+        // The variable: hlc3's VWAP from each session's start (the v6 reference).
+        const fn = c.rt.register(new VwapFn());
+        return series(
+          'float',
+          (rt) =>
+            fn.call(
+              sourceValue(rt.bar, 'hlc3'),
+              rt.symbol.hasVolume ? rt.bar.volume : Number.NaN,
+              sessionOf(rt),
+              0,
+              rt.final,
+            )[0] as number,
           span,
         );
       }
@@ -331,10 +405,126 @@ function syminfo(member: string, span: Span): Compiled | null {
       return simple('float', (rt) => rt.symbol.mintick, span);
     case 'pricescale':
       return simple('int', (rt) => Math.round(1 / rt.symbol.mintick), span);
+    case 'minmove':
+      return simple('int', () => 1, span);
+    case 'pointvalue':
+      return simple('float', () => 1, span);
+    case 'prefix':
+      return simple('string', (rt) => rt.symbol.tickerid.split(':')[0] ?? '', span);
+    case 'root':
+      // Futures have a root of their own; spot pairs and stocks are their ticker.
+      return simple('string', (rt) => rt.symbol.ticker, span);
+    case 'main_tickerid':
+      return simple('string', (rt) => rt.symbol.tickerid, span);
+    case 'volumetype':
+      // Provisional (docs/SPEC.md §11): our pairs' volume is in the base asset, stocks' in shares.
+      return simple('string', (rt) => (rt.symbol.hasVolume ? 'base' : 'n/a'), span);
+    case 'country':
+    case 'sector':
+    case 'industry':
+    case 'current_contract':
+    case 'isin':
+      // Not known for our symbols: the na string (strings.ts).
+      return simple('string', () => '', span);
+    case 'mincontract':
+    case 'shares_outstanding_total':
+    case 'shares_outstanding_float':
+    case 'target_price_average':
+    case 'target_price_high':
+    case 'target_price_low':
+    case 'target_price_median':
+      return simple('float', () => Number.NaN, span);
+    case 'expiration_date':
+    case 'employees':
+    case 'shareholders':
+    case 'target_price_date':
+    case 'target_price_estimates':
+    case 'recommendations_buy':
+    case 'recommendations_buy_strong':
+    case 'recommendations_date':
+    case 'recommendations_hold':
+    case 'recommendations_sell':
+    case 'recommendations_sell_strong':
+    case 'recommendations_total':
+      return simple('int', () => Number.NaN, span);
     default:
       return null;
   }
 }
+
+/** A color that reads on `background`: white on a dark one, black on a light one (provisional). */
+function contrast(background: number): number {
+  const { r, g, b } = unpackColor(background);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5
+    ? (COLORS.white ?? 0xffffff00)
+    : (COLORS.black ?? 0);
+}
+
+/**
+ * chart.*: the chart's colors (the background, and a color that reads on it: TradingView doesn't
+ * say which, so white on our dark chart, provisional), its type (always standard bars here), and
+ * its visible range (provisional: the loaded bars', docs/SPEC.md §11).
+ */
+function chart(member: string, span: Span): Compiled | null {
+  switch (member) {
+    case 'bg_color':
+      return {
+        base: 'color',
+        qual: INPUT,
+        ev: (rt) => rt.symbol.background,
+        fold: () => DEFAULT_SYMBOL.background,
+        span,
+      };
+    case 'fg_color':
+      return {
+        base: 'color',
+        qual: INPUT,
+        ev: (rt) => contrast(rt.symbol.background),
+        fold: () => contrast(DEFAULT_SYMBOL.background),
+        span,
+      };
+    case 'is_standard':
+      return simple('bool', () => true, span);
+    case 'is_heikinashi':
+    case 'is_kagi':
+    case 'is_linebreak':
+    case 'is_pnf':
+    case 'is_range':
+    case 'is_renko':
+      return simple('bool', () => false, span);
+    case 'left_visible_bar_time':
+      return series('int', (rt) => barTimeAt(rt, rt.start), span);
+    case 'right_visible_bar_time':
+      return series('int', (rt) => barTimeAt(rt, rt.bars.length - 1), span);
+    default:
+      return null;
+  }
+}
+
+const barTimeAt = (rt: Runtime, i: number): number => {
+  const bar = rt.bars[i];
+  return bar ? (bar.start ?? bar.time * 1000) : Number.NaN;
+};
+
+/** One series per ta.* volume variable per compile: `ta.obv` and `ta.obv[24]` share it. */
+const barSeriesOf = new WeakMap<Compiler, Map<string, BarSeriesFn>>();
+
+function barSeries(c: Compiler, name: string): BarSeriesFn {
+  let byName = barSeriesOf.get(c);
+  if (!byName) {
+    byName = new Map();
+    barSeriesOf.set(c, byName);
+  }
+  let fn = byName.get(name);
+  if (!fn) {
+    fn = c.rt.register(new BarSeriesFn(BAR_STEPS[name] as (typeof BAR_STEPS)[string]));
+    byName.set(name, fn);
+  }
+  return fn;
+}
+
+const readBarSeries = (fn: BarSeriesFn, rt: Runtime, k: number): number =>
+  fn.at(rt.index, k, (i) => rt.barBack(rt.index - i), rt.symbol.hasVolume, rt.final);
 
 /** `close[3]`, `bar_index[1]`: straight from the chart's bars. */
 export function compileHistoryOfBuiltin(
@@ -343,10 +533,28 @@ export function compileHistoryOfBuiltin(
   offset: Compiled,
   span: Span,
 ): Compiled | null {
+  if (name in BAR_STEPS) {
+    // ta.obv[24]: the series is kept on every bar, so any bar back can be read.
+    const fn = barSeries(_c, name);
+    const back = offset.ev as NumEv;
+    return series(
+      'float',
+      (rt) => {
+        const n = back(rt);
+        if (!(n >= 0))
+          throw new PineRuntimeError(
+            `Invalid history reference [${n}]: the offset must be 0 or more`,
+            span,
+          );
+        return readBarSeries(fn, rt, Math.floor(n));
+      },
+      span,
+    );
+  }
   const bar = barValue(name);
   if (!bar) return null;
   const k = offset.ev as NumEv;
-  const base: Base = name === 'time' || name === 'bar_index' ? 'int' : 'float';
+  const base: Base = INT_BAR_VALUES.has(name) ? 'int' : 'float';
   return series(
     base,
     (rt) => {
@@ -428,6 +636,13 @@ const CALLS: Record<string, Handler> = {
   'input.string': (c, call, scope) => inputCall(c, call, scope, 'string'),
   'input.color': (c, call, scope) => inputCall(c, call, scope, 'color'),
   'input.source': (c, call, scope) => inputCall(c, call, scope, 'source'),
+  'input.timeframe': (c, call, scope) => inputCall(c, call, scope, 'timeframe'),
+  'input.session': (c, call, scope) => inputCall(c, call, scope, 'session'),
+  'input.symbol': (c, call, scope) => inputCall(c, call, scope, 'symbol'),
+  'input.time': (c, call, scope) => inputCall(c, call, scope, 'time'),
+  'input.price': (c, call, scope) => inputCall(c, call, scope, 'price'),
+  'input.text_area': (c, call, scope) => inputCall(c, call, scope, 'text_area'),
+  'input.enum': (c, call, scope) => inputCall(c, call, scope, 'enum'),
   plot: plotCall,
   hline: hlineCall,
   fill: fillCall,
@@ -463,7 +678,10 @@ const CALLS: Record<string, Handler> = {
         ? () => false
         : isNumeric(x.base) || x.base === 'color'
           ? (v: Value) => typeof v === 'number' && Number.isNaN(v)
-          : (v: Value) => v === null || (typeof v === 'number' && Number.isNaN(v));
+          : x.base === 'string'
+            ? // The na string is "": na("") is true (measured on TradingView, strings.ts).
+              (v: Value) => v === '' || v === null
+            : (v: Value) => v === null || (typeof v === 'number' && Number.isNaN(v));
     return {
       base: 'bool',
       qual: x.qual,
@@ -482,7 +700,9 @@ const CALLS: Record<string, Handler> = {
     const s = source.ev;
     const r = replacement?.ev ?? (() => fallback);
     const pick = (value: Value, rt: Runtime | null, env: FoldEnv | null): Value => {
-      const missing = isString ? value === null : typeof value === 'number' && Number.isNaN(value);
+      const missing = isString
+        ? value === null || value === ''
+        : typeof value === 'number' && Number.isNaN(value);
       if (!missing) return value;
       if (rt) return r(rt);
       return replacement?.fold?.(env as FoldEnv) ?? fallback;
@@ -514,28 +734,12 @@ const CALLS: Record<string, Handler> = {
   bool: (c, call, scope) => cast(c, call, scope, 'bool'),
   color: (c, call, scope) => cast(c, call, scope, 'color'),
   string: (c, call, scope) => cast(c, call, scope, 'string'),
-  'str.tostring': (c, call, scope) => {
-    const args = new Args(c, call, scope, ['value', 'format'], 1);
-    const value = args.get('value') as Compiled;
-    const ev = value.ev;
-    const show = (v: Value): Value =>
-      v === null || (typeof v === 'number' && Number.isNaN(v))
-        ? 'NaN'
-        : typeof v === 'number'
-          ? String(v)
-          : String(v);
-    return {
-      base: 'string',
-      qual: value.qual,
-      ev: (rt) => show(ev(rt)),
-      fold: value.fold && ((env) => show((value.fold as (env: FoldEnv) => Value)(env))),
-      span: call.span,
-    };
-  },
   ...mathCalls(),
   ...colorCalls(),
   ...taCalls(),
   ...collectionCalls(),
+  ...timeCalls(),
+  ...stringCalls(),
 };
 
 /** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
@@ -710,15 +914,72 @@ const INPUT_NAMES: Record<string, readonly string[]> = {
   color: ['defval', 'title', 'tooltip', 'inline', 'group', 'confirm', 'display', 'active'],
   source: ['defval', 'title', 'tooltip', 'inline', 'group', 'display', 'active'],
   generic: ['defval', 'title', 'tooltip', 'inline', 'group', 'display', 'active'],
+  timeframe: [
+    'defval',
+    'title',
+    'options',
+    'tooltip',
+    'inline',
+    'group',
+    'confirm',
+    'display',
+    'active',
+  ],
+  session: [
+    'defval',
+    'title',
+    'options',
+    'tooltip',
+    'inline',
+    'group',
+    'confirm',
+    'display',
+    'active',
+  ],
+  symbol: ['defval', 'title', 'tooltip', 'inline', 'group', 'confirm', 'display', 'active'],
+  time: ['defval', 'title', 'tooltip', 'inline', 'group', 'confirm', 'display', 'active'],
+  price: ['defval', 'title', 'tooltip', 'inline', 'group', 'confirm', 'display', 'active'],
+  text_area: ['defval', 'title', 'tooltip', 'group', 'confirm', 'display', 'active'],
+  enum: [
+    'defval',
+    'title',
+    'options',
+    'tooltip',
+    'inline',
+    'group',
+    'confirm',
+    'display',
+    'active',
+  ],
 };
 
+/** The type each kind of input gives the script (the v6 reference's input.* returns). */
+const INPUT_BASES: Readonly<Record<string, Base>> = {
+  timeframe: 'string',
+  session: 'string',
+  symbol: 'string',
+  text_area: 'string',
+  time: 'int',
+  price: 'float',
+};
+
+type InputKind =
+  | 'int'
+  | 'float'
+  | 'bool'
+  | 'string'
+  | 'color'
+  | 'source'
+  | 'timeframe'
+  | 'session'
+  | 'symbol'
+  | 'time'
+  | 'price'
+  | 'text_area'
+  | 'enum';
+
 /** input(), input.int() …: one field of the Inputs tab; its value comes from the settings. */
-function inputCall(
-  c: Compiler,
-  call: Call,
-  scope: Scope,
-  kind: 'int' | 'float' | 'bool' | 'string' | 'color' | 'source' | null,
-): Compiled {
+function inputCall(c: Compiler, call: Call, scope: Scope, kind: InputKind | null): Compiled {
   // input.int and input.float take options in third place when the call gives a list there.
   let names = INPUT_NAMES[kind ?? 'generic'] as readonly string[];
   // v4 and older: input() took minval, maxval, step and options whatever its type (v4 reference).
@@ -776,20 +1037,38 @@ function inputCall(
   } else {
     const value = args.get('defval') as Compiled;
     const base = value.base;
-    if (actual === null) {
-      if (
-        base === 'int' ||
-        base === 'float' ||
-        base === 'bool' ||
-        base === 'string' ||
-        base === 'color'
-      )
-        actual = base;
-      else return c.fail(`An input's default can't be '${typeName(value)}'`, value.span);
+    if (actual === 'enum') {
+      // input.enum: the default is one of an enum's members; the settings keep its name.
+      const def = c.enums.get(base);
+      if (!def)
+        return c.fail(
+          `input.enum's default must be an enum's member, not '${typeName(value)}'`,
+          value.span,
+        );
+      const member = args.constant('defval', null);
+      return enumInput(c, call, args, names, def, member, scope);
     }
-    const ok = base === actual || (actual === 'float' && base === 'int');
-    c.needType(value, ok, call.callee, 'defval', `const ${actual}`);
-    defval = args.constant('defval', null);
+    if (actual !== null && actual in INPUT_BASES) {
+      const want = INPUT_BASES[actual] as Base;
+      const ok = base === want || (want === 'float' && base === 'int');
+      c.needType(value, ok, call.callee, 'defval', `const ${want}`);
+      defval = args.constant('defval', null);
+    } else {
+      if (actual === null) {
+        if (
+          base === 'int' ||
+          base === 'float' ||
+          base === 'bool' ||
+          base === 'string' ||
+          base === 'color'
+        )
+          actual = base;
+        else return c.fail(`An input's default can't be '${typeName(value)}'`, value.span);
+      }
+      const ok = base === actual || (actual === 'float' && base === 'int');
+      c.needType(value, ok, call.callee, 'defval', `const ${actual}`);
+      defval = args.constant('defval', null);
+    }
   }
   const index = c.inputs.length;
   const optionsArg = names.includes('options') ? args.raw('options') : undefined;
@@ -857,12 +1136,78 @@ function inputCall(
       span: call.span,
     };
   }
-  const base = actual as Base;
+  const base = INPUT_BASES[actual] ?? (actual as Base);
   return {
     base,
     qual: INPUT,
     ev: (rt) => rt.inputs[index] ?? defval,
     fold: (env) => env.inputs[index] ?? defval,
+    span: call.span,
+  };
+}
+
+/**
+ * input.enum(): a menu of the enum's members, by their titles (Pine docs, Inputs: Enum input);
+ * the settings keep the chosen member's name, the script gets the member.
+ */
+function enumInput(
+  c: Compiler,
+  call: Call,
+  args: Args,
+  names: readonly string[],
+  def: EnumDef,
+  member: Value,
+  scope: Scope,
+): Compiled {
+  if (!(member instanceof PineEnum)) {
+    return c.fail("input.enum's default must be one of the enum's members", call.span);
+  }
+  let members = def.members;
+  const optionsArg = names.includes('options') ? args.raw('options') : undefined;
+  if (optionsArg) {
+    if (optionsArg.value.kind !== 'list') {
+      c.fail(`'options' takes a list in brackets: options = [E.a, E.b]`, optionsArg.span);
+    } else {
+      members = optionsArg.value.items.map((item) => {
+        const value = c.expr(item, scope).fold?.({ inputs: [] });
+        if (!(value instanceof PineEnum) || value.type !== def.key) {
+          c.fail(`Each option must be a member of the enum "${def.name}"`, item.span);
+        }
+        return value as PineEnum;
+      });
+      if (!members.includes(member)) {
+        c.fail(`The default "${member.name}" isn't one of the options`, call.span);
+      }
+    }
+  }
+  const text = (name: string) => {
+    const value = args.constant(name, null, 'string');
+    return typeof value === 'string' ? value : undefined;
+  };
+  const index = c.inputs.length;
+  const activeArg = args.get('active');
+  const activeFold = activeArg?.fold;
+  c.inputs.push({
+    index,
+    kind: 'enum',
+    title: text('title') ?? '',
+    defval: member.name,
+    options: members.map((m) => m.name),
+    optionTitles: members.map((m) => m.title),
+    tooltip: text('tooltip'),
+    inline: text('inline'),
+    group: text('group'),
+    display: Number(args.foldedAs('display', 'int', DISPLAY.all)({ inputs: [] })),
+    active: activeFold ? (env) => activeFold(env) === true : undefined,
+    span: call.span,
+  });
+  const byName = new Map(def.members.map((m) => [m.name, m]));
+  const pick = (name: Value) => byName.get(String(name)) ?? member;
+  return {
+    base: def.key,
+    qual: INPUT,
+    ev: (rt) => pick(rt.inputs[index] ?? member.name),
+    fold: (env) => pick(env.inputs[index] ?? member.name),
     span: call.span,
   };
 }
@@ -1181,6 +1526,28 @@ function variadic(
 
 const anyNa = (values: readonly number[]) => values.some((value) => Number.isNaN(value));
 
+/** Each math.random() call site's number in the script, so its sequence is its own. */
+const randomSites = new WeakMap<Compiler, number>();
+
+function randomSite(c: Compiler): number {
+  const site = randomSites.get(c) ?? 0;
+  randomSites.set(c, site + 1);
+  return site;
+}
+
+/**
+ * A number in [0, 1) from a seed, a call site, a bar and a call count: the same for the same
+ * seed (math.random's `seed`: the same sequence; the v6 reference), else for one load of the
+ * script, so its check runs agree (script.ts). A 32-bit mix (Mulberry32's), not cryptographic.
+ */
+function random01(seed: number, site: number, bar: number, count: number): number {
+  let h = (Math.imul(seed | 0, 0x9e3779b1) ^ Math.imul(site + 1, 0x85ebca6b)) >>> 0;
+  h = (h ^ Math.imul(bar + 1, 0xc2b2ae35) ^ Math.imul(count + 1, 0x27d4eb2f)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), h | 1);
+  h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
+  return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+}
+
 function mathCalls(): Record<string, Handler> {
   const unary =
     (f: (x: number) => number, base: 'int' | 'float' | 'same' = 'float'): Handler =>
@@ -1252,6 +1619,28 @@ function mathCalls(): Record<string, Handler> {
         (a, b) => (a + b) / 2,
         true,
       ),
+    'math.random': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['min', 'max', 'seed'], 0);
+      const min = args.number('min') ?? (() => 0);
+      const max = args.number('max') ?? (() => 1);
+      const seed = args.int('seed', SIMPLE);
+      const site = randomSite(c);
+      let run = -1;
+      let count = 0;
+      return series(
+        'float',
+        (rt) => {
+          // Each call in one execution of a bar gives another number (a loop's calls too).
+          if (rt.run !== run) {
+            run = rt.run;
+            count = 0;
+          }
+          const u = random01(seed ? seed(rt) : rt.seed, site, rt.index, count++);
+          return min(rt) + (max(rt) - min(rt)) * u;
+        },
+        call.span,
+      );
+    },
     'math.sum': (c, call, scope) => {
       const args = new Args(c, call, scope, ['source', 'length'], 2);
       const source = args.number('source') as NumEv;
@@ -1359,7 +1748,7 @@ function sourceLength(
   call: Call,
   scope: Scope,
   lengthQual: Qual,
-  make: () => { call(value: number, length: number, final: boolean): number },
+  make: () => { call(value: number, length: number, final: boolean, index: number): number },
   lengthName = 'length',
   required = 2,
   lengthDefault = 1,
@@ -1370,7 +1759,8 @@ function sourceLength(
   const fn = c.rt.register(
     make() as unknown as Parameters<typeof c.rt.register>[0],
   ) as unknown as ReturnType<typeof make>;
-  return series('float', (rt) => fn.call(source(rt), length(rt), rt.final), call.span);
+  // The bar goes too: the functions that read their source by bar inside an `if` need it.
+  return series('float', (rt) => fn.call(source(rt), length(rt), rt.final, rt.index), call.span);
 }
 
 function taCalls(): Record<string, Handler> {
@@ -1385,7 +1775,7 @@ function taCalls(): Record<string, Handler> {
     },
     'ta.ema': (c, call, scope) => sourceLength(c, call, scope, SIMPLE, emaFn),
     'ta.rma': (c, call, scope) => sourceLength(c, call, scope, SIMPLE, rmaFn),
-    'ta.wma': (c, call, scope) => sourceLength(c, call, scope, SIMPLE, wmaFn),
+    'ta.wma': (c, call, scope) => sourceLength(c, call, scope, SERIES, () => new WmaFn()),
     'ta.rsi': (c, call, scope) => sourceLength(c, call, scope, SIMPLE, () => new RsiFn()),
     'ta.mom': (c, call, scope) => sourceLength(c, call, scope, SERIES, () => new ChangeFn('mom')),
     'ta.roc': (c, call, scope) => sourceLength(c, call, scope, SERIES, () => new ChangeFn('roc')),
@@ -1397,15 +1787,18 @@ function taCalls(): Record<string, Handler> {
       if (source.base === 'bool') {
         const value = source.ev as (rt: Runtime) => boolean;
         const fn = c.rt.register(new BoolChangeFn());
-        return series('bool', (rt) => fn.call(value(rt), rt.final), call.span);
+        return series('bool', (rt) => fn.call(value(rt), rt.final, rt.index), call.span);
       }
       return sourceLength(c, call, scope, SERIES, () => new ChangeFn('change'), 'length', 1, 1);
     },
     'ta.vwma': (c, call, scope) => {
       const args = new Args(c, call, scope, ['source', 'length'], 2);
       const source = args.number('source') as NumEv;
-      const length = args.int('length', SIMPLE) as NumEv;
-      const fn = c.rt.register(new VwmaFn());
+      const lengthArg = args.get('length') as Compiled;
+      const length = args.int('length') as NumEv;
+      // A length that can't change keeps the kernel; one that can, the values themselves.
+      const fn =
+        lengthArg.qual <= SIMPLE ? c.rt.register(new VwmaFn()) : c.rt.register(new DynamicVwma());
       return series(
         'float',
         (rt) =>
@@ -1422,7 +1815,7 @@ function taCalls(): Record<string, Handler> {
       const args = new Args(c, call, scope, ['source'], 1);
       const source = args.number('source') as NumEv;
       const fn = c.rt.register(new SwmaFn());
-      return series('float', (rt) => fn.call(source(rt), rt.final), call.span);
+      return series('float', (rt) => fn.call(source(rt), rt.final, rt.index), call.span);
     },
     'ta.stdev': (c, call, scope) => stdevCall(c, call, scope, false),
     'ta.variance': (c, call, scope) => stdevCall(c, call, scope, true),
@@ -1461,7 +1854,8 @@ function taCalls(): Record<string, Handler> {
       const fn = c.rt.register(new TrFn());
       return series(
         'float',
-        (rt) => fn.call(rt.bar.high, rt.bar.low, rt.bar.close, handle(rt), rt.final),
+        (rt) =>
+          fn.call(rt.bar.high, rt.bar.low, rt.bar.close, handle(rt), rt.final, closeBefore(rt)),
         call.span,
       );
     },
@@ -1471,7 +1865,8 @@ function taCalls(): Record<string, Handler> {
       const fn = c.rt.register(new AtrFn());
       return series(
         'float',
-        (rt) => fn.call(rt.bar.high, rt.bar.low, rt.bar.close, length(rt), rt.final),
+        (rt) =>
+          fn.call(rt.bar.high, rt.bar.low, rt.bar.close, length(rt), rt.final, closeBefore(rt)),
         call.span,
       );
     },
@@ -1490,7 +1885,7 @@ function taCalls(): Record<string, Handler> {
       const fn = c.rt.register(new StochFn());
       return series(
         'float',
-        (rt) => fn.call(source(rt), high(rt), low(rt), length(rt), rt.final),
+        (rt) => fn.call(source(rt), high(rt), low(rt), length(rt), rt.final, rt.index),
         call.span,
       );
     },
@@ -1509,12 +1904,14 @@ function taCalls(): Record<string, Handler> {
         span: call.span,
       };
     },
+    ...moreTaCalls(),
     'ta.bb': (c, call, scope) => {
       const args = new Args(c, call, scope, ['series', 'length', 'mult'], 3);
       const source = args.number('series') as NumEv;
-      const length = args.int('length', SIMPLE) as NumEv;
+      const lengthArg = args.get('length') as Compiled;
+      const length = args.int('length') as NumEv;
       const mult = args.number('mult', SIMPLE) as NumEv;
-      const fn = c.rt.register(new BbFn());
+      const fn = c.rt.register(new BbFn(lengthArg.qual > SIMPLE));
       return {
         base: 'tuple',
         items: ['float', 'float', 'float'],
@@ -1529,9 +1926,14 @@ function taCalls(): Record<string, Handler> {
 function stdevCall(c: Compiler, call: Call, scope: Scope, variance: boolean): Compiled {
   const args = new Args(c, call, scope, ['source', 'length', 'biased'], 2);
   const source = args.number('source') as NumEv;
-  const length = args.int('length', SIMPLE) as NumEv;
+  const lengthArg = args.get('length') as Compiled;
+  const length = args.int('length') as NumEv;
   const biased = args.bool('biased', SIMPLE) ?? (() => true);
-  const fn = c.rt.register(new StdevFn(variance));
+  // A length that can't change keeps the window kernel; one that can, the values themselves.
+  const fn =
+    lengthArg.qual <= SIMPLE
+      ? c.rt.register(new StdevFn(variance))
+      : c.rt.register(new WindowStdevFn(variance));
   return series('float', (rt) => fn.call(source(rt), length(rt), biased(rt), rt.final), call.span);
 }
 
@@ -1553,7 +1955,7 @@ function extremeCall(
   const fn = c.rt.register(new ExtremeFn(highest, offset));
   return series(
     offset ? 'int' : 'float',
-    (rt) => fn.call(source(rt), length(rt), rt.final),
+    (rt) => fn.call(source(rt), length(rt), rt.final, rt.index),
     call.span,
   );
 }
@@ -1590,5 +1992,327 @@ function pivotCall(c: Compiler, call: Call, scope: Scope, high: boolean): Compil
   const left = args.int('leftbars') as NumEv;
   const right = args.int('rightbars') as NumEv;
   const fn = c.rt.register(new PivotFn(high));
-  return series('float', (rt) => fn.call(source(rt), left(rt), right(rt), rt.final), call.span);
+  return series(
+    'float',
+    (rt) => fn.call(source(rt), left(rt), right(rt), rt.final, rt.index),
+    call.span,
+  );
+}
+
+/** The previous bar's close (na on the first), which ta.tr and ta.atr read by bar. */
+const closeBefore = (rt: Runtime): number => rt.barBack(1)?.close ?? Number.NaN;
+
+/** A ta.* call returning a tuple of floats. */
+const floats = (items: number, ev: (rt: Runtime) => number[], span: Span): Compiled => ({
+  base: 'tuple',
+  items: Array.from({ length: items }, () => 'float'),
+  qual: SERIES,
+  ev,
+  span,
+});
+
+/** The ta.* functions added in P2 (taStats.ts, taTrend.ts). */
+function moreTaCalls(): Record<string, Handler> {
+  /** f(source, length, …): one source and a length, the rest given by `extra`. */
+  const windowed = (
+    names: readonly string[],
+    required: number,
+    make: () => { call(...args: never[]): number },
+    read: (args: Args) => NumEv[],
+  ): Handler => {
+    return (c, call, scope) => {
+      const args = new Args(c, call, scope, names, required);
+      const evs = read(args);
+      const fn = c.rt.register(
+        make() as unknown as Parameters<typeof c.rt.register>[0],
+      ) as unknown as {
+        call(...args: unknown[]): number;
+      };
+      return series(
+        'float',
+        (rt) => fn.call(...evs.map((ev) => ev(rt)), rt.final, rt.index),
+        call.span,
+      );
+    };
+  };
+  const sourceAnd =
+    (
+      source: string,
+      ...rest: [
+        name: string,
+        kind: 'int' | 'float' | 'bool',
+        qual: Qual,
+        fallback?: number | boolean,
+      ][]
+    ) =>
+    (args: Args): NumEv[] => [
+      args.number(source) as NumEv,
+      ...rest.map(([name, kind, qual, fallback]) => {
+        const ev =
+          kind === 'int'
+            ? args.int(name, qual)
+            : kind === 'bool'
+              ? (args.bool(name, qual) as NumEv | undefined)
+              : args.number(name, qual);
+        return ev ?? ((() => fallback ?? Number.NaN) as NumEv);
+      }),
+    ];
+  return {
+    'ta.alma': windowed(
+      ['series', 'length', 'offset', 'sigma', 'floor'],
+      4,
+      () => new AlmaFn(),
+      sourceAnd(
+        'series',
+        ['length', 'int', SERIES],
+        ['offset', 'float', SIMPLE],
+        ['sigma', 'float', SIMPLE],
+        ['floor', 'bool', SIMPLE, false],
+      ),
+    ),
+    'ta.median': windowed(
+      ['source', 'length'],
+      2,
+      () => new MedianFn(),
+      sourceAnd('source', ['length', 'int', SERIES]),
+    ),
+    'ta.mode': windowed(
+      ['source', 'length'],
+      2,
+      () => new ModeFn(),
+      sourceAnd('source', ['length', 'int', SERIES]),
+    ),
+    'ta.percentile_linear_interpolation': windowed(
+      ['source', 'length', 'percentage'],
+      3,
+      () => new PercentileLinearFn(),
+      sourceAnd('source', ['length', 'int', SERIES], ['percentage', 'float', SIMPLE]),
+    ),
+    'ta.percentile_nearest_rank': windowed(
+      ['source', 'length', 'percentage'],
+      3,
+      () => new PercentileNearestFn(),
+      sourceAnd('source', ['length', 'int', SERIES], ['percentage', 'float', SIMPLE]),
+    ),
+    'ta.percentrank': windowed(
+      ['source', 'length'],
+      2,
+      () => new PercentrankFn(),
+      sourceAnd('source', ['length', 'int', SERIES]),
+    ),
+    'ta.range': windowed(
+      ['source', 'length'],
+      2,
+      () => new RangeFn(),
+      sourceAnd('source', ['length', 'int', SERIES]),
+    ),
+    'ta.rci': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['source', 'length'], 2);
+      const source = args.number('source') as NumEv;
+      const lengthArg = args.get('length') as Compiled;
+      const length = args.int('length') as NumEv;
+      // A length that can't change reads slots by bar inside an `if`, as TradingView's (taStats).
+      const fn = c.rt.register(new RciFn(lengthArg.qual <= SIMPLE));
+      return series(
+        'float',
+        (rt) => fn.call(source(rt), length(rt), rt.final, rt.index),
+        call.span,
+      );
+    },
+    'ta.linreg': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['source', 'length', 'offset'], 3);
+      const source = args.number('source') as NumEv;
+      const lengthArg = args.get('length') as Compiled;
+      const length = args.int('length') as NumEv;
+      const offset = args.int('offset', SIMPLE) as NumEv;
+      const fn = c.rt.register(new LinregFn(lengthArg.qual <= SIMPLE));
+      return series(
+        'float',
+        (rt) => fn.call(source(rt), length(rt), offset(rt), rt.final, rt.index),
+        call.span,
+      );
+    },
+    'ta.cog': windowed(
+      ['source', 'length'],
+      2,
+      () => new CogFn(),
+      sourceAnd('source', ['length', 'int', SERIES]),
+    ),
+    'ta.cmo': windowed(
+      ['series', 'length'],
+      2,
+      () => new CmoFn(),
+      sourceAnd('series', ['length', 'int', SERIES]),
+    ),
+    'ta.hma': windowed(
+      ['source', 'length'],
+      2,
+      () => new HmaFn(),
+      sourceAnd('source', ['length', 'int', SIMPLE]),
+    ),
+    'ta.bbw': windowed(
+      ['series', 'length', 'mult'],
+      3,
+      () => new BbwFn(),
+      sourceAnd('series', ['length', 'int', SERIES], ['mult', 'float', SIMPLE]),
+    ),
+    'ta.tsi': windowed(
+      ['source', 'short_length', 'long_length'],
+      3,
+      () => new TsiFn(),
+      sourceAnd('source', ['short_length', 'int', SIMPLE], ['long_length', 'int', SIMPLE]),
+    ),
+    'ta.max': windowed(['source'], 1, () => new AllTimeFn(true), sourceAnd('source')),
+    'ta.min': windowed(['source'], 1, () => new AllTimeFn(false), sourceAnd('source')),
+    'ta.correlation': windowed(
+      ['source1', 'source2', 'length'],
+      3,
+      () => new CorrelationFn(),
+      (args) => [
+        args.number('source1') as NumEv,
+        args.number('source2') as NumEv,
+        args.int('length') as NumEv,
+      ],
+    ),
+    'ta.mfi': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['series', 'length'], 2);
+      const source = args.number('series') as NumEv;
+      const length = args.int('length') as NumEv;
+      const fn = c.rt.register(new MfiFn());
+      return series(
+        'float',
+        (rt) =>
+          fn.call(
+            source(rt),
+            rt.symbol.hasVolume ? rt.bar.volume : Number.NaN,
+            length(rt),
+            rt.final,
+          ),
+        call.span,
+      );
+    },
+    'ta.wpr': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['length'], 1);
+      const length = args.int('length') as NumEv;
+      const fn = c.rt.register(new WprFn());
+      return series('float', (rt) => fn.call(rt.bar, length(rt), rt.final), call.span);
+    },
+    'ta.sar': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['start', 'inc', 'max'], 3);
+      const start = args.number('start', SIMPLE) as NumEv;
+      const inc = args.number('inc', SIMPLE) as NumEv;
+      const max = args.number('max', SIMPLE) as NumEv;
+      const fn = c.rt.register(new SarFn());
+      return series(
+        'float',
+        (rt) => fn.call(rt.bar, start(rt), inc(rt), max(rt), rt.final),
+        call.span,
+      );
+    },
+    'ta.dmi': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['diLength', 'adxSmoothing'], 2);
+      const di = args.int('diLength', SIMPLE) as NumEv;
+      const adx = args.int('adxSmoothing', SIMPLE) as NumEv;
+      const fn = c.rt.register(new DmiFn());
+      return floats(3, (rt) => fn.call(rt.bar, di(rt), adx(rt), rt.final), call.span);
+    },
+    'ta.supertrend': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['factor', 'atrPeriod'], 2);
+      const factor = args.number('factor') as NumEv;
+      const period = args.int('atrPeriod', SIMPLE) as NumEv;
+      const fn = c.rt.register(new SupertrendFn());
+      return floats(
+        2,
+        (rt) => fn.call(rt.bar, closeBefore(rt), factor(rt), period(rt), rt.final),
+        call.span,
+      );
+    },
+    'ta.kc': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['series', 'length', 'mult', 'useTrueRange'], 3);
+      const source = args.number('series') as NumEv;
+      const length = args.int('length', SIMPLE) as NumEv;
+      const mult = args.number('mult', SIMPLE) as NumEv;
+      const trueRange = args.bool('useTrueRange', SIMPLE) ?? (() => true);
+      const fn = c.rt.register(new KcFn());
+      return floats(
+        3,
+        (rt) =>
+          fn.call(
+            source(rt),
+            rt.bar,
+            closeBefore(rt),
+            length(rt),
+            mult(rt),
+            trueRange(rt),
+            rt.final,
+          ),
+        call.span,
+      );
+    },
+    'ta.kcw': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['series', 'length', 'mult', 'useTrueRange'], 3);
+      const source = args.number('series') as NumEv;
+      const length = args.int('length', SIMPLE) as NumEv;
+      const mult = args.number('mult', SIMPLE) as NumEv;
+      const trueRange = args.bool('useTrueRange', SIMPLE) ?? (() => true);
+      const fn = c.rt.register(new KcFn());
+      return series(
+        'float',
+        (rt) => {
+          const [basis, upper, lower] = fn.call(
+            source(rt),
+            rt.bar,
+            closeBefore(rt),
+            length(rt),
+            mult(rt),
+            trueRange(rt),
+            rt.final,
+          ) as [number, number, number];
+          return (upper - lower) / basis;
+        },
+        call.span,
+      );
+    },
+    'ta.vwap': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['source', 'anchor', 'stdev_mult'], 1);
+      const source = args.number('source') as NumEv;
+      const anchor = args.bool('anchor');
+      const mult = args.number('stdev_mult');
+      const fn = c.rt.register(new VwapFn());
+      // Without an anchor it starts afresh with each session (the variable's rule).
+      const read = (rt: Runtime) =>
+        fn.call(
+          source(rt),
+          rt.symbol.hasVolume ? rt.bar.volume : Number.NaN,
+          anchor ? anchor(rt) : sessionOf(rt),
+          mult ? mult(rt) : 0,
+          rt.final,
+        );
+      if (mult) return floats(3, read, call.span);
+      return series('float', (rt) => read(rt)[0] as number, call.span);
+    },
+    'ta.pivot_point_levels': (c, call, scope) => {
+      const args = new Args(c, call, scope, ['type', 'anchor', 'developing'], 2);
+      const type = (args.string('type') as Compiled).ev;
+      const anchor = args.bool('anchor') as (rt: Runtime) => boolean;
+      const developing = args.bool('developing', SIMPLE) ?? (() => false);
+      const fn = c.rt.register(new PivotLevelsFn());
+      return {
+        base: 'array<float>',
+        qual: SERIES,
+        ev: (rt) => {
+          rt.usesObjects = true;
+          const levels = fn.call(
+            rt.bar,
+            String(type(rt) ?? ''),
+            anchor(rt),
+            developing(rt),
+            rt.final,
+          );
+          return new PineArray('float', [...levels]);
+        },
+        span: call.span,
+      };
+    },
+  };
 }

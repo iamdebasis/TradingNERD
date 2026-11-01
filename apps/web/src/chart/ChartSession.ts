@@ -171,6 +171,9 @@ export class ChartSession {
         resolution,
         timezone:
           this.settings.timezone === 'exchange' ? info.timezone : intlZone(this.settings.timezone),
+        exchangeTimezone: info.timezone,
+        ...(this.schedule ? { schedule: this.schedule } : {}),
+        hours: this.hours,
         clock: this.schedule ? sessionClock(this.schedule, this.hours) : UTC_CLOCK,
         delayMs: info.delayMs,
         base: volumeUnit(info),

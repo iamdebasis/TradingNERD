@@ -3,12 +3,16 @@ import {
   type BarClock,
   formatResolution,
   isIntraday,
+  type MarketSchedule,
   type PriceFormat,
   type Resolution,
+  type SessionHours,
   timeZone,
   UTC_CLOCK,
+  UTC_ZONE,
 } from '@tradingnerd/core';
 import type { BarChange } from '@tradingnerd/indicators';
+import { DEFAULT_SYMBOL, hexColor } from '@tradingnerd/pine';
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -80,8 +84,14 @@ export interface ChartInstrument {
   /** How prices are written: market caps in thousands to trillions ("price" when absent). */
   format?: PriceFormat;
   resolution: Resolution;
-  /** The exchange's time zone, which the time axis shows (UTC when absent). */
+  /** The time zone the time axis shows (UTC when absent): the exchange's, or the user's choice. */
   timezone?: string;
+  /** The exchange's own time zone, which a Pine script's calendar values follow (UTC when absent). */
+  exchangeTimezone?: string;
+  /** The market's trading calendar, for a Pine script's sessions; absent around the clock. */
+  schedule?: MarketSchedule;
+  /** The hours an intraday chart shows ("regular" when absent). */
+  hours?: SessionHours;
   /** Where its bars begin and end, for the countdown (UTC bars when absent). */
   clock?: BarClock;
   /** How far behind real time its data runs, ms. */
@@ -91,6 +101,10 @@ export interface ChartInstrument {
   /** Whether its bars carry real traded volume: CRYPTOCAP's and formulas' don't (§6.16). */
   hasVolume?: boolean;
 }
+
+/** The chart's background as a Pine color (chart.bg_color); the default for other CSS. */
+const scriptColor = (css: string): number =>
+  /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(css) ? hexColor(css) : DEFAULT_SYMBOL.background;
 
 /** The pre/post-market price line: the price, its "Pre"/"Post" tag and color. */
 export type ExtendedPrice = Omit<ExtendedPriceState, 'text'>;
@@ -397,6 +411,11 @@ export class ChartController {
           mintick: tickSize,
           timeframe: formatResolution(resolution),
           hasVolume: instrument.hasVolume ?? true,
+          timezone: instrument.exchangeTimezone ?? UTC_ZONE,
+          session: instrument.hours ?? 'regular',
+          clock: instrument.clock ?? UTC_CLOCK,
+          schedule: instrument.schedule ?? null,
+          background: scriptColor(this.theme.background),
         },
         priceDecimals: precision,
       },

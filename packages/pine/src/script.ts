@@ -362,9 +362,18 @@ function sanitizeInput(input: InputDef, value: unknown): Value {
     case 'bool':
       return typeof value === 'boolean' ? value : input.defval;
     case 'string':
+    case 'timeframe':
+    case 'session':
+    case 'symbol':
+    case 'text_area':
+    case 'enum':
       return typeof value === 'string' && (!input.options || input.options.includes(value))
         ? value
         : input.defval;
+    case 'time':
+      return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : input.defval;
+    case 'price':
+      return typeof value === 'number' && Number.isFinite(value) ? value : input.defval;
     case 'color':
       return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 2 ** 32
         ? value
@@ -384,6 +393,16 @@ export interface ScriptError {
   span: Span | null;
   /** The bar it stopped on. */
   bar: number;
+}
+
+/**
+ * What every execution of one load of a script shares: timenow on its history (Pine docs, Time:
+ * nearly the same on every historical bar) and math.random()'s seed, so the warm-up check's runs
+ * agree with the main one.
+ */
+interface RunClock {
+  now: number;
+  seed: number;
 }
 
 /** Room for this many bars past the loaded ones, so live bars rarely need new arrays. */
@@ -412,6 +431,7 @@ class Execution {
     start: number,
     changed: readonly Bar[],
     realtimeFrom: number,
+    clock: RunClock,
   ) {
     this.program = program;
     this.start = start;
@@ -424,6 +444,8 @@ class Execution {
     const rt = program.runtime;
     rt.inputs = inputs;
     rt.symbol = symbol;
+    rt.now = clock.now;
+    rt.seed = clock.seed;
     rt.start = start;
     rt.changed = changed;
     rt.realtimeFrom = realtimeFrom;
@@ -446,6 +468,8 @@ class Execution {
   /** The live bar moved. */
   tick(bars: readonly Bar[]): void {
     this.program.runtime.bars = bars;
+    // Realtime executions see the time they run at (timenow; Pine docs, Time).
+    this.program.runtime.now = Date.now();
     this.run(bars.length - 1, false);
   }
 
@@ -454,6 +478,7 @@ class Execution {
     const last = bars.length - 1;
     this.room(bars.length);
     this.program.runtime.bars = bars;
+    this.program.runtime.now = Date.now();
     this.beforeLastCommit = this.program.runtime.save();
     this.run(last - 1, true);
     this.run(last, false);
@@ -605,6 +630,8 @@ export class ScriptRun {
   setBars(bars: readonly Bar[], fromListing: boolean): void {
     this.fromListing = fromListing;
     const realtimeFrom = Math.max(0, bars.length - 1);
+    // One clock and seed for the whole load: the check runs must see what the main run sees.
+    const clock: RunClock = { now: Date.now(), seed: (Math.random() * 2 ** 31) | 0 };
     const make = (start: number, changed: readonly Bar[]) =>
       new Execution(
         this.program.instance(),
@@ -613,6 +640,7 @@ export class ScriptRun {
         start,
         changed,
         realtimeFrom,
+        clock,
       );
     this.main = make(0, []);
     this.main.all(bars);

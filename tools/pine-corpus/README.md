@@ -2,7 +2,7 @@
 
 Real Pine scripts through our engine, to measure what runs (docs/SPEC.md §4.17, §9).
 
-- **What it reads:** TradingView's Pine manual examples, from the manual's GitHub mirrors, and nine community collections of open-source indicators on GitHub. The list is `SOURCES` in `corpus.ts`.
+- **What it reads:** TradingView's Pine manual examples, from the manual's GitHub mirrors, and eight community collections of open-source indicators on GitHub. The list is `SOURCES` in `corpus.ts`.
 - **Where they go:** `tools/pine-corpus/.cache/`, which git ignores. Their licences don't let us publish them, so none is committed.
 - **What it never does:** contact tradingview.com.
 
