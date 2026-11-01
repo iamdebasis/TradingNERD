@@ -273,3 +273,126 @@ test('a script that stops on a runtime error draws nothing and says why in its l
     row(page, 'script-1').getByRole('img', { name: 'Error: Stopped on purpose' }),
   ).toBeVisible();
 });
+
+test('plotshape, plotarrow, plotcandle and barcolor draw as TradingView draws them', async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(
+    page,
+    [
+      '//@version=6',
+      'indicator("Marks", overlay = true)',
+      'plotshape(close > open, "Up", shape.triangleup, location.belowbar, color.teal, text = "Up")',
+      'plotarrow(close - open, "Body")',
+      'plotcandle(open, high, low, close, "Copy", color.orange)',
+      'barcolor(close > open ? color.yellow : na)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  // Shapes and arrows on the bars in view, over clear series that carry them on the scale.
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.plots[0]?.marks).toBeGreaterThan(0);
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.plots[1]?.marks).toBeGreaterThan(0);
+  const state = await chartState(page);
+  const [shapes, arrows, candles] = state.indicators[0]?.plots ?? [];
+  expect([shapes?.type, arrows?.type, candles?.type]).toEqual(['Line', 'Line', 'Candlestick']);
+  // A candle on every bar; the high, low and close aren't plots of their own.
+  expect(state.indicators[0]?.plots).toHaveLength(3);
+  expect(candles?.points).toBe(state.barCount);
+
+  // barcolor(): the up bars' bodies are yellow, the others the chart's own.
+  const bars = market.bars.slice(-state.barCount);
+  const ups = bars.flatMap((bar, index) => (bar.close > bar.open ? [index] : []));
+  expect(state.barColors.map((bar) => bar.index)).toEqual(ups);
+  expect(new Set(state.barColors.map((bar) => bar.color))).toEqual(new Set(['#FDD835']));
+
+  // The legend writes the candles' open, high, low and close, all in their color.
+  const legend = row(page, 'script-1');
+  const last = bars.at(-1) as (typeof bars)[number];
+  const parts = ['plot_2', 'plot_3', 'plot_4', 'plot_5'];
+  const texts = await Promise.all(
+    parts.map((id) => legend.locator(`[data-plot="${id}"]`).textContent()),
+  );
+  expect(texts.map((text) => Number(text))).toEqual(
+    [last.open, last.high, last.low, last.close].map((value) => Number(value.toFixed(4))),
+  );
+  for (const id of parts) {
+    await expect(legend.locator(`[data-plot="${id}"]`)).toHaveCSS('color', 'rgb(255, 152, 0)');
+  }
+
+  // The Style tab lists each output once; turning Bar color off gives the bars their colors back.
+  await legend.getByRole('button', { name: 'Marks', exact: true }).dblclick();
+  const settings = page.getByRole('dialog', { name: 'Marks' });
+  await settings.getByRole('tab', { name: 'Style' }).click();
+  for (const title of ['Up', 'Body', 'Copy', 'Bar color']) {
+    await expect(settings.getByRole('checkbox', { name: title, exact: true })).toBeVisible();
+  }
+  await settings.getByRole('checkbox', { name: 'Bar color', exact: true }).uncheck();
+  await expect.poll(async () => (await chartState(page)).barColors).toEqual([]);
+  await settings.getByRole('button', { name: 'Ok' }).click();
+});
+
+test('a plotcandle is drawn from where its open, high, low and close have all settled', async ({
+  page,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  // The close is an average still settling on the first bars loaded; the open isn't.
+  await setCode(
+    page,
+    [
+      '//@version=6',
+      'indicator("Smoothed", overlay = true)',
+      'c = ta.ema(close, 50)',
+      'plotcandle(open, high, low, c, "Smoothed")',
+      'plot(c, "EMA")',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.plots.length).toBe(2);
+  const state = await chartState(page);
+  const [candles, ema] = state.indicators[0]?.plots ?? [];
+  expect(ema?.start).toBeGreaterThan(0);
+  expect(candles?.start).toBe(ema?.start);
+  expect(candles?.points).toBe(state.barCount - (candles?.start ?? 0));
+});
+
+test('a script that stops takes its bar colors off the chart', async ({ page, market }) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(
+    page,
+    [
+      '//@version=6',
+      'indicator("Colors", overlay = true)',
+      'barcolor(color.yellow)',
+      'if volume == 25000000',
+      '    runtime.error("Stopped live")',
+      'plot(close)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  await expect.poll(async () => (await chartState(page)).barColors.length).toBeGreaterThan(0);
+  // A live tick stops it: every bar takes the chart's own colors back.
+  const last = market.bars.at(-1) as (typeof market.bars)[number];
+  await market.sendBar({ ...last, volume: 2.5e7 });
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.error).toBe('Stopped live');
+  await expect.poll(async () => (await chartState(page)).barColors).toEqual([]);
+});

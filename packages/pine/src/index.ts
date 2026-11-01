@@ -15,6 +15,8 @@ export {
   type CompileResult,
   compileCached,
   compileScript,
+  type MarkLocation,
+  type MarkSize,
   PINE_VERSION,
   type ScriptBackground,
   type ScriptDescription,
@@ -22,9 +24,11 @@ export {
   type ScriptFill,
   type ScriptHline,
   type ScriptInput,
+  type ScriptMark,
   type ScriptPlot,
   ScriptProgram,
   ScriptRun,
+  type Shape,
 } from './script.ts';
 export {
   COLORS,

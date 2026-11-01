@@ -498,7 +498,12 @@ function NumberField({
   );
 }
 
-type StyleKind = 'line' | 'columns' | 'level' | 'fill' | 'gradient';
+/**
+ * A Style tab row's kind: marks (plotshape, plotchar, plotarrow) and candles (plotcandle, plotbar)
+ * show their color only; TradingView's menus for a mark's shape and place, and a candle's wick and
+ * border colors, come later (provisional, docs/SPEC.md §11).
+ */
+type StyleKind = 'line' | 'columns' | 'marks' | 'candles' | 'level' | 'fill' | 'gradient';
 
 function StyleTab({
   definition,

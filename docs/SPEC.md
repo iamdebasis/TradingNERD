@@ -206,6 +206,9 @@ A local clone of TradingView's chart page. It should match TradingView's look an
 | 2026-11-01 | **Numbers are written by Java's DecimalFormat and MessageFormat rules, with TradingView's rounding**: `str.tostring` half up from the digits written, `str.format` half even on the exact value, at most 10 decimals by default, `format.percent` and `format.volume` as TradingView's | Pine's patterns are Java's (the reference's examples); TradingView's measured outputs reproduced exactly: 46 groups and 5 error messages (§4.17). |
 | 2026-11-01 | **A script knows the exchange's time zone, its sessions, the chart's bar clock and background**: calendar values and `timestamp()` in the exchange's zone, a date string without a zone in UTC, session strings as the manual writes them | Pine docs: Time; Sessions; the v6 reference (`timestamp`: "If no time zone is supplied, GMT+0 will be used"). |
 | 2026-11-01 | **Every input kind has its control**: `input.timeframe` a menu ("Chart", then the intervals in TradingView's words), `input.enum` its members by title, `input.session` two times, `input.time` a date and a time, `input.text_area` several lines, `input.price` a number; `input.symbol` stays text until other symbols' data comes (P4) | Pine docs, Inputs. |
+| 2026-11-01 | **The plotshape family draws as TradingView's own figures show it**: plotshape's 12 shapes, plotchar's characters and plotarrow's arrows, each with its text; plotcandle and plotbar as candles and bars; barcolor() on the chart's own candles. A mark stands on its pane's scale: above or below the bar's high or low, at its value with `location.absolute`, at the pane's top or bottom | Pine docs: Text and shapes, Bar plotting, Bar coloring, and their figures, measured (§4.18). The manual: `location.abovebar` "will put the price into play in the script's scale", in a pane too. |
+| 2026-11-01 | **What the figures show, where the reference is silent:** a mark's text takes the mark's color; `\n` lifts text above a mark and pushes it down below one; a plotcandle's legend writes its open, high, low and close in its color, without letters, and its close labels the price scale; barcolor() colors only the bodies, the wicks and borders keeping the chart's up and down colors | Figures 98, 192, 193 and "Lift text" of the Pine manual (§4.18). |
+| 2026-11-01 | **Defaults the reference leaves out, from the same figures:** a candle's wick dark gray (`#737375`) and its border black; plotarrow's colors `color.lime` and `color.red`; sizes from the bar spacing (plotshape's arrows 0.39 of it wide, plotarrow's heads 0.85). Provisional until a screenshot of yours | Figures 99, 192, 287, 288 and 289 (§4.18); the Charting Library's example of OHLC plots sets the same wick and border. Measure, don't guess (§11, items 89–92). |
 
 ## 4. Research findings
 
@@ -540,16 +543,16 @@ Both rules keep their values within a hundred-millionth of an RSI point of the l
 
 **The corpus** (`tools/pine-corpus/`, `pnpm test:corpus`): TradingView's manual examples from its GitHub mirrors, and eight community collections from GitHub, each compiled and run over 600 bars. "P2-only" counts the scripts that need nothing from P3 to P5 (drawings, other symbols and timeframes, strategies).
 
-| | P1's engine (31 Oct) | P2 step 1 | P2 step 3 |
-|---|---|---|---|
-| Manual examples that run, of all | 175 of 1,010 | 286 of 1,016 | 358 of 1,016 |
-| … of those needing only P2's features | not counted | 284 of 468 (60.7%) | 356 of 468 (76.1%) |
-| Community scripts that run, of all | 1 of 271 | 124 of 271 | 155 of 271 |
-| … of those needing only P2's features | not counted | 124 of 201 (61.7%) | 155 of 201 (77.1%) |
+| | P1's engine (31 Oct) | P2 step 1 | P2 step 3 | P2 step 4 (1 Nov) |
+|---|---|---|---|---|
+| Manual examples that run, of all | 175 of 1,010 | 286 of 1,016 | 358 of 1,016 | 413 of 1,016 |
+| … of those needing only P2's features | not counted | 284 of 468 (60.7%) | 356 of 468 (76.1%) | 411 of 468 (87.8%) |
+| Community scripts that run, of all | 1 of 271 | 124 of 271 | 155 of 271 | 194 of 271 |
+| … of those needing only P2's features | not counted | 124 of 201 (61.7%) | 155 of 201 (77.1%) | 194 of 201 (96.5%) |
 
 P1's numbers come from the first, scratch version of the measurement, which gathered the manual's examples a little differently; the corpus tool's own are from step 1 on.
 
-What stops the rest (step 3): the plotshape family, 94 scripts (step 4); libraries not yet added, 7 (step 5); and code fences of the manual that hold two scripts, 11.
+What stops the rest after step 4, 64 scripts: code fences of the manual that hold two scripts, 11; an argument of the wrong type, 7; libraries not yet added, 7 (step 5); no output at all, 5; a string without its closing quote, 4; and 30 others, of 1 to 3 scripts each (step 7).
 
 **TradingView's own values for the built-ins.** TradingView's reference gives formulas but not how a function treats `na`, a length that changes, or a call that skips bars. PineTS (third-party, AGPL-3.0) publishes TradingView's outputs for its probes on BINANCE:BTCUSDT 1h; we run the same probe scripts through our engine on the same bars, locally, without copying the data into the repository.
 
@@ -580,6 +583,30 @@ PineTS's own notes give the other rules we follow (§3, 1 November); each matche
 **Time.** Pine's manual (Time; Sessions; Timeframes) and its reference: calendar values in `syminfo.timezone`; time zones as "UTC+3", "GMT-0530" or IANA names; session strings "0930-1600:23456", an overnight one belonging to the day it ends on; `timeframe.in_seconds("1M")` 2,628,003; `timeframe.from_seconds` rounding up to the next timeframe.
 
 **Still unknown, searched and not found:** `chart.fg_color`'s value; which week numbering `weekofyear` uses; how `str.tostring` writes a matrix; whether `timeframe.change` is true on the chart's first bar (§11, items 82–87).
+
+### 4.18 The plotshape family (researched 2026-11-01)
+
+**TradingView's own sources.** The Pine manual (Text and shapes; Bar plotting; Bar coloring; the figures of Requesting LTF collections and Custom contexts) and the v6 reference: a bool series picks the bars; `\n` with a zero-width character lifts text up or pushes it down; plotarrow's length is "proportional to the relative value of the series", between `minheight` and `maxheight` px (5 and 100); "if one of open, high, low or close is na, no bar is plotted", the largest of the four is the high and the smallest the low; barcolor() colors the main chart's bars from any pane, na leaving a bar as is. The Charting Library's docs, read in search results' extracts (tradingview.com can't be fetched from the cloud): a shapes plot has a shape, a location (AboveBar, BelowBar, Top, Bottom, Absolute) and a color; an arrows plot an up and a down color and its heights; an OHLC candles plot a color, a wick and a border, each with a color, as its Style settings; a shape's `size` is one of auto, tiny, small, normal, large and huge.
+
+**Measured on the manual's figures** (its PDF mirror, the images at full size):
+
+| What | Measured | Figure |
+|---|---|---|
+| plotshape's arrows at `size.auto` | 0.39 of the bar spacing wide, 1.3 times as tall (8 arrows) | "Lift text" (287) |
+| A mark's text without `textcolor` | the mark's color: A green, B lime | the same |
+| Its size | about 0.38 of the bar spacing, zoomed in: it grows as the bars spread | the same |
+| A plotshape's value in the legend | 1.00 for true | the same |
+| plotarrow's head | 0.87 and 0.83 of the bar spacing wide; about half as tall as wide; a short arrow all head, flattened | 288 (14 arrows), 289 (37) |
+| Its shaft | 0.58 of the head's width | the same |
+| Its colors without `colorup` and `colordown` | `#00FF00` and `#FF0000`: `color.lime` and `color.red` when the figure was made | 289 |
+| A plotcandle without `wickcolor` and `bordercolor` | a dark gray wick, a black border | 99, 192 |
+| A plotcandle in the legend | its four values, no letters, in its color | 192, 193 |
+| On the price scale | its close, in its color | 192, 193 |
+| barcolor() | the body only: the wick and the border keep the up and down colors | 98 |
+
+**Third-party:** none needed; one platform's docs (mmt.gg) scale arrows by the series' largest value too, which isn't TradingView.
+
+**Still unknown, searched and not found:** the fixed sizes (tiny to huge) in pixels; whether text follows the bar spacing at every zoom; whether an arrow's length is against the bars in view or the whole series; the Style tab's own controls for marks and candles; which barcolor() wins when several color one bar; the candles' defaults on a dark chart (§11, items 89–92).
 
 ## 5. Requirements (v1)
 
@@ -1142,6 +1169,7 @@ In `packages/core/src/formula.ts` and `apps/gateway/src/formula/`:
 - **`packages/indicators`:** RSI's Pine code (`rsi.pine.ts`); the model's additions: a definition of kind `script`, inputs for text, colors and numbers with options, tooltips; a plot's `look` (Pine's style, per-bar colors, offset, `show_last`, `trackprice`, `histbase`, display flags, `editable`); backgrounds; the `price` placement; the percent format; `styleOverrides` with `styleOf`.
 - **`packages/chart`:** `indicators/script.ts` reads a compiled script as a definition (inputs by place, `in_0`; outputs by kind and place, `plot_0`, `hline_0`, `fill_0`, `bg_0`) and runs it as a `ScriptLayerRun`. The layer draws scripts with the built-ins' paths, plus Pine's plot styles, per-bar colors, backgrounds (`plugins/BackgroundPrimitive.ts`), fills colored bar by bar, offsets, `show_last` and `trackprice`; an overlay's series sit on the candles' scale; a script that stops draws nothing. `ChartController` passes the symbol's `syminfo.*` and `timeframe.*` and reports each script's error.
 - **Gateway:** `storage/ScriptsStore.ts` keeps My scripts in `data/scripts.json`, written whole, changes one at a time, an unreadable file moved aside; `routes/scripts.ts`: `GET /api/scripts` (newest first), `POST /api/scripts`, `GET|PUT|PATCH|DELETE /api/scripts/:id`, `GET /api/scripts/:id/versions/:version`. Their types and checks in `packages/core/src/scripts.ts`. Protocol v11.
+- **P2's plotshape family:** the engine keeps marks, candles and bar colors as plot-like outputs (`packages/pine/src/marks.ts`): each mark's value per bar, its look (`ScriptMark`); a candle's open as its value, its high, low and close in hidden parts that also carry the wick's and border's colors; barcolor() as a background marked `bars`. The chart maps them to plots of kind `marks` and `candles` (a part has `partOf`). The layer draws marks with `plugins/MarksPrimitive.ts` over a clear line whose points are the prices the marks stand at, so they count in the pane's autoscale; candles and bars as Lightweight Charts' own series, colors per bar; barcolor() by the chart's own candles' body colors (`ChartController.recolorBars`, only the bars a live update changed). The legend writes a candle's four values, and the Style tab gives marks and candles a color each.
 - **`apps/web`:** `pine/` (the panel `PineEditor.tsx`, `CodeEditor.tsx` around Monaco, `language.ts` for Pine's tokens and colors, `monaco.ts` and `features.ts` loading Monaco the first time, `pineStore.ts` keeping the open script and its unsaved code in this browser, `SaveScriptDialog.tsx`); `layout/RightToolbar.tsx` and `usePanelWidth.ts`; `indicators/definitions.ts` (any indicator's definition, a script's compiled once); the indicator store's version 2; the legend's Source code button and error mark; the settings dialog's new inputs; My scripts in the Indicators dialog; `data/api.ts`'s `scriptsApi`.
 
 ## 7. UI and visual spec
@@ -1253,6 +1281,19 @@ Reference viewport is 1634 px wide.
 - **Measured** from your screenshot of 27 October (§4.16): the panel and editor black; the current line `#142043`; the token colors; the banner `#34261B` with its first words `#C9813A`, its text `#AAA096` and its mark `#F67E05`. These are a read-only built-in's colors, which TradingView greys: provisional until measured on code being edited (§11, item 74).
 - **Ours, provisional:** the panel's rows (40 px title, 48 px name row, 28 px status bar), its 13 px text and 16 px semibold name, outlined 30 px buttons with 6 px corners; the right toolbar 48 px wide with 44 px buttons, the lit one on the chip color; the editor's 13 px monospace on 20 px lines; the Save dialog in the app's dialog idiom; the Pine and panel icons ours.
 
+### 7.6 Marks, candles and bar colors (P2, provisional)
+
+| Part | Size | Measured from |
+|---|---|---|
+| A shape at `size.auto` | 0.39 of the bar spacing, 6 to 32 px | "Lift text" figure |
+| A shape at tiny, small, normal, large, huge | 8, 12, 16, 24, 32 px | not measured: a guess to calibrate |
+| plotshape's arrows | 1.3 times as tall as wide | "Lift text" figure |
+| A character | 1.4 times a shape's size (fixed: 10, 14, 20, 28, 40 px) | not measured |
+| Text | 0.38 of the bar spacing, 11 to 24 px; 2 px from its mark | "Lift text" figure |
+| plotarrow | head 0.85 of the bar spacing (3 to 40 px), shaft 0.58 of the head, head half as tall as wide | Figures 288, 289 |
+| Gap to the bar's high or low, or the pane's edge | 4 px | not measured |
+| A candle's wick and border | `#737375`, `#000000` unless the script colors them | Figures 99, 192 |
+
 ## 8. Delivery plan
 
 | | Milestone | Done when |
@@ -1288,7 +1329,7 @@ Reference viewport is 1634 px wide.
 | I4 | Templates and defaults: save and apply templates (Remember symbol), Defaults → Save as default, Chart settings → Status line | As TradingView's |
 | I5+ | More built-ins, a plan each | — |
 | P1 | Pine Script: our own Pine v6 engine, the Pine Editor (Monaco) with the right toolbar, a built-in's code editable as a copy with Reset to original, Add to chart and Update on chart, Save into My scripts with versions (`data/scripts.json`, protocol v11), drafts kept, My scripts in the Indicators dialog, the legend's Source code button | RSI's copy reads as the built-in on your chart; a script of yours runs as on TradingView; every test passes on the Mac; screenshots renewed for the right toolbar. **Merged 2026-10-31** (pull request #3); the Mac's checks remain (§5.16) |
-| P2 | Real scripts run: every version (v1 to v6), the whole language (arrays, maps, matrices, user-defined types, methods, enums, `for…in`), the complete built-ins without drawings and other symbols, `plotshape`, `plotchar`, `plotarrow`, `plotcandle`, `plotbar`, `barcolor`, libraries (`import`, `export`, My libraries), Pine Logs; the editor as TradingView's: its script menu, Open script, Version history with differences, Convert code to v6, Move to bottom, help while typing (autocomplete, hover help, colour swatches) | At least 98% of the corpus scripts that need only P2's features run (463 manual, 201 community); your Ichimoku (lib-hlm) runs once its library is added; hand checks on 10 scripts against TradingView; every test passes on the Mac. **Under way (31 October)**: step 1 (versions; types, collections, objects, methods, enums) committed |
+| P2 | Real scripts run: every version (v1 to v6), the whole language (arrays, maps, matrices, user-defined types, methods, enums, `for…in`), the complete built-ins without drawings and other symbols, `plotshape`, `plotchar`, `plotarrow`, `plotcandle`, `plotbar`, `barcolor`, libraries (`import`, `export`, My libraries), Pine Logs; the editor as TradingView's: its script menu, Open script, Version history with differences, Convert code to v6, Move to bottom, help while typing (autocomplete, hover help, colour swatches) | At least 98% of the corpus scripts that need only P2's features run (463 manual, 201 community); your Ichimoku (lib-hlm) runs once its library is added; hand checks on 10 scripts against TradingView; every test passes on the Mac. **Under way (1 November)**: steps 1 and 2 (versions; types, collections, objects, methods, enums), 3 (the built-ins on TradingView's values) and 4 (the plotshape family on the chart) committed |
 | P3 | Drawings in scripts: labels, lines, boxes, tables, polylines, linefills, chart points | Their corpus scripts run (74% of the manual's in all); hand checks |
 | P4 | Other symbols and timeframes: `request.security` and its family, non-standard chart types (Heikin Ashi and others) | Their corpus scripts run (86% of the manual's in all); hand checks |
 | P5 | Strategies and the Strategy Tester; then alerts, the Profiler, the editor in its own window | A plan each |
@@ -1399,6 +1440,11 @@ Reference viewport is 1634 px wide.
   - RSI's Pine code against the built-in (27 tests): identical over 20,000 bars for every smoothing and two sources, with and without volume; through 100 bars of ticks, new bars and corrections; its warm-up within a hundred-millionth of a run with 3,000 more bars of history; its inputs, plots, levels, fills and colors the built-in's.
   - The chart's reading of scripts (`packages/chart`, 11 tests); My scripts in core (6) and the gateway (14, the server's own guards among them); the web app's store of scripts on the chart, and a script's definition kept per price precision (`apps/web`, 5).
   - In the browser (`tests/e2e/pine.spec.ts`): the right toolbar; RSI's code from the legend, editable, Reset to original and Undo; Add to chart beside the built-in with the same values, then Update on chart; an error kept off the chart and shown in the console; Save, its name and versions; unsaved code through a reload; My scripts in the Indicators dialog and an overlay on the price pane; a runtime error in the legend.
+- **Pine (P2, under way):**
+  - The engine (`packages/pine`, 230 tests after step 4): every version's rules (`versions.test.ts`); types, collections, objects, methods and enums (`objects.test.ts`); the built-ins by TradingView's measured rules, on our own small numbers (`taRules.test.ts`); strings and numbers (`format.test.ts`, `strings.test.ts`); time and sessions (`time.test.ts`); the newer inputs (`inputs.test.ts`); the plotshape family (`marks.test.ts`: values, the defaults measured from the manual's figures, a candle's parts, barcolor()).
+  - The chart (`packages/chart`): the newer inputs' controls, marks, candles and barcolor() read from a script (`indicators/script.test.ts`); plotarrow's outline and the marks' sizes (`plugins/marks.test.ts`).
+  - In the browser (`tests/e2e/pine.spec.ts`): shapes and arrows drawn; a plotcandle on every bar; barcolor()'s bodies on the up bars only; the legend's four candle values in the candle's color; the Style tab's rows, and Bar color turned off.
+  - Outside the repository: the corpus (`pnpm test:corpus`, §4.17) and TradingView's values for the built-ins (PineTS's data, local only).
 - **Live (opt-in, `pnpm test:live`):** gateway and browser tests against the real exchanges:
   - Symbol names, full history back to 2018, live candle and quotes.
   - Binance's own 1m, 15m, 1h, 4h, 1D, 1W and 1M bars rebuilt exactly from smaller intervals.
@@ -1549,6 +1595,11 @@ Reference viewport is 1634 px wide.
 87. **Values TradingView doesn't document (provisional):** `str.tostring` of a matrix, one row per line; `syminfo.volumetype` "base" (or "n/a" without volume); `chart.left_visible_bar_time` and `right_visible_bar_time` are the loaded bars' first and last, not the visible ones; `math.random`'s sequence is ours, the same for the same seed.
 88. **Known differences from TradingView's values** (18 of 689 plots, §4.17): `ta.percentile_*` with a length that changes inside a condition (TradingView refills its array from the bars when the length grows), 11; `ta.linreg` at length 1, 6 plots (1 to 3 bars each); `ta.stoch` whose high and low are sources with na, 1; a value under 1e-10 written by `str.tostring` (5e-11 is "0" on TradingView, "0.0000000001" here).
 
+89. **Mark sizes (provisional, §7.6):** `size.auto` and the text follow the bar spacing as the manual's zoomed-in figure shows them; the fixed sizes, the gaps and the characters' sizes aren't measured. A screenshot of plotshape at each size, at TradingView's default zoom, would settle them.
+90. **plotarrow (provisional):** an arrow's length is against the largest value among the bars in view (TradingView says "in relation to other series values"); its colors `color.lime` and `color.red` read from a figure made when those were `#00FF00` and `#FF0000`.
+91. **Candles and bar colors (provisional):** the wick and border defaults on a dark chart are the light figures' (`#737375`, `#000000`); where several barcolor() calls color one bar, the last script in the legend, and its last call, wins; an untitled barcolor() is "Bar color"; a plotchar without `char` draws ★; marks have no label on the price scale.
+92. **The Style tab for marks and candles (later in P2):** each gives one color for now. TradingView's (from its Charting Library's settings) also offers a mark's shape and location, and a candle's wick and border with their colors; a color set there replaces the script's for a mark (both of an arrow's directions) and a candle's body, while the text, the wick and the border keep the script's.
+
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
 **Still needing a reference screenshot** (built in TradingView's idiom, not yet measured):
@@ -1603,6 +1654,7 @@ Reference viewport is 1634 px wide.
 - Pine Script and the Pine Editor (P1), TradingView's own (read on its public pages; titles where its address wasn't kept): Help Center, "How to work with Pine Editor", "Useful Pine Editor commands", "How to create a new script", "How to apply an older version of an indicator", "I want to see the source code of a built-in script" https://www.tradingview.com/support/solutions/43000481659-i-want-to-see-the-source-code-of-a-built-in-script/ · Blog, "Pine Script has a new VSC-style editor" (2022), "Track unsaved changes in the Pine Editor" (2023), "Updated detach mode" (2024) · Pine release notes (August 2025's side panel) · Pine docs https://www.tradingview.com/pine-script-docs/ (Execution model, Operators, Type system, Conditional structures, Loops, User-defined functions, Plots, Levels, Fills, Backgrounds, Colors, Errors, Limitations, the v6 migration guide; Inputs https://tradingview.com/pine-script-docs/concepts/inputs/) and the v6 reference https://www.tradingview.com/pine-script-reference/v6/, read through https://github.com/AndreHeinecke/pinescript_user_manual (the manual as of March 2025) and https://github.com/codenamedevan/pinescriptv6 · your screenshot of the Pine Editor on the built-in RSI (27 October)
 - Pine Script and the Pine Editor (P1), third-party: Traders Post on inputs' `display` https://blog.traderspost.io/article/professional-pine-script-input-ui · TradingCode on a script's name and title · ChartWiseHub's 2026 guide and Proea's guides (the editor's placements) · the engines read and not used: LuxAlgo's PineTS (AGPL-3.0), OpenPineScript (GPL-3.0) · Monaco https://github.com/microsoft/monaco-editor (MIT)
 - P2's built-ins, TradingView's own: Pine Script docs, Time https://www.tradingview.com/pine-script-docs/concepts/time/ · Sessions https://www.tradingview.com/pine-script-docs/concepts/sessions/ · Timeframes https://www.tradingview.com/pine-script-docs/concepts/timeframes/ · Inputs https://www.tradingview.com/pine-script-docs/concepts/inputs/ · Debugging (strings, Pine Logs) https://www.tradingview.com/pine-script-docs/writing/debugging/ · the v6 reference https://www.tradingview.com/pine-script-reference/v6/ (read through its GitHub copies: AndreHeinecke/pinescript_user_manual, codenamedevan/pinescriptv6)
+- P2's plotshape family, TradingView's own: Pine Script docs, Text and shapes https://www.tradingview.com/pine-script-docs/visuals/text-and-shapes/ · Bar plotting https://www.tradingview.com/pine-script-docs/visuals/bar-plotting/ · Bar coloring https://www.tradingview.com/pine-script-docs/visuals/bar-coloring/ (figures read in the manual's PDF mirror, AndreHeinecke/pinescript_user_manual) · Charting Library: StudyShapesPlotPreferences, StudyArrowsPlotPreferences, StudyOhlcPlotCandlesStylePreferences, Custom Studies Plots https://www.tradingview.com/charting-library-docs/latest/custom_studies/Custom-Studies-Plots/ (read in search results)
 - P2's built-ins, third-party: PineTS (QuantForgeOrg/PineTS, AGPL-3.0), its published TradingView values (`tests/namespaces/ta/data`, BINANCE:BTCUSDT 1h) and its changelog's measured rules (0.11.0, 1 October 2026) https://github.com/QuantForgeOrg/PineTS, read and run locally, never copied into this repository
 - Binance WebSocket streams: https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Coinbase Advanced Trade WebSocket channels: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels

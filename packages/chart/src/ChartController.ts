@@ -155,16 +155,24 @@ export interface ChartDebugState {
   priceAxisWidth: number;
   /** The indicators drawn, in the legend's order. */
   indicators: IndicatorDebugState[];
+  /** The chart's bars a script's barcolor() colors: each one's index and body color. */
+  barColors: { index: number; color: string }[];
   /** Every pane, the price pane first: its height in CSS px, stretch factor and auto-scale. */
   panes: { height: number; stretch: number; autoScale: boolean }[];
 }
 
-const toCandle = (bar: Bar, time: number): CandlestickData<Time> => ({
+/**
+ * A bar as the candles draw it. `body`: a script's barcolor() color, which takes only the body's
+ * place: the wick and the border keep the chart's up and down colors (the Pine manual's figure of
+ * Bar coloring).
+ */
+const toCandle = (bar: Bar, time: number, body?: string | null): CandlestickData<Time> => ({
   time: time as UTCTimestamp,
   open: bar.open,
   high: bar.high,
   low: bar.low,
   close: bar.close,
+  ...(body ? { color: body } : {}),
 });
 
 const UTC_ZONES = new Set(['Etc/UTC', 'UTC']);
@@ -204,6 +212,8 @@ export class ChartController {
   private readonly viewport: TimeViewport;
   private readonly indicators: IndicatorLayer;
   private bars: Bar[] = [];
+  /** Some bar's body has a script's barcolor() color. */
+  private recolored = false;
   /** The first bar is the pair's listing, where TradingView's history starts too. */
   private fromListing = false;
   /** The indicator panes' heights last applied or told, to tell only a change. */
@@ -474,6 +484,7 @@ export class ChartController {
    */
   setIndicators(indicators: readonly ChartIndicator[]): void {
     this.indicators.set(indicators);
+    this.recolorBars();
     this.paneHeights = this.indicators.paneHeights();
     // A new indicator may wait on older bars than the chart has.
     this.checkHistory(this.chart.timeScale().getVisibleLogicalRange());
@@ -535,6 +546,8 @@ export class ChartController {
       change = 'correction';
     }
     this.indicators.update(this.bars, this.displayTimes, change, index);
+    // The update drew the bar in the chart's own colors: its barcolor() color goes back on.
+    this.recolorBars(index);
     this.refreshLastPrice();
   }
 
@@ -628,6 +641,11 @@ export class ChartController {
       sessionBands: this.sessionShade.drawnBands(),
       priceAxisWidth: this.chart.priceScale('right').width(),
       indicators: this.indicators.debug(),
+      // As the candles hold them, not as the scripts would give them.
+      barColors: this.series.data().flatMap((point, index) => {
+        const color = 'color' in point ? point.color : undefined;
+        return color ? [{ index, color }] : [];
+      }),
       panes: this.chart.panes().map((pane, index) => {
         const series = index === 0 ? this.series : this.indicators.scaleSeries(index);
         return {
@@ -794,7 +812,40 @@ export class ChartController {
     }
     this.displayTimes = times;
     this.series.setData(candles);
+    this.recolored = false;
     this.indicators.setBars(this.bars, this.displayTimes, this.fromListing);
+    this.recolorBars();
+  }
+
+  /**
+   * Scripts' barcolor() colors on the chart's candles (Pine docs, Bar coloring): every bar when
+   * a run started over, else the bars a live update changed (`updated`, which the update drew
+   * plain, among them). Without barcolor() nothing is set.
+   */
+  private recolorBars(updated?: number): void {
+    const taken = this.indicators.takeBarColorChanges();
+    const changed =
+      taken === 'all' || updated === undefined || taken.includes(updated)
+        ? taken
+        : [...taken, updated];
+    const colored = this.indicators.hasBarColors();
+    if (!colored && !this.recolored) return;
+    const last = this.bars.length - 1;
+    if (changed === 'all') {
+      this.series.setData(
+        this.bars.map((bar, i) =>
+          toCandle(bar, this.displayTimes[i] ?? bar.time, this.indicators.barColorAt(i)),
+        ),
+      );
+      this.recolored = colored;
+      return;
+    }
+    for (const i of changed) {
+      const bar = this.bars[i];
+      const time = this.displayTimes[i];
+      if (!bar || time === undefined) continue;
+      this.series.update(toCandle(bar, time, this.indicators.barColorAt(i)), i < last);
+    }
   }
 
   /**

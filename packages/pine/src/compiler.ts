@@ -101,10 +101,41 @@ export interface StyleArg {
 }
 
 /** plot()'s arguments (the v6 reference): const ones as values, input ones as folds. */
+/**
+ * What draws a plot-like output: plot()'s line or columns; plotshape(), plotchar() and
+ * plotarrow()'s marks; plotcandle() and plotbar()'s candles and bars; or a hidden part holding a
+ * candle's high, low or close (or a mark's text colors) beside its first value.
+ */
+export type PlotKind = 'plot' | 'shape' | 'char' | 'arrow' | 'candle' | 'bar' | 'part';
+
+/** A mark's look (Pine docs, Text and shapes; the v6 reference). */
+export interface MarkDef {
+  /** plotshape's style: "xcross", "arrowup" … (shape.*). */
+  shape: Fold;
+  /** plotchar's character. */
+  char: Fold;
+  /** Where it sits: "abovebar", "belowbar", "top", "bottom" or "absolute" (location.*). */
+  location: Fold;
+  /** "auto", "tiny" … "huge" (size.*). */
+  size: Fold;
+  /** Text beside the mark (const). */
+  text: string;
+  textColor: StyleArg;
+  /** The part holding its text colors bar by bar, when they change. */
+  textPart: number | null;
+  /** plotarrow's lengths, in px. */
+  minheight: Fold;
+  maxheight: Fold;
+}
+
 export interface PlotDef {
   index: number;
+  kind: PlotKind;
   title: string;
   color: StyleArg;
+  mark?: MarkDef;
+  /** A candle's or bar's high, low and close parts (its own values are the opens). */
+  parts?: readonly [number, number, number];
   linewidth: Fold;
   style: Fold;
   linestyle: Fold;
@@ -149,6 +180,8 @@ export interface FillDef {
 
 export interface BgcolorDef {
   index: number;
+  /** barcolor(): the price bars take the color, not the pane's background. */
+  bars: boolean;
   color: StyleArg;
   offset: Fold;
   editable: boolean;

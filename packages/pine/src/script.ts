@@ -10,7 +10,13 @@ import {
   type PlotStyle,
   type ScriptFormat,
 } from './builtins.ts';
-import { type CompiledProgram, type CompileOptions, Compiler, type InputDef } from './compiler.ts';
+import {
+  type CompiledProgram,
+  type CompileOptions,
+  Compiler,
+  type InputDef,
+  type PlotKind,
+} from './compiler.ts';
 import {
   PineCompileError,
   type PineDiagnostic,
@@ -18,6 +24,7 @@ import {
   type Span,
 } from './diagnostics.ts';
 import { upgrade } from './dialect.ts';
+import { LOCATIONS, SHAPES, SIZES } from './marks.ts';
 import { parse } from './parser.ts';
 import { DEFAULT_SYMBOL, type Outputs, type ScriptSymbol } from './runtime.ts';
 import type { FoldEnv, Qual } from './types.ts';
@@ -128,7 +135,36 @@ export interface ScriptInput extends Omit<InputDef, 'active' | 'span'> {
 }
 
 /** One plot(), as these inputs make it (the v6 reference's arguments). */
+/** A mark's look, as plotshape(), plotchar() and plotarrow() give it. */
+export interface ScriptMark {
+  /** plotshape's shape ("xcross" …); null for a char or an arrow. */
+  shape: Shape | null;
+  /** plotchar's character; null otherwise. */
+  char: string | null;
+  location: MarkLocation;
+  size: MarkSize;
+  text: string;
+  /** Packed, or null for na; ignored when it changes from bar to bar (its part has them). */
+  textColor: number | null;
+  /**
+   * The run's plot holding its text colors bar by bar (its own, when the text takes the mark's
+   * color); null when they don't change.
+   */
+  textPart: number | null;
+  minheight: number;
+  maxheight: number;
+}
+
+export type Shape = (typeof SHAPES)[number];
+export type MarkLocation = (typeof LOCATIONS)[number];
+export type MarkSize = (typeof SIZES)[number];
+
 export interface ScriptPlot {
+  /**
+   * plot()'s line or columns, a mark, a candle or bar, or a hidden part of one (its values,
+   * at its own index in the run, aren't drawn by themselves).
+   */
+  kind: PlotKind;
   title: string;
   /** Packed color, or null for na (the plot doesn't show). */
   color: number | null;
@@ -150,6 +186,9 @@ export interface ScriptPlot {
   format: ScriptFormat | null;
   /** null: the indicator's. */
   precision: number | null;
+  mark: ScriptMark | null;
+  /** A candle's or bar's high, low and close: the parts' indices. */
+  parts: readonly [number, number, number] | null;
 }
 
 export interface ScriptHline {
@@ -178,6 +217,8 @@ export interface ScriptFill {
 }
 
 export interface ScriptBackground {
+  /** barcolor(): it colors the chart's bars rather than the pane behind them. */
+  bars: boolean;
   /** Its color when it doesn't change from bar to bar; null otherwise or for na. */
   color: number | null;
   colorChanges: boolean;
@@ -274,6 +315,7 @@ export class ScriptProgram {
         active: active ? active(env) : true,
       })),
       plots: p.plots.map((plot) => ({
+        kind: plot.kind,
         title: plot.title,
         color: plot.color.dynamic ? null : colorOf(plot.color.fold(env)),
         colorChanges: plot.color.dynamic,
@@ -289,6 +331,22 @@ export class ScriptProgram {
         display: Math.round(numberOr(plot.display(env), DISPLAY.all)),
         format: formatOf(plot.format(env)),
         precision: countOf(plot.precision(env)),
+        mark: plot.mark
+          ? {
+              shape: plot.kind === 'shape' ? oneOf(SHAPES, plot.mark.shape(env), 'xcross') : null,
+              char: plot.kind === 'char' ? String(plot.mark.char(env) ?? '★') : null,
+              location: oneOf(LOCATIONS, plot.mark.location(env), 'abovebar'),
+              size: oneOf(SIZES, plot.mark.size(env), 'auto'),
+              text: plot.mark.text,
+              textColor: plot.mark.textColor.dynamic
+                ? null
+                : colorOf(plot.mark.textColor.fold(env)),
+              textPart: plot.mark.textPart,
+              minheight: Math.max(0, numberOr(plot.mark.minheight(env), 5)),
+              maxheight: Math.max(0, numberOr(plot.mark.maxheight(env), 100)),
+            }
+          : null,
+        parts: plot.parts ?? null,
       })),
       hlines: p.hlines.map((hline) => ({
         price: numberOr(hline.price(env), Number.NaN),
@@ -321,6 +379,7 @@ export class ScriptProgram {
         display: Math.round(numberOr(fill.display(env), DISPLAY.all)),
       })),
       backgrounds: p.bgcolors.map((bg) => ({
+        bars: bg.bars,
         color: bg.color.dynamic ? null : colorOf(bg.color.fold(env)),
         colorChanges: bg.color.dynamic,
         offset: Math.round(numberOr(bg.offset(env), 0)),

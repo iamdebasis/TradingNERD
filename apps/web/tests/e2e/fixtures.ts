@@ -1285,7 +1285,15 @@ export interface ChartState {
     kind: string;
     hidden: boolean;
     pane: number;
-    plots: { id: string; start: number; points: number; ghost: boolean; type: string }[];
+    /** Each drawn plot; for marks, how many it drew last. */
+    plots: {
+      id: string;
+      start: number;
+      points: number;
+      ghost: boolean;
+      type: string;
+      marks: number;
+    }[];
     levels: number;
     fills: { id: string; gradient: boolean }[];
     /** A script's backgrounds, by id. */
@@ -1294,6 +1302,8 @@ export interface ChartState {
     /** What stopped a script, if anything did. */
     error: string | null;
   }[];
+  /** The chart's bars a script's barcolor() colors: each one's index and body color. */
+  barColors: { index: number; color: string }[];
   panes: { height: number; stretch: number; autoScale: boolean }[];
 }
 

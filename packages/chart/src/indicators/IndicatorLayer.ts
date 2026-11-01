@@ -17,6 +17,8 @@ import { colorCss, compileCached, DEFAULT_SYMBOL, type ScriptProgram } from '@tr
 import {
   AreaSeries,
   type AutoscaleInfo,
+  BarSeries,
+  CandlestickSeries,
   HistogramSeries,
   type IChartApi,
   type IPriceLine,
@@ -34,6 +36,7 @@ import type { AxisContext } from '../plugins/axisLabel';
 import { type BackgroundBand, BackgroundPrimitive } from '../plugins/BackgroundPrimitive';
 import { CrosshairPrimitive } from '../plugins/CrosshairPrimitive';
 import { type BandEdge, FillPrimitive, type FillShape } from '../plugins/FillPrimitive';
+import { type BarExtent, type MarkSet, MarksPrimitive } from '../plugins/MarksPrimitive';
 import { type ValueLabel, ValueLabelsPrimitive } from '../plugins/ValueLabelsPrimitive';
 import type { ChartTheme } from '../theme';
 import {
@@ -71,7 +74,17 @@ interface DrawnPlot {
   spec: PlotSpec;
   /** Its place in the run's values. */
   index: number;
-  series: ISeriesApi<'Line'> | ISeriesApi<'Histogram'> | ISeriesApi<'Area'>;
+  series:
+    | ISeriesApi<'Line'>
+    | ISeriesApi<'Histogram'>
+    | ISeriesApi<'Area'>
+    | ISeriesApi<'Candlestick'>
+    | ISeriesApi<'Bar'>;
+  /**
+   * A script's marks (plotshape, plotchar, plotarrow): drawn over its series, a clear line whose
+   * points are the prices the marks stand at.
+   */
+  marks: MarksPrimitive | null;
   /** The last bar handed to the series; updates before it are corrections of the past. */
   last: number;
   /** Drawn clear: its style hides it, but its pane's levels and fills hang on it. */
@@ -147,8 +160,18 @@ export interface IndicatorDebugState {
   kind: string;
   hidden: boolean;
   pane: number;
-  /** Each drawn plot: its first drawn bar, and how many bars it has a value on. */
-  plots: { id: string; start: number; points: number; ghost: boolean; type: string }[];
+  /**
+   * Each drawn plot: its first drawn bar, how many bars it has a value on, and for marks how
+   * many it drew last.
+   */
+  plots: {
+    id: string;
+    start: number;
+    points: number;
+    ghost: boolean;
+    type: string;
+    marks: number;
+  }[];
   levels: number;
   /** Its fills, by id, as drawn: each a solid color or a gradient. */
   fills: { id: string; gradient: boolean }[];
@@ -235,6 +258,8 @@ export class IndicatorLayer {
   private context: ScriptContext = { symbol: DEFAULT_SYMBOL, priceDecimals: 2 };
   /** The pane the crosshair label shows in, if an indicator's. */
   private crosshairPane: number | null = null;
+  /** The chart's bars whose barcolor() color may have changed since the chart last asked. */
+  private barColorChanges: 'all' | Set<number> = new Set();
 
   constructor(chart: IChartApi, theme: ChartTheme, font: string) {
     this.chart = chart;
@@ -281,6 +306,7 @@ export class IndicatorLayer {
     this.views = next;
     this.orderPanes();
     this.applyStretch();
+    this.barColorChanges = 'all';
   }
 
   /** New bars throughout: every run computed afresh, as Pine reloads a script. */
@@ -296,6 +322,7 @@ export class IndicatorLayer {
       this.refreshStarts(view);
       this.push(view);
     }
+    this.barColorChanges = 'all';
   }
 
   /** A live change to the bars at `index` (see IndicatorRun.update). */
@@ -310,12 +337,9 @@ export class IndicatorLayer {
       // A script's warm-up starts can move with a new bar; a stopped script draws nothing.
       if (view.script) this.refreshStarts(view);
       const moved = view.starts.some((start, p) => start !== before[p]);
-      if (
-        changed === 'all' ||
-        moved ||
-        (view.error !== null) !== stopped ||
-        this.needsFullPush(view)
-      ) {
+      const all = changed === 'all' || moved || (view.error !== null) !== stopped;
+      this.noteBarColors(view, all ? 'all' : changed);
+      if (all || this.needsFullPush(view)) {
         this.push(view);
         continue;
       }
@@ -324,18 +348,84 @@ export class IndicatorLayer {
     }
   }
 
+  /** Whether any indicator on the chart colors the chart's bars (barcolor). */
+  hasBarColors(): boolean {
+    return this.views.some((view) => this.barColorSpecs(view).length > 0);
+  }
+
+  /**
+   * The body color scripts' barcolor() gives the chart's bar `i`, or null for its own (Pine docs,
+   * Bar coloring: na leaves a bar as is). Where several color one bar, the last in the legend's
+   * order, and its last call, wins (provisional, §11).
+   */
+  barColorAt(i: number): string | null {
+    let color: string | null = null;
+    for (const view of this.views) {
+      const script = view.script;
+      if (!script) continue;
+      for (const { spec, index } of this.barColorSpecs(view)) {
+        const start =
+          (script.run.backgroundStarts[index] ?? Number.POSITIVE_INFINITY) + spec.offset;
+        const last = this.times.length - 1;
+        if (i < start || (spec.showLast !== null && i <= last - spec.showLast)) continue;
+        const packed = script.run.backgrounds[index]?.[i - spec.offset];
+        if (packed === undefined || Number.isNaN(packed)) continue;
+        // A color set in the Style tab takes the place of the script's (provisional, §11).
+        const override = view.indicator.settings.styles[spec.id];
+        color = override ? withOpacity(override.color, override.opacity) : colorCss(packed);
+      }
+    }
+    return color;
+  }
+
+  /** The bars whose barcolor() color may have changed since the last call: all, or these. */
+  takeBarColorChanges(): 'all' | number[] {
+    const changes = this.barColorChanges;
+    this.barColorChanges = new Set();
+    return changes === 'all' ? 'all' : [...changes];
+  }
+
+  /** A script's barcolor() calls that show: each one's spec and place among its backgrounds. */
+  private barColorSpecs(view: IndicatorView) {
+    if (view.indicator.hidden || view.error !== null || !view.script) return [];
+    return (view.definition.backgrounds ?? []).flatMap((spec, index) =>
+      spec.bars && styleOf(view.indicator.settings, spec).visible ? [{ spec, index }] : [],
+    );
+  }
+
+  /** Notes the bars a run's update may have recolored: every one, or the changed ones shifted. */
+  private noteBarColors(view: IndicatorView, changed: 'all' | readonly number[]): void {
+    // By its definition, not what shows now: a script that just stopped takes its colors away.
+    const specs = (view.definition.backgrounds ?? []).filter((spec) => spec.bars);
+    if (specs.length === 0 || this.barColorChanges === 'all') return;
+    if (changed === 'all') {
+      this.barColorChanges = 'all';
+      return;
+    }
+    for (const i of changed) {
+      for (const spec of specs) {
+        const at = i + spec.offset;
+        if (at >= 0 && at < this.times.length) this.barColorChanges.add(at);
+      }
+    }
+  }
+
   /** Each indicator's values on bar `index`, for the legend. */
   valuesAt(index: number): IndicatorValues[] {
     return this.views.map((view) => {
       const shown = !view.indicator.hidden && view.error === null;
       const colors: (string | null)[] = [];
-      const values = view.definition.plots.map((spec, p) => {
+      const { plots } = view.definition;
+      const values = plots.map((own, p) => {
+        // A candle's high, low and close show where its candles do, in their color.
+        const owner = own.partOf ? plots.findIndex((spec) => spec.id === own.partOf) : p;
+        const spec = plots[owner] ?? own;
         const look = spec.look;
         if (look && (look.display & PINE_DISPLAY.statusLine) === 0) return Number.NaN;
         // A shifted plot's value at a bar is the one drawn there.
         const source = index - (look?.offset ?? 0);
-        if (look) colors[p] = this.barColor(view, spec, p, source);
-        return shown && index >= this.drawnFrom(view, spec, p)
+        if (look) colors[p] = this.barColor(view, spec, owner, source);
+        return shown && index >= this.drawnFrom(view, spec, owner)
           ? (view.run.values[p]?.[source] ?? Number.NaN)
           : Number.NaN;
       });
@@ -367,7 +457,7 @@ export class IndicatorLayer {
     for (const view of this.views) {
       for (const plot of view.plots) {
         if (plot.ghost) continue;
-        const start = view.starts[plot.index] ?? 0;
+        const start = this.settledFrom(view, plot.spec, plot.index);
         if (Number.isFinite(start)) waiting = Math.max(waiting, start);
       }
     }
@@ -441,10 +531,11 @@ export class IndicatorLayer {
       pane: view.paneIndex(),
       plots: view.plots.map((plot) => ({
         id: plot.spec.id,
-        start: view.starts[plot.index] ?? Number.POSITIVE_INFINITY,
-        points: plot.series.data().filter((point) => 'value' in point).length,
+        start: this.settledFrom(view, plot.spec, plot.index),
+        points: plot.series.data().filter((point) => 'value' in point || 'close' in point).length,
         ghost: plot.ghost,
         type: plot.series.seriesType(),
+        marks: plot.marks?.drawnMarks().length ?? 0,
       })),
       levels: view.levels.length,
       fills:
@@ -529,7 +620,10 @@ export class IndicatorLayer {
       }
       return;
     }
-    const shown = definition.plots.filter((spec) => spec.shownWhen?.(inputs) ?? true);
+    // A candle's parts are drawn with it.
+    const shown = definition.plots.filter(
+      (spec) => !spec.partOf && (spec.shownWhen?.(inputs) ?? true),
+    );
     const hosts = placement !== 'volume';
     shown.forEach((spec, k) => {
       const style = styleOf(view.indicator.settings, spec);
@@ -546,7 +640,9 @@ export class IndicatorLayer {
         priceScaleId: placement === 'volume' ? VOLUME_SCALE : 'right',
         ...(carries ? { autoscaleInfoProvider: this.levelScale(view, ghost) } : {}),
       };
-      const series = this.addPlotSeries(spec, style, ghost, common, paneIndex);
+      const series = this.addPlotSeries(view, spec, style, ghost, common, paneIndex);
+      const marks = spec.kind === 'marks' && !ghost ? new MarksPrimitive(this.font) : null;
+      if (marks) series.attachPrimitive(marks);
       const track =
         spec.look?.trackprice && !ghost
           ? series.createPriceLine({
@@ -564,6 +660,7 @@ export class IndicatorLayer {
         spec,
         index: definition.plots.indexOf(spec),
         series,
+        marks,
         last: -1,
         ghost,
         track,
@@ -622,7 +719,8 @@ export class IndicatorLayer {
       view.labels = new ValueLabelsPrimitive(this.font, this.theme.labelText, axis);
       host.attachPrimitive(view.fill);
       host.attachPrimitive(view.labels);
-      if ((definition.backgrounds ?? []).length > 0) {
+      // barcolor() colors the chart's bars instead (ChartController).
+      if ((definition.backgrounds ?? []).some((spec) => !spec.bars)) {
         view.background = new BackgroundPrimitive();
         host.attachPrimitive(view.background);
       }
@@ -643,6 +741,7 @@ export class IndicatorLayer {
 
   /** The series a plot is drawn with: Pine's style for a script's, the built-in's kind otherwise. */
   private addPlotSeries(
+    view: IndicatorView,
     spec: PlotSpec,
     style: StyleValue,
     ghost: boolean,
@@ -652,6 +751,51 @@ export class IndicatorLayer {
     const color = ghost ? CLEAR : withOpacity(style.color, style.opacity);
     const lineWidth = Math.min(4, Math.max(1, style.width ?? 1)) as LineWidth;
     const pine = spec.look?.style;
+    if (spec.kind === 'marks') {
+      // Clear: its points only carry the marks on the pane's scale.
+      return this.chart.addSeries(
+        LineSeries,
+        {
+          ...common,
+          color: CLEAR,
+          lineVisible: false,
+          pointMarkersVisible: false,
+          crosshairMarkerVisible: false,
+        },
+        paneIndex,
+      );
+    }
+    const candle = spec.look?.candle;
+    if (spec.kind === 'candles' && candle) {
+      // Each bar's own colors come with its point; these are the ones that don't change.
+      const partStyle = (index: number) => {
+        const part = view.definition.plots[index];
+        return part ? styleOf(view.indicator.settings, part) : style;
+      };
+      const [high, low] = candle.parts;
+      const wick = ghost ? CLEAR : withOpacity(partStyle(high).color, partStyle(high).opacity);
+      const border = ghost ? CLEAR : withOpacity(partStyle(low).color, partStyle(low).opacity);
+      if (candle.kind === 'bar') {
+        return this.chart.addSeries(
+          BarSeries,
+          { ...common, upColor: color, downColor: color, thinBars: true },
+          paneIndex,
+        );
+      }
+      return this.chart.addSeries(
+        CandlestickSeries,
+        {
+          ...common,
+          upColor: color,
+          downColor: color,
+          wickUpColor: wick,
+          wickDownColor: wick,
+          borderUpColor: border,
+          borderDownColor: border,
+        },
+        paneIndex,
+      );
+    }
     if (spec.kind === 'columns') {
       return this.chart.addSeries(
         HistogramSeries,
@@ -758,11 +902,22 @@ export class IndicatorLayer {
    * than its show_last allows.
    */
   private drawnFrom(view: IndicatorView, spec: PlotSpec, p: number): number {
-    const start = view.starts[p] ?? Number.POSITIVE_INFINITY;
+    const start = this.settledFrom(view, spec, p);
     const look = spec.look;
     if (!look) return start;
     const shifted = start + look.offset;
     return look.showLast === null ? shifted : Math.max(shifted, this.times.length - look.showLast);
+  }
+
+  /**
+   * Where a plot's values have settled (the warm-up rule): a candle's where its open, high, low
+   * and close all have, so no candle is drawn from a value that still depends on older bars.
+   */
+  private settledFrom(view: IndicatorView, spec: PlotSpec, p: number): number {
+    const own = view.starts[p] ?? Number.POSITIVE_INFINITY;
+    const parts = spec.look?.candle?.parts;
+    if (!parts) return own;
+    return Math.max(own, ...parts.map((part) => view.starts[part] ?? Number.POSITIVE_INFINITY));
   }
 
   /** A script's plot whose drawn bars move with each new bar (show_last): set afresh each time. */
@@ -825,6 +980,8 @@ export class IndicatorLayer {
     const look = plot.spec.look;
     const time = this.times[i];
     if (!look || time === undefined) return null;
+    if (plot.spec.kind === 'marks') return this.markPoint(view, plot, i, time);
+    if (plot.spec.kind === 'candles') return this.candlePoint(view, plot, i, time);
     const source = i - look.offset;
     const value = view.run.values[plot.index]?.[source] ?? Number.NaN;
     const point: { time: Time; value?: number; color?: string; lineColor?: string } = {
@@ -842,6 +999,57 @@ export class IndicatorLayer {
       else point.color = color;
     }
     return point;
+  }
+
+  /**
+   * Where a mark at bar `i` stands on its pane's scale, as its carrier's point: the bar's high
+   * or low, or its own value at location.absolute (Pine manual: abovebar "will put the price
+   * into play in the script's scale"); none at the pane's top or bottom, or without a mark.
+   */
+  private markPoint(view: IndicatorView, plot: DrawnPlot, i: number, time: number): object {
+    const point = { time: time as UTCTimestamp };
+    const mark = plot.spec.look?.mark;
+    if (!mark || plot.ghost) return point;
+    const value = view.run.values[plot.index]?.[i - (plot.spec.look?.offset ?? 0)] ?? Number.NaN;
+    if (!Number.isFinite(value) || (value === 0 && mark.location !== 'absolute')) return point;
+    const bar = this.bars[i];
+    let price = Number.NaN;
+    if (mark.kind === 'arrow') price = (value > 0 ? bar?.low : bar?.high) ?? Number.NaN;
+    else if (mark.location === 'absolute') price = value;
+    else if (mark.location === 'abovebar') price = bar?.high ?? Number.NaN;
+    else if (mark.location === 'belowbar') price = bar?.low ?? Number.NaN;
+    return Number.isFinite(price) ? { ...point, value: price } : point;
+  }
+
+  /**
+   * A candle or bar at bar `i` (plotcandle, plotbar): its open is its plot's value and its
+   * parts hold the high, low and close; any of them na draws none (Pine docs, Bar plotting).
+   * Its body, wick and border colors come with it when they change from bar to bar.
+   */
+  private candlePoint(view: IndicatorView, plot: DrawnPlot, i: number, time: number): object {
+    const point = { time: time as UTCTimestamp };
+    const candle = plot.spec.look?.candle;
+    if (!candle) return point;
+    const { values } = view.run;
+    const [high, low, close] = candle.parts;
+    const ohlc = [plot.index, high, low, close].map((p) => values[p]?.[i] ?? Number.NaN);
+    if (ohlc.some((value) => !Number.isFinite(value))) return point;
+    const [o, h, l, c] = ohlc as [number, number, number, number];
+    const out: Record<string, unknown> = { ...point, open: o, high: h, low: l, close: c };
+    if (plot.ghost) return out;
+    const packed = (p: number) => {
+      const color = view.script?.run.plotColors[p]?.[i];
+      return color === undefined || Number.isNaN(color) ? CLEAR : colorCss(color);
+    };
+    const { styles } = view.indicator.settings;
+    const look = plot.spec.look;
+    if (look?.colorChanges && !styles[plot.spec.id]) out.color = packed(plot.index);
+    if (candle.kind === 'candle') {
+      const changes = (p: number) => view.definition.plots[p]?.look?.colorChanges === true;
+      if (changes(high)) out.wickColor = packed(high);
+      if (changes(low)) out.borderColor = packed(low);
+    }
+    return out;
   }
 
   /** Hands every drawn plot its value on bar `index`. */
@@ -899,6 +1107,10 @@ export class IndicatorLayer {
     view.background?.update(stopped ? [] : this.backgrounds(view));
     view.labels?.update(stopped ? [] : this.valueLabels(view));
     for (const plot of view.plots) {
+      const set = stopped ? null : this.markSet(view, plot);
+      plot.marks?.update(set ? [set] : [], this.barExtent);
+    }
+    for (const plot of view.plots) {
       if (!plot.track) continue;
       const last = this.times.length - 1 - (plot.spec.look?.offset ?? 0);
       const value = view.run.values[plot.index]?.[last] ?? Number.NaN;
@@ -908,6 +1120,39 @@ export class IndicatorLayer {
         last + (plot.spec.look?.offset ?? 0) >= this.drawnFrom(view, plot.spec, plot.index);
       plot.track.applyOptions(show ? { price: value, lineVisible: true } : { lineVisible: false });
     }
+  }
+
+  /** The chart's bars' highs and lows, for marks above and below them. */
+  private readonly barExtent: BarExtent = {
+    high: (i) => this.bars[i]?.high ?? Number.NaN,
+    low: (i) => this.bars[i]?.low ?? Number.NaN,
+  };
+
+  /**
+   * A mark plot as its primitive draws it: its value and colors on each bar (its offset
+   * applied), the Style tab's color in place of the script's when it was changed there.
+   */
+  private markSet(view: IndicatorView, plot: DrawnPlot): MarkSet | null {
+    const { spec, index: p } = plot;
+    const look = spec.look;
+    const mark = look?.mark;
+    if (!look || !mark) return null;
+    const style = styleOf(view.indicator.settings, spec);
+    const override = view.indicator.settings.styles[spec.id] !== undefined;
+    const own = style.opacity > 0 ? withOpacity(style.color, style.opacity) : null;
+    const packed = (part: number, i: number) => {
+      const color = view.script?.run.plotColors[part]?.[i - look.offset];
+      return color === undefined || Number.isNaN(color) ? null : colorCss(color);
+    };
+    return {
+      id: spec.id,
+      look: mark,
+      start: this.drawnFrom(view, spec, p),
+      end: this.times.length - 1,
+      valueAt: (i) => view.run.values[p]?.[i - look.offset] ?? Number.NaN,
+      colorAt: (i) => (look.colorChanges && !override ? packed(p, i) : own),
+      textColorAt: (i) => (mark.textPart === null ? mark.textColor : packed(mark.textPart, i)),
+    };
   }
 
   private fills(view: IndicatorView): FillShape[] {
@@ -970,7 +1215,7 @@ export class IndicatorLayer {
     const bands: BackgroundBand[] = [];
     (view.definition.backgrounds ?? []).forEach((spec, b) => {
       const style = styleOf(view.indicator.settings, spec);
-      if (!style.visible) return;
+      if (!style.visible || spec.bars) return;
       const colors = script.run.backgrounds[b];
       if (!colors) return;
       const override = view.indicator.settings.styles[spec.id];
@@ -1015,10 +1260,14 @@ export class IndicatorLayer {
     for (const plot of view.plots) {
       const look = plot.spec.look;
       if (plot.ghost || (!look && plot.spec.kind !== 'line')) continue;
+      // Marks have no label on the scale (provisional, §11); candles label their close (the
+      // Pine manual's figures of plotcandle).
+      if (plot.spec.kind === 'marks') continue;
       if (look && (look.display & PINE_DISPLAY.priceScale) === 0) continue;
       if (last < this.drawnFrom(view, plot.spec, plot.index)) continue;
       const source = last - (look?.offset ?? 0);
-      const value = view.run.values[plot.index]?.[source] ?? Number.NaN;
+      const valueIndex = look?.candle ? look.candle.parts[2] : plot.index;
+      const value = view.run.values[valueIndex]?.[source] ?? Number.NaN;
       const style = styleOf(view.indicator.settings, plot.spec);
       if (!Number.isFinite(value)) continue;
       const color = this.barColor(view, plot.spec, plot.index, source) ?? style.color;

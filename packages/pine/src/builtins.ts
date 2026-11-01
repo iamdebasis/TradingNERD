@@ -14,6 +14,7 @@ import type { Arg } from './ast.ts';
 import { collectionCalls } from './collections.ts';
 import type { Compiler, EnumDef, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
+import { markCalls, markConstant } from './marks.ts';
 import { DEFAULT_SYMBOL, type Runtime } from './runtime.ts';
 import { stringCalls } from './strings.ts';
 import {
@@ -147,10 +148,6 @@ export type ScriptFormat = (typeof FORMATS)[number];
  */
 const LATER: readonly [RegExp, string][] = [
   [
-    /^(plotshape|plotchar|plotarrow|plotbar|plotcandle|barcolor)$/,
-    "isn't supported in tradingNerd yet",
-  ],
-  [
     /^(label|line|box|table|polyline|linefill|chart\.point)\./,
     "isn't supported in tradingNerd yet: drawings (labels, lines, boxes, tables) come in a later update",
   ],
@@ -283,6 +280,13 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
         return constant('scale_style', member, span);
       }
       break;
+    case 'shape':
+    case 'location':
+    case 'size': {
+      const mark = markConstant(space, member, span);
+      if (mark) return mark;
+      break;
+    }
     case 'alert':
       if (
         member === 'freq_all' ||
@@ -740,6 +744,7 @@ const CALLS: Record<string, Handler> = {
   ...collectionCalls(),
   ...timeCalls(),
   ...stringCalls(),
+  ...markCalls(),
 };
 
 /** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
@@ -1266,6 +1271,7 @@ function plotCall(c: Compiler, call: Call, scope: Scope): Compiled {
   }
   c.plots.push({
     index,
+    kind: 'plot',
     title: constTitle(args),
     color: { fold: color.fold, dynamic: color.dynamic },
     linewidth: args.foldedAs('linewidth', 'int', 1),
@@ -1439,6 +1445,7 @@ function bgcolorCall(c: Compiler, call: Call, scope: Scope): Compiled {
   }
   c.bgcolors.push({
     index,
+    bars: false,
     color: { fold: dynamic ? () => Number.NaN : args.folded('color', Number.NaN), dynamic },
     offset: args.foldedAs('offset', 'int', 0),
     editable: constEditable(args),

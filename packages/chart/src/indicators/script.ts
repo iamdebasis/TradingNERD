@@ -15,11 +15,14 @@ import {
   type ValueFormat,
 } from '@tradingnerd/indicators';
 import {
+  colorCss,
   colorHex,
   colorOpacity,
   type InputDef,
   type OutputRef,
   type ScriptDescription,
+  type ScriptMark,
+  type ScriptPlot,
   type ScriptProgram,
   ScriptRun,
   type ScriptSymbol,
@@ -221,31 +224,20 @@ export function scriptDefinition(
   const enabled = (index: number) => (current: Inputs) =>
     program.describe(scriptInputs(program, current)).inputs[index]?.active ?? true;
   const name = d.shorttitle || d.title;
-  const plots: PlotSpec[] = d.plots.map((plot, i) => ({
-    id: plotId(i),
-    // An untitled plot is "Plot" (provisional, §11).
-    title: plot.title || 'Plot',
-    kind: plot.style === 'histogram' || plot.style === 'columns' ? 'columns' : 'line',
-    style: {
-      visible: true,
-      ...look(plot.colorChanges ? null : plot.color),
-      ...(plot.colorChanges ? { color: '#2962FF', opacity: 1 } : {}),
-      width: plot.linewidth,
-      dash: plot.linestyle,
-    },
-    // display = display.none: not drawn, not listed (as the built-ins' hidden plots).
-    shownWhen: () => plot.display !== 0,
-    look: {
-      style: plot.style,
-      colorChanges: plot.colorChanges,
-      offset: plot.offset,
-      showLast: plot.showLast,
-      trackprice: plot.trackprice,
-      histbase: plot.histbase,
-      display: plot.display,
-      editable: plot.editable,
-    },
-  }));
+  // A candle's high, low and close, by the candles they belong to.
+  const owners = new Map<number, number>();
+  d.plots.forEach((plot, i) => {
+    if (plot.kind === 'candle' || plot.kind === 'bar') {
+      for (const part of plot.parts ?? []) owners.set(part, i);
+    }
+  });
+  const plots: PlotSpec[] = d.plots.map((plot, i) => {
+    const owner = owners.get(i);
+    const candles = owner === undefined ? undefined : d.plots[owner];
+    return candles && owner !== undefined
+      ? candlePart(plot, i, candles, owner)
+      : scriptPlot(plot, i);
+  });
   const levels: LevelSpec[] = d.hlines.map((hline, i) => ({
     id: hlineId(i),
     title: hline.title || 'Line',
@@ -284,7 +276,9 @@ export function scriptDefinition(
   }));
   const backgrounds: BackgroundSpec[] = d.backgrounds.map((background, i) => ({
     id: backgroundId(i),
-    title: background.title || 'Background',
+    ...(background.bars ? { bars: true } : {}),
+    // An untitled barcolor is "Bar color" (provisional, §11).
+    title: background.title || (background.bars ? 'Bar color' : 'Background'),
     style: { visible: pane(background.display), ...look(background.color) },
     offset: background.offset,
     showLast: background.showLast,
@@ -319,6 +313,122 @@ export function scriptDefinition(
     },
     settledFrom: () => 0,
   };
+}
+
+/**
+ * A candle's high, low or close: drawn with its candles, never by itself, and written in the
+ * legend after their open (the four values in their color: the Pine manual's figures of
+ * plotcandle, Requesting LTF collections and Custom contexts).
+ */
+function candlePart(plot: ScriptPlot, i: number, candles: ScriptPlot, owner: number): PlotSpec {
+  return {
+    id: plotId(i),
+    title: '',
+    kind: 'line',
+    style: { visible: true, ...look(plot.color) },
+    partOf: plotId(owner),
+    shownWhen: () => candles.display !== 0,
+    look: {
+      style: 'line',
+      colorChanges: false,
+      offset: 0,
+      showLast: candles.showLast,
+      trackprice: false,
+      histbase: 0,
+      display: candles.display,
+      editable: false,
+    },
+  };
+}
+
+/**
+ * One of a script's plot-like outputs as the chart draws it. Every engine plot keeps its place,
+ * so the run's values line up; a mark's hidden text colors are never shown by themselves.
+ */
+function scriptPlot(plot: ScriptPlot, i: number): PlotSpec {
+  const plotLook = {
+    style: plot.style,
+    colorChanges: plot.colorChanges,
+    offset: plot.offset,
+    showLast: plot.showLast,
+    trackprice: plot.trackprice,
+    histbase: plot.histbase,
+    display: plot.display,
+    editable: plot.editable,
+  };
+  const color = {
+    visible: true,
+    ...look(plot.colorChanges ? null : plot.color),
+    ...(plot.colorChanges ? { color: '#2962FF', opacity: 1 } : {}),
+  };
+  switch (plot.kind) {
+    case 'part':
+      return {
+        id: plotId(i),
+        title: '',
+        kind: 'line',
+        style: color,
+        shownWhen: () => false,
+        look: { ...plotLook, display: 0, editable: false },
+      };
+    case 'shape':
+    case 'char':
+    case 'arrow': {
+      const mark = plot.mark as ScriptMark;
+      return {
+        id: plotId(i),
+        // An untitled mark is "Shapes" (provisional, §11).
+        title:
+          plot.title ||
+          (plot.kind === 'char' ? 'Chars' : plot.kind === 'arrow' ? 'Arrows' : 'Shapes'),
+        kind: 'marks',
+        style: color,
+        shownWhen: () => plot.display !== 0,
+        look: {
+          ...plotLook,
+          mark: {
+            kind: plot.kind,
+            shape: mark.shape,
+            char: mark.char,
+            location: mark.location,
+            size: mark.size,
+            text: mark.text,
+            textColor: mark.textColor === null ? null : colorCss(mark.textColor),
+            textPart: mark.textPart,
+            minheight: mark.minheight,
+            maxheight: mark.maxheight,
+          },
+        },
+      };
+    }
+    case 'candle':
+    case 'bar':
+      return {
+        id: plotId(i),
+        title: plot.title || (plot.kind === 'candle' ? 'Candles' : 'Bars'),
+        kind: 'candles',
+        style: color,
+        shownWhen: () => plot.display !== 0,
+        look: {
+          ...plotLook,
+          candle: {
+            kind: plot.kind,
+            parts: plot.parts ?? [i, i, i],
+          },
+        },
+      };
+    default:
+      return {
+        id: plotId(i),
+        // An untitled plot is "Plot" (provisional, §11).
+        title: plot.title || 'Plot',
+        kind: plot.style === 'histogram' || plot.style === 'columns' ? 'columns' : 'line',
+        style: { ...color, width: plot.linewidth, dash: plot.linestyle },
+        // display = display.none: not drawn, not listed (as the built-ins' hidden plots).
+        shownWhen: () => plot.display !== 0,
+        look: plotLook,
+      };
+  }
 }
 
 /** A script's input values for its settings, from the script's defaults. */

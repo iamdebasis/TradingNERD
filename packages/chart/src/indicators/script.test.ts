@@ -205,6 +205,70 @@ describe('Scripts’ other inputs, placements and formats', () => {
     expect(definition.backgrounds?.map((background) => background.id)).toEqual(['bg_0']);
   });
 
+  it('draws plotshape, plotchar and plotarrow as marks, with what places and colors them', () => {
+    const p = script(
+      [
+        'plotshape(close > open, style = shape.triangleup, location = location.belowbar, color = color.teal, text = "Buy")',
+        'plotchar(close < open, "Down", "▼", location.top, size = size.tiny)',
+        'plotarrow(close - open)',
+      ].join('\n'),
+      'indicator("Signals", overlay = true)',
+    );
+    const [shape, char, arrow] = scriptDefinition(p, {}, CONTEXT).plots;
+    // An untitled mark is named for its kind (provisional).
+    expect(shape).toMatchObject({
+      kind: 'marks',
+      title: 'Shapes',
+      style: { color: '#089981' },
+      look: {
+        mark: {
+          kind: 'shape',
+          shape: 'triangleup',
+          location: 'belowbar',
+          size: 'auto',
+          text: 'Buy',
+          // The text in the shape's color (the manual's "Lift text" figure).
+          textColor: '#089981',
+        },
+      },
+    });
+    expect(char).toMatchObject({
+      kind: 'marks',
+      title: 'Down',
+      look: { mark: { kind: 'char', char: '▼', location: 'top', size: 'tiny' } },
+    });
+    expect(arrow).toMatchObject({
+      kind: 'marks',
+      title: 'Arrows',
+      look: { colorChanges: true, mark: { kind: 'arrow', minheight: 5, maxheight: 100 } },
+    });
+  });
+
+  it('draws plotcandle as candles whose high, low and close follow them in the legend', () => {
+    const p = script('plotcandle(open, high, low, close, "Mine", color.teal)');
+    const definition = scriptDefinition(p, {}, CONTEXT);
+    const [candles, high, low, close] = definition.plots;
+    expect(candles).toMatchObject({
+      kind: 'candles',
+      title: 'Mine',
+      look: { candle: { kind: 'candle', parts: [1, 2, 3] } },
+    });
+    // Parts: drawn with the candles, never listed in the Style tab by themselves.
+    for (const part of [high, low, close]) {
+      expect(part).toMatchObject({ partOf: 'plot_0', look: { editable: false } });
+      expect(part?.shownWhen?.({})).toBe(true);
+    }
+    // The wick's and the border's colors, unless the script gives them (provisional).
+    expect(high?.style.color).toBe('#737375');
+    expect(low?.style.color).toBe('#000000');
+  });
+
+  it('marks barcolor() as coloring the chart’s bars, named "Bar color" when untitled', () => {
+    const p = script('barcolor(close > open ? color.yellow : na)\nplot(close)');
+    const definition = scriptDefinition(p, {}, CONTEXT);
+    expect(definition.backgrounds).toMatchObject([{ id: 'bg_0', bars: true, title: 'Bar color' }]);
+  });
+
   it('runs through ScriptLayerRun with the chart’s listing flag', () => {
     const p = script('plot(bar_index)');
     const run = new ScriptLayerRun(p, {}, CONTEXT, null);
