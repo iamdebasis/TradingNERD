@@ -602,6 +602,50 @@ test('the script menu as TradingView’s: Open script, Version history, Rename, 
   await expect(editor(page).getByTestId('pine-name')).toHaveText(/Faster RSI/);
 });
 
+test('Convert code to v6 rewrites v5 code with the guide’s fixes, and Undo brings it back', async ({
+  page,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  const v5 = [
+    '//@version=5',
+    'indicator("Old script")',
+    'up = close > open ? 1 : 0',
+    'plot(up ? close : open, color = color.teal, transp = 50)',
+  ].join('\n');
+  await setCode(page, v5);
+  // The v5 annotation is marked, as TradingView's editor marks it.
+  await expect(editor(page).locator('[class*="versionToConvert"]')).toHaveText('//@version=5');
+  await editor(page).getByTestId('pine-name').click();
+  await editor(page).getByRole('menuitem', { name: 'Convert code to v6' }).click();
+  await expect
+    .poll(() => code(page))
+    .toBe(
+      [
+        '//@version=6',
+        'indicator("Old script")',
+        'up = close > open ? 1 : 0',
+        'plot(bool(up) ? close : open, color = color.new(color.teal, 50))',
+      ].join('\n'),
+    );
+  await expect(editor(page).locator('[class*="versionToConvert"]')).toHaveCount(0);
+  // v6 code has nothing to convert.
+  await editor(page).getByTestId('pine-name').click();
+  await expect(editor(page).getByRole('menuitem', { name: 'Convert code to v6' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await editor(page).getByRole('textbox', { name: 'Pine Script code' }).focus();
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect.poll(() => code(page)).toBe(v5);
+  // v5 code that doesn't compile can't be converted.
+  await setCode(page, v5.replace('close > open', 'nope'));
+  await editor(page).getByTestId('pine-name').click();
+  await expect(editor(page).getByRole('menuitem', { name: 'Convert code to v6' })).toBeDisabled();
+});
+
 test.describe('typing in the editor', () => {
   // The pinned clock's performance.now breaks Monaco's own typing-latency marks; typing needs
   // the real one (the fixture's realClock).

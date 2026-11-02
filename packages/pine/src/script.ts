@@ -24,9 +24,10 @@ import {
   type Span,
 } from './diagnostics.ts';
 import { upgrade } from './dialect.ts';
+import { spanText } from './edits.ts';
 import { LOCATIONS, SHAPES, SIZES } from './marks.ts';
 import { parse } from './parser.ts';
-import { DEFAULT_SYMBOL, type Outputs, type ScriptSymbol } from './runtime.ts';
+import { DEFAULT_SYMBOL, type LogEntry, type Outputs, type ScriptSymbol } from './runtime.ts';
 import type { FoldEnv, Qual } from './types.ts';
 import type { OutputRef, Value } from './values.ts';
 import { Agreement, drawnFrom } from './warmup.ts';
@@ -53,7 +54,10 @@ export function compileScript(source: string, options: CompileOptions = {}): Com
   try {
     const parsed = parse(source);
     checkVersion(parsed, source);
-    const script = upgrade(parsed);
+    const script = upgrade(
+      parsed,
+      options.edits ? { edits: options.edits, text: spanText(source) } : undefined,
+    );
     let floors: ReadonlyMap<object, Qual> = new Map();
     for (let pass = 0; pass < MAX_PASSES; pass++) {
       const found = new Compiler(script, source, floors, false, options).compile().quals;
@@ -292,6 +296,11 @@ export class ScriptProgram {
     this.warnings = this.compiled.warnings;
   }
 
+  /** Whether it calls log.info(), log.warning() or log.error() (Pine docs, Debugging). */
+  get logging(): boolean {
+    return this.compiled.logging;
+  }
+
   /** The inputs' defaults, by input. */
   defaults(): Value[] {
     return this.inputs.map((input) => input.defval);
@@ -518,6 +527,16 @@ class Execution {
     rt.outputs = this.outputs;
   }
 
+  /** Its Pine Logs, oldest first. */
+  get logs(): readonly LogEntry[] {
+    return this.program.runtime.logs;
+  }
+
+  /** How many messages it has logged in all: it changes when there are new ones. */
+  get logsWritten(): number {
+    return this.program.runtime.logsWritten;
+  }
+
   /** Computes every bar: closed ones commit, the last (live) one is tentative. */
   all(bars: readonly Bar[]): void {
     this.room(bars.length);
@@ -687,6 +706,21 @@ export class ScriptRun {
 
   get length(): number {
     return this.main?.length ?? 0;
+  }
+
+  /** The script's Pine Logs from its run over the chart's bars, oldest first (Pine docs, Debugging). */
+  get logs(): readonly LogEntry[] {
+    return this.main?.logs ?? [];
+  }
+
+  /** How many messages this run has logged in all: it changes when there are new ones. */
+  get logsWritten(): number {
+    return this.main?.logsWritten ?? 0;
+  }
+
+  /** Whether the script calls log.info(), log.warning() or log.error() (its More menu's Pine Logs). */
+  get logging(): boolean {
+    return this.program.logging;
   }
 
   /**

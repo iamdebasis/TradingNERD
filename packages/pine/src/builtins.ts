@@ -545,7 +545,9 @@ export function compileHistoryOfBuiltin(
       'float',
       (rt) => {
         const n = back(rt);
-        if (!(n >= 0))
+        // An na offset reads na, a negative one stops (compiler.ts, historyError).
+        if (Number.isNaN(n)) return Number.NaN;
+        if (n < 0)
           throw new PineRuntimeError(
             `Invalid history reference [${n}]: the offset must be 0 or more`,
             span,
@@ -563,7 +565,8 @@ export function compileHistoryOfBuiltin(
     base,
     (rt) => {
       const n = k(rt);
-      if (!(n >= 0))
+      if (Number.isNaN(n)) return Number.NaN;
+      if (n < 0)
         throw new PineRuntimeError(
           `Invalid history reference [${n}]: the offset must be 0 or more`,
           span,
@@ -652,6 +655,7 @@ const CALLS: Record<string, Handler> = {
   fill: fillCall,
   bgcolor: bgcolorCall,
   alertcondition: (c, call, scope) => {
+    c.otherOutputs++;
     const args = new Args(c, call, scope, ['condition', 'title', 'message'], 1);
     args.bool('condition');
     return { base: 'void', qual: CONST, ev: () => null, span: call.span };
@@ -1315,13 +1319,17 @@ function hlineCall(c: Compiler, call: Call, scope: Scope): Compiled {
   const names = ['price', 'title', 'color', 'linestyle', 'linewidth', 'editable', 'display'];
   const args = new Args(c, call, scope, names, 1);
   const index = c.hlines.length;
+  // v4 and older styles were ints, and old scripts give hline a plot style: `linestyle = line`
+  // (a v3 community script) draws solid, both being their function's first style (provisional,
+  // docs/SPEC.md §11).
+  const plotStyle = c.version <= 4 && args.get('linestyle')?.base === 'plot_style';
   c.hlines.push({
     index,
     price: args.foldedAs('price', 'float', Number.NaN),
     title: constTitle(args),
     // Not in TradingView's docs: gray and dashed, provisional (docs/SPEC.md §11).
     color: args.foldedAs('color', 'color', COLORS.gray as number),
-    linestyle: args.foldedAs('linestyle', 'hline_style', 'dashed'),
+    linestyle: plotStyle ? () => 'solid' : args.foldedAs('linestyle', 'hline_style', 'dashed'),
     linewidth: args.foldedAs('linewidth', 'int', 1),
     editable: constEditable(args),
     display: args.foldedAs('display', 'int', DISPLAY.all),

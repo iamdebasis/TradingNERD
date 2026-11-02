@@ -18,14 +18,15 @@ export {
   signatureOf,
 } from './catalog.ts';
 export type { CompileOptions, InputDef, LibraryResolver } from './compiler.ts';
+export { type ConvertResult, convertToV6 } from './convert.ts';
 export {
   type LibraryProblem,
   type PineDiagnostic,
   PineRuntimeError,
   type Span,
 } from './diagnostics.ts';
-export { KEYWORDS } from './lexer.ts';
-export { DEFAULT_SYMBOL, type ScriptSymbol } from './runtime.ts';
+export { KEYWORDS, versionIn } from './lexer.ts';
+export { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
 export {
   type CompileResult,
   compileCached,

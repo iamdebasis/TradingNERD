@@ -1,6 +1,7 @@
 import type { Arg, Expr } from './ast.ts';
 import type { Compiler, Scope } from './compiler.ts';
 import type { Span } from './diagnostics.ts';
+import { repeatedArg } from './edits.ts';
 import type { Runtime } from './runtime.ts';
 import {
   type Base,
@@ -60,7 +61,7 @@ export function bind(
   const fn = call.callee;
   const bound: (Arg | undefined)[] = names.map(() => undefined);
   let position = 0;
-  for (const arg of call.args) {
+  for (const [k, arg] of call.args.entries()) {
     let i: number;
     if (arg.name === null) {
       if (position >= names.length) c.fail(`Too many arguments in the call to '${fn}'`, arg.span);
@@ -74,6 +75,7 @@ export function bind(
       // v5 and older used the first and warned (v6 guide: Cannot repeat parameters).
       if (c.version <= 5) {
         c.warn(message, arg.span);
+        c.convertEdit(repeatedArg(call.args, k));
         continue;
       }
       c.fail(message, arg.span);
@@ -161,9 +163,18 @@ export class Args {
     return value?.ev as NumEv | undefined;
   }
 
+  /**
+   * An int argument. An int can hold a fraction (two ints divided keep theirs: compiler.ts), and
+   * an int parameter takes its floor, as TradingView's manual says of array.get()'s index.
+   */
   int(name: string, max: Qual = SERIES): NumEv | undefined {
     const value = this.check(name, (b) => b === 'int' || b === 'na', qualWord(max, 'int'), max);
-    return value?.ev as NumEv | undefined;
+    const ev = value?.ev as NumEv | undefined;
+    if (!ev) return undefined;
+    return (rt) => {
+      const n = ev(rt);
+      return Number.isInteger(n) || Number.isNaN(n) ? n : Math.floor(n);
+    };
   }
 
   bool(name: string, max: Qual = SERIES): ((rt: Runtime) => boolean) | undefined {

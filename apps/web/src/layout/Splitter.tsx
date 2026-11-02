@@ -3,7 +3,7 @@ import styles from './Splitter.module.css';
 import { clampWidth } from './watchlistWidth';
 
 interface SplitterProps {
-  /** Current watchlist width in px. */
+  /** The panel's current size in px: its width beside the chart, or its height below it. */
   width: number;
   min: number;
   max: number;
@@ -11,26 +11,41 @@ interface SplitterProps {
   onPreview: (width: number) => void;
   /** Called once when a drag or key press settles on a new width. */
   onCommit: (width: number) => void;
+  /** 'y' for a panel below the chart (the Pine Editor moved to the bottom). */
+  axis?: 'x' | 'y';
+  label?: string;
 }
 
 const KEY_STEP = 16;
 const KEY_STEP_LARGE = 64;
 
-/** Vertical splitter between the chart and the watchlist (WAI-ARIA window splitter). */
-export function Splitter({ width, min, max, onPreview, onCommit }: SplitterProps) {
+/**
+ * The splitter between the chart and a panel (WAI-ARIA window splitter): vertical beside a panel
+ * on the right, horizontal above one below the chart.
+ */
+export function Splitter({
+  width,
+  min,
+  max,
+  onPreview,
+  onCommit,
+  axis = 'x',
+  label = 'Resize watchlist',
+}: SplitterProps) {
+  const across = axis === 'y';
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     const handle = event.currentTarget;
     handle.setPointerCapture(event.pointerId);
-    const startX = event.clientX;
+    const start = across ? event.clientY : event.clientX;
     let latest = width;
     let frame = 0;
-    document.body.dataset.resizing = 'col';
+    document.body.dataset.resizing = across ? 'row' : 'col';
 
     const onMove = (move: PointerEvent) => {
-      // The watchlist sits on the right, so dragging left makes it wider.
-      latest = clampWidth(width + startX - move.clientX, min, max);
+      // The panel sits right of or below the chart: dragging left or up makes it bigger.
+      latest = clampWidth(width + start - (across ? move.clientY : move.clientX), min, max);
       if (frame === 0) {
         frame = requestAnimationFrame(() => {
           frame = 0;
@@ -54,9 +69,11 @@ export function Splitter({ width, min, max, onPreview, onCommit }: SplitterProps
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
+    const grow = across ? 'ArrowUp' : 'ArrowLeft';
+    const shrink = across ? 'ArrowDown' : 'ArrowRight';
     let next: number;
-    if (event.key === 'ArrowLeft') next = clampWidth(width + step, min, max);
-    else if (event.key === 'ArrowRight') next = clampWidth(width - step, min, max);
+    if (event.key === grow) next = clampWidth(width + step, min, max);
+    else if (event.key === shrink) next = clampWidth(width - step, min, max);
     else return;
     event.preventDefault();
     onPreview(next);
@@ -66,10 +83,10 @@ export function Splitter({ width, min, max, onPreview, onCommit }: SplitterProps
   return (
     // biome-ignore lint/a11y/useSemanticElements: a draggable, focusable splitter is a widget; <hr> is a static divider.
     <div
-      className={styles.splitter}
+      className={`${styles.splitter} ${across ? styles.across : ''}`}
       role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize watchlist"
+      aria-orientation={across ? 'horizontal' : 'vertical'}
+      aria-label={label}
       aria-valuenow={width}
       aria-valuemin={min}
       aria-valuemax={Number.isFinite(max) ? max : undefined}

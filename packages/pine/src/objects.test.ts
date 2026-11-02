@@ -157,6 +157,35 @@ plot(a.get(-1))`,
     expect(run.error?.message).toMatch(/Index -1 is out of bounds\. Array size is 3/);
   });
 
+  it('stops with TradingView’s own messages (Arrays, Error handling)', () => {
+    const error = (body: string) =>
+      runScript(indicator(`${body}\nplot(close)`), bars).error?.message;
+    expect(error('a = array.new<float>(0)\na.pop()')).toBe('Cannot use pop() if array is empty.');
+    expect(error('a = array.new<float>(0)\na.shift()')).toBe(
+      'Cannot use shift() if array is empty.',
+    );
+    expect(error('a = array.new<float>(-1)')).toBe('Cannot create an array with a negative size');
+    expect(error('a = array.new<float>(100001)')).toBe(
+      'Array is too large. Maximum size is 100000',
+    );
+    expect(error('a = array.new<float>(100000)\na.push(1)')).toBe(
+      'Array is too large. Maximum size is 100000',
+    );
+    expect(error('array<int> a = na\narray.push(a, 111)')).toBe(
+      "Cannot call array methods when ID of array is 'na'",
+    );
+  });
+
+  it('reads na at an na index, as the manual’s “Distance from high” needs; writing there stops', () => {
+    // ta.highestbars is na until its length's bar, and TradingView still runs the example.
+    expect(series('a = array.from(1, 2, 3)\nplot(a.get(int(na)))', bars)[0]).toBeNaN();
+    const run = runScript(
+      indicator('a = array.from(1, 2, 3)\na.set(int(na), 4)\nplot(a.get(0))'),
+      bars,
+    );
+    expect(run.error?.message).toMatch(/The index of 'array.set' is na/);
+  });
+
   it('works out statistics, sorts and joins', () => {
     expect(
       series(
@@ -258,5 +287,26 @@ plot(m.det() * 100 + p.get(0, 0) + p.get(1, 1))`,
         bars,
       )[0],
     ).toBeCloseTo(10 * 100 + 2, 9);
+  });
+
+  it('stops with TradingView’s own messages (Matrices, Error handling)', () => {
+    const error = (body: string) =>
+      runScript(indicator(`${body}\nplot(close)`), bars).error?.message;
+    // The manual's "Non-square demo" and "Matrix too large demo".
+    expect(error('m = matrix.new<float>(3, 5, 1)\nx = m.det()')).toBe(
+      'Operation not available for non-square matrices.',
+    );
+    expect(error('m = matrix.new<float>(1000, 101)')).toBe(
+      'Matrix is too large. Maximum size of the matrix is 100,000 elements.',
+    );
+    expect(error('m = matrix.new<float>(2, 2)\nm.set(2, 0, 1)')).toBe(
+      'The row index (2) is out of bounds, row size is (2).',
+    );
+    expect(error('m = matrix.new<float>(2, 3, 1)\nx = matrix.mult(m, m)')).toBe(
+      "The number of columns in the 'id1' matrix must equal the number of rows in the matrix (or the number of elements in the array) 'id2'.",
+    );
+    expect(error('matrix<float> m = na\nx = m.rows()')).toBe(
+      "Cannot call matrix methods when the ID of matrix is 'na'.",
+    );
   });
 });

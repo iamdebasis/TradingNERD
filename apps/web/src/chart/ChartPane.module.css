@@ -3,3 +3,23 @@
   position: absolute;
   inset: 0;
 }
+
+/* A Pine Logs entry's bar, brought into view: its date and time over it for a moment, as
+   TradingView's pane shows them (Pine docs, Debugging, Figure 351). Its place near the top of
+   the chart and its look are provisional (docs/SPEC.md §11). */
+.barTip {
+  position: absolute;
+  z-index: 3;
+  top: 48px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 50%);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  white-space: pre;
+  transform: translateX(-50%);
+  pointer-events: none;
+}

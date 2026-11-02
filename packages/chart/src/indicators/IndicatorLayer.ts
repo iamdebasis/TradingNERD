@@ -18,6 +18,7 @@ import {
   colorCss,
   compileCached,
   DEFAULT_SYMBOL,
+  type LogEntry,
   type ScriptProgram,
 } from '@tradingnerd/pine';
 import {
@@ -80,6 +81,13 @@ type LayerRun = IndicatorRun | ScriptLayerRun;
  * the libraries' revision, which moves on with each change.
  */
 export type ScriptLibraries = CompileOptions & { revision: string };
+
+/** One script's Pine Logs, oldest first, and how many it has written in all. */
+export interface ScriptLogs {
+  id: string;
+  logs: readonly LogEntry[];
+  written: number;
+}
 
 /** A script with an import statement: its code depends on the libraries'. */
 const IMPORTS = /^[ \t]*import\s/m;
@@ -490,6 +498,21 @@ export class IndicatorLayer {
   }
 
   /** Why each script draws nothing, by its id: its compile or runtime error. */
+  /**
+   * The Pine Logs of each script on the chart that logs, in the legend's order: "each script
+   * maintains its own independent message history" (Pine docs, Debugging). `written` changes
+   * when there are new messages.
+   */
+  logs(): ScriptLogs[] {
+    const out: ScriptLogs[] = [];
+    for (const view of this.views) {
+      if (!view.program?.logging || !(view.run instanceof ScriptLayerRun)) continue;
+      const { run } = view.run;
+      out.push({ id: view.indicator.id, logs: run.logs, written: run.logsWritten });
+    }
+    return out;
+  }
+
   errors(): Map<string, string> {
     const errors = new Map<string, string>();
     for (const view of this.views) {

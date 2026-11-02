@@ -35,6 +35,7 @@ import {
   IndicatorLayer,
   type IndicatorValues,
   type ScriptLibraries,
+  type ScriptLogs,
 } from './indicators/IndicatorLayer';
 import { type ChartIndicator, paneAt } from './indicators/model';
 import { installKeyboard } from './interaction/keyboard';
@@ -534,6 +535,11 @@ export class ChartController {
     return this.indicators.errors();
   }
 
+  /** Each logging script's Pine Logs, in the legend's order (IndicatorLayer.logs). */
+  scriptLogs(): ScriptLogs[] {
+    return this.indicators.logs();
+  }
+
   /**
    * Applies a live update to the current bar or opens a new one. A `historical` update corrects
    * an earlier bar (the exchange's final word on it); other stale updates are ignored.
@@ -615,6 +621,20 @@ export class ChartController {
     this.viewport.set(
       zoomRange(range, this.viewport.width(), notches, null, spacingLimits(this.chart)),
     );
+  }
+
+  /**
+   * Brings bar `index` to the middle of the view, the zoom kept: a Pine Logs entry's Scroll to
+   * bar (Pine docs, Debugging). Its time label, as the crosshair writes it, for the tooltip the
+   * pane shows over it; null for a bar the chart doesn't have.
+   */
+  scrollToBar(index: number): string | null {
+    const bar = this.bars[index];
+    const range = this.viewport.range();
+    if (!bar || !range) return null;
+    const half = (range.to - range.from) / 2;
+    this.viewport.set({ from: index - half, to: index + half });
+    return this.timeLabel(bar.time);
   }
 
   /** Scrolls by whole bars; negative goes back in time. */

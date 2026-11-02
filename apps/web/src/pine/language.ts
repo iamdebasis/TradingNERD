@@ -159,6 +159,9 @@ export const pineTokens: Monaco.languages.IMonarchLanguage = {
       [/\/\/@[a-zA-Z_]+.*$/, 'comment.annotation'],
       [/\/\/.*$/, 'comment'],
       [/#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b/, 'constant.color'],
+      // A multiline string (v6, April 2026 release notes) runs on until its closing delimiter.
+      [/"""/, 'string', '@stringTripleDouble'],
+      [/'''/, 'string', '@stringTripleSingle'],
       [/"/, 'string', '@stringDouble'],
       [/'/, 'string', '@stringSingle'],
       [/\d*\.\d+([eE][-+]?\d+)?|\d+\.?\d*([eE][-+]?\d+)?/, 'number'],
@@ -203,6 +206,18 @@ export const pineTokens: Monaco.languages.IMonarchLanguage = {
       [/[^\\']+/, 'string'],
       [/\\./, 'string.escape'],
       [/'/, 'string', '@pop'],
+    ],
+    stringTripleDouble: [
+      [/"""/, 'string', '@pop'],
+      [/[^\\"]+/, 'string'],
+      [/\\./, 'string.escape'],
+      [/"/, 'string'],
+    ],
+    stringTripleSingle: [
+      [/'''/, 'string', '@pop'],
+      [/[^\\']+/, 'string'],
+      [/\\./, 'string.escape'],
+      [/'/, 'string'],
     ],
   },
 };

@@ -126,4 +126,15 @@ describe('Libraries and the compile cache', () => {
     const result = compileScript(HLM);
     expect(result.ok && result.program.isLibrary).toBe(true);
   });
+
+  it('refuses a library that exports nothing, as the reference says each must', () => {
+    const result = compileScript(
+      '//@version=6\nlibrary("Nothing")\nf(float x) => x\nplot(f(close))',
+    );
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.errors[0]).toMatchObject({
+      message: 'A library must export at least one function or type',
+      line: 2,
+    });
+  });
 });

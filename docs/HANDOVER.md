@@ -2,7 +2,7 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 31 October 2026, by the AI Lead Architect and Lead Delivery Engineer (Claude).
+**Last updated:** 2 November 2026, by the AI Lead Architect and Lead Delivery Engineer (Claude).
 
 ## 1. Where things stand
 
@@ -13,7 +13,7 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
-| Under way | **P2, real Pine scripts and the editor as TradingView's** (31 October), on `claude/keen-allen-7wubfe` from `main` at `4295233`, committed step by step on your YES; pushing and the pull request wait for their own YES. Done: step 1 (versions and types, `212fb59`), step 3 (the built-ins: `ta.*` against TradingView's own values, 671 of 689 plots equal on every bar; strings, time and sessions, every input kind; SPEC §4.17, `0c80d88`) step 4 (the plotshape family on the chart: shapes, characters, arrows, candles, bars and bar colors, drawn as the Pine manual's figures show them; sizes provisional until your screenshot; SPEC §4.18, `074a0a7`) step 5 (libraries: My libraries in `data/libraries.json`, protocol v12, "Add library…" from the console where you paste a library's code, Create new → Library; SPEC §5.17, `264218c`) and step 6 (the script menu as TradingView's, Open script, Version history with differences and Add version to chart, help while typing; and a fix: letters typed in the editor no longer open symbol search; SPEC §5.18). The corpus's scripts needing only P2 now run 87.8% (manual) and 96.5% (community). Next: step 7, Pine Logs, Convert code to v6, Move to bottom, and the corpus at 98%. See SPEC §8 |
+| Built, waiting to be pushed | **P2, real Pine scripts and the editor as TradingView's** (31 October to 2 November), on `claude/keen-allen-7wubfe` from `main` at `4295233`, committed step by step on your YES: step 1 (versions and types, `212fb59`), step 3 (the built-ins on TradingView's own values, `0c80d88`), step 4 (the plotshape family, `074a0a7`), step 5 (libraries, protocol v12, `264218c`), step 6 (the script menu, Version history, help while typing, `f296709`) and step 7 (Pine Logs, Convert code to v6, Move script to bottom, the corpus's last fixes). The corpus: 478 of 481 manual examples and 199 of 199 community scripts that need only P2 run (99.6%), and all 37 of the manual's error examples stop as on TradingView; 671 of 689 plots equal TradingView's (SPEC §4.17). Pushing and the pull request wait for their own YES. **Still to do on the Mac:** `pnpm verify` (the cloud can't run the browser tests against the Mac's baselines), the hand checks on 10 scripts against TradingView, and your Ichimoku with `JollyWizard/lib_hlm/1` pasted. What's provisional is SPEC §11, items 89 to 103 |
 | Taken out | A3 (hiding unchecked coins), on the user's rule against hiding data |
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
@@ -162,7 +162,9 @@ The full list is SPEC §11; these are the ones that matter most.
 
 ## 6. Next steps, in order
 
-For P2: step 7 (Pine Logs, Convert code to v6, Move to bottom, the corpus at 98%), each committed under the YES in hand; then the hand-over with its evidence, and a YES to push and open the pull request. On the Mac, after pulling: restart `pnpm dev` (protocol v12: the gateway and the web app move together), then `pnpm verify`, P1's hand checks, a TradingView screenshot of plotshape at each size to calibrate the marks (SPEC §11, item 89), and your Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17).
+For P2: a YES to push `claude/keen-allen-7wubfe` and open its pull request into `main`; the user merges it. On the Mac, after pulling: restart `pnpm dev` (protocol v12: the gateway and the web app move together), then `pnpm verify`, P1's hand checks, a TradingView screenshot of plotshape at each size to calibrate the marks (SPEC §11, item 89), and your Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17). Screenshots that would settle step 7's provisional looks: the Pine Logs pane in the dark theme, the editor moved to the bottom, and what follows "Convert code to v6…" (SPEC §11, items 101 to 103).
+
+After P2, the plan's next milestones (SPEC §8): P3 drawings (labels, lines, boxes, tables), P4 other symbols and timeframes (`request.*`, `indicator(timeframe = …)`), P5 strategies; and the open items P2 left (SPEC §11, item 100: the chart script's More menu, v5's series `offset`, `array.slice()` sharing its elements).
 
 For M9f:
 

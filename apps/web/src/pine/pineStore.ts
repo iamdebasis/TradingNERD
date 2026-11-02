@@ -92,6 +92,13 @@ export interface PineDocument {
 export interface PineState {
   /** The panel is showing. */
   open: boolean;
+  /**
+   * Where the editor sits: docked on the right, or below the chart (the script menu's Move
+   * script to bottom; the user's screenshot of 31 October).
+   */
+  dock: 'right' | 'bottom';
+  /** A chart script's line to show and select, asked for by a Pine Logs entry's Source code. */
+  line: { chartId: string; line: number; serial: number } | null;
   /** The scripts opened lately, the latest first. */
   recent: readonly RecentScript[];
   document: PineDocument | null;
@@ -101,7 +108,15 @@ export interface PineState {
   notice: string | null;
 }
 
-const EMPTY: PineState = { open: false, recent: [], document: null, busy: false, notice: null };
+const EMPTY: PineState = {
+  open: false,
+  dock: 'right',
+  line: null,
+  recent: [],
+  document: null,
+  busy: false,
+  notice: null,
+};
 
 const isOrigin = (value: unknown): value is ScriptOrigin => value === 'rsi' || value === 'volume';
 
@@ -152,7 +167,15 @@ export function sanitizePineState(value: unknown): PineState {
       };
     }
   }
-  return { open: raw.open === true, recent: [], document, busy: false, notice: null };
+  return {
+    open: raw.open === true,
+    dock: raw.dock === 'bottom' ? 'bottom' : 'right',
+    line: null,
+    recent: [],
+    document,
+    busy: false,
+    notice: null,
+  };
 }
 
 /** The name the header shows: the built-in's, the saved script's, or a new one's. */
@@ -203,6 +226,24 @@ export class PineStore {
 
   setOpen(open: boolean): void {
     if (open !== this.value.open) this.commit({ ...this.value, open });
+  }
+
+  /** Docks the editor on the right or below the chart, kept in this browser. */
+  setDock(dock: PineState['dock']): void {
+    if (dock !== this.value.dock) this.commit({ ...this.value, dock });
+  }
+
+  /**
+   * A chart script's code at a line (a Pine Logs entry's Source code): the editor shows it, the
+   * code it holds kept when it's that script's already.
+   */
+  showLine(indicator: ChartIndicator, line: number): void {
+    if (this.value.document?.chartId !== indicator.id) this.openIndicator(indicator);
+    this.commit({
+      ...this.value,
+      open: true,
+      line: { chartId: indicator.id, line, serial: Date.now() },
+    });
   }
 
   /** A built-in's code, to edit as a copy (the legend's Source code, Create new → Built-in). */
@@ -490,7 +531,7 @@ export class PineStore {
 
   private commit(next: PineState): void {
     this.value = next;
-    writeJson(PINE_KEY, { open: next.open, document: next.document });
+    writeJson(PINE_KEY, { open: next.open, dock: next.dock, document: next.document });
     for (const listener of [...this.listeners]) listener();
   }
 }

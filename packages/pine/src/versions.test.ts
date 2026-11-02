@@ -86,6 +86,34 @@ plot(s)`).slice(0, 4),
     ).toEqual([1, 2, 3, 4]);
   });
 
+  it('reads a bool as 1 or 0 in v2 arithmetic; v3 forbade it (the manual’s own example)', () => {
+    const counted = first(`//@version=2
+study("Test")
+s = close >= open
+sum = s + s[1] - (close < open)
+plot(sum)`);
+    const values = bars.map((bar, i) => {
+      const up = (k: number) => ((bars[k]?.close ?? 0) >= (bars[k]?.open ?? 0) ? 1 : 0);
+      return i === 0 ? Number.NaN : up(i) + up(i - 1) - (bar.close < bar.open ? 1 : 0);
+    });
+    expect(firstDifference(counted.slice(1), values.slice(1))).toBe(-1);
+    expect(compileError('//@version=3\nstudy("Test")\nplot((close > open) + 1)').message).toMatch(
+      /Cannot apply "\+" to 'series bool'/,
+    );
+  });
+
+  it('reads v4’s barssince() as ta.barssince(), and v3’s plot style as an hline’s linestyle', () => {
+    const v3 = `//@version=3
+study("Test")
+hline(0, linestyle=line)
+plot(barssince(close > open))`;
+    const v6 = `//@version=6
+indicator("Test")
+plot(ta.barssince(close > open))`;
+    expect(firstDifference(first(v3), first(v6))).toBe(-1);
+    expect(program(v3).describe([]).hlines[0]?.linestyle).toBe('solid');
+  });
+
   it('gives v4’s bgcolor() and fill() a transparency of 90 when none is given', () => {
     const background = program(`//@version=4
 study("Test")
@@ -186,5 +214,11 @@ plot(k)`;
 describe('versions', () => {
   it('reads a script without //@version as version 1, as Pine assumes', () => {
     expect(first('study("Test")\nplot(close)')).toEqual(bars.map((bar) => bar.close));
+    // The v6 reference: "Pine Script v1 has no function named indicator()".
+    for (const version of ['', '//@version=4\n']) {
+      expect(compileError(`${version}indicator("Test")\nplot(close)`).message).toBe(
+        "Could not find function or function reference 'indicator'",
+      );
+    }
   });
 });

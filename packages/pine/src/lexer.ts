@@ -158,8 +158,56 @@ const span = (line: number, column: number, endColumn: number): Span => ({
   endColumn,
 });
 
-/** The physical line without its comment, and the comment's text if any. */
-function splitComment(text: string, line: number): { code: string; comment: string | null } {
+/** Where a joined line's text came from: each piece's start in it, and its line and column. */
+interface Piece {
+  offset: number;
+  line: number;
+  column: number;
+}
+
+/** Where an offset into a joined line is in the script. */
+type Locate = (offset: number) => { line: number; column: number };
+
+function locator(pieces: readonly Piece[]): Locate {
+  return (offset) => {
+    let piece = pieces[0] as Piece;
+    for (const next of pieces) {
+      if (next.offset > offset) break;
+      piece = next;
+    }
+    return { line: piece.line, column: piece.column + offset - piece.offset };
+  };
+}
+
+/** The span of a joined line's text from `start` to `end` (exclusive). */
+function spanOf(at: Locate, start: number, end: number): Span {
+  const from = at(start);
+  const to = at(Math.max(start, end - 1));
+  return { line: from.line, column: from.column, endLine: to.line, endColumn: to.column + 1 };
+}
+
+/** The multiline string delimiter at `i` (""" or '''), if one starts there. */
+function tripleAt(text: string, i: number): string | null {
+  const c = text[i];
+  if (c !== '"' && c !== "'") return null;
+  return text.startsWith(c.repeat(3), i) ? c.repeat(3) : null;
+}
+
+/** Where the multiline string opened before `from` closes (after its delimiter), or -1. */
+function tripleEnd(text: string, from: number, triple: string): number {
+  for (let i = from; i < text.length; i++) {
+    if (text[i] === '\\') i++;
+    else if (text.startsWith(triple, i)) return i + 3;
+  }
+  return -1;
+}
+
+/** The line without its comment, and the comment's text if any. */
+function splitComment(
+  text: string,
+  at: Locate,
+  multiline: boolean,
+): { code: string; comment: string | null } {
   let quote: string | null = null;
   for (let i = 0; i < text.length; i++) {
     const c = text[i] as string;
@@ -168,13 +216,21 @@ function splitComment(text: string, line: number): { code: string; comment: stri
       else if (c === quote) quote = null;
       continue;
     }
-    if (c === '"' || c === "'") {
-      if (text.startsWith(c.repeat(3), i)) {
+    const triple = tripleAt(text, i);
+    if (triple) {
+      if (!multiline) {
         throw new PineCompileError(
-          "Multiline strings aren't supported yet",
-          span(line, i + 1, i + 4),
+          `Multiline strings (${triple}…${triple}) need //@version=6`,
+          spanOf(at, i, i + 3),
         );
       }
+      const end = tripleEnd(text, i + 3, triple);
+      // Left open, it's reported where its tokens are read.
+      if (end < 0) break;
+      i = end - 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
       quote = c;
     } else if (c === '/' && text[i + 1] === '/') {
       return { code: text.slice(0, i), comment: text.slice(i) };
@@ -183,22 +239,46 @@ function splitComment(text: string, line: number): { code: string; comment: stri
   return { code: text, comment: null };
 }
 
-function readString(code: string, start: number, line: number): { value: string; end: number } {
+/** An escape sequence's character: \n, \t and \r, else the character itself (\", \\). */
+const escaped = (next: string) =>
+  next === 'n' ? '\n' : next === 't' ? '\t' : next === 'r' ? '\r' : next;
+
+function readString(code: string, start: number, at: Locate): { value: string; end: number } {
   const quote = code[start] as string;
   let value = '';
   for (let i = start + 1; i < code.length; i++) {
     const c = code[i] as string;
     if (c === quote) return { value, end: i + 1 };
     if (c === '\\' && i + 1 < code.length) {
-      const next = code[++i] as string;
-      value += next === 'n' ? '\n' : next === 't' ? '\t' : next === 'r' ? '\r' : next;
+      value += escaped(code[++i] as string);
     } else {
       value += c;
     }
   }
+  throw new PineCompileError('This string has no closing quote', spanOf(at, start, code.length));
+}
+
+/**
+ * A multiline string (v6, April 2026 release notes): all the code between its delimiters is its
+ * text, each line break and every space of indentation included. Escape sequences read as in a
+ * one-line string: the notes' own example writes `\\n` to show `\n` (provisional, SPEC §11).
+ */
+function readMultiline(
+  code: string,
+  start: number,
+  triple: string,
+  at: Locate,
+): { value: string; end: number } {
+  let value = '';
+  for (let i = start + 3; i < code.length; i++) {
+    if (code.startsWith(triple, i)) return { value, end: i + 3 };
+    const c = code[i] as string;
+    if (c === '\\' && i + 1 < code.length) value += escaped(code[++i] as string);
+    else value += c;
+  }
   throw new PineCompileError(
-    'This string has no closing quote',
-    span(line, start + 1, code.length + 1),
+    `This multiline string has no closing ${triple}`,
+    spanOf(at, start, start + 3),
   );
 }
 
@@ -222,8 +302,13 @@ function readNumber(code: string, start: number): { text: string; float: boolean
   return { text: code.slice(start, i), float };
 }
 
-/** One physical line's tokens (its code, without the comment). */
-function tokenize(code: string, line: number, keywords: ReadonlySet<string>): Token[] {
+/** One line's tokens (its code, without the comment). */
+function tokenize(
+  code: string,
+  at: Locate,
+  keywords: ReadonlySet<string>,
+  multiline: boolean,
+): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < code.length) {
@@ -232,7 +317,6 @@ function tokenize(code: string, line: number, keywords: ReadonlySet<string>): To
       i++;
       continue;
     }
-    const column = i + 1;
     if (isIdentStart(c)) {
       let j = i + 1;
       while (j < code.length && isIdentPart(code[j] as string)) j++;
@@ -240,7 +324,7 @@ function tokenize(code: string, line: number, keywords: ReadonlySet<string>): To
       tokens.push({
         kind: keywords.has(text) ? 'keyword' : 'ident',
         text,
-        ...span(line, column, j + 1),
+        ...spanOf(at, i, j),
       });
       i = j;
       continue;
@@ -251,18 +335,19 @@ function tokenize(code: string, line: number, keywords: ReadonlySet<string>): To
         kind: float ? 'float' : 'int',
         text,
         value: Number(text),
-        ...span(line, column, i + text.length + 1),
+        ...spanOf(at, i, i + text.length),
       });
       i += text.length;
       continue;
     }
     if (c === '"' || c === "'") {
-      const { value, end } = readString(code, i, line);
+      const triple = multiline ? tripleAt(code, i) : null;
+      const { value, end } = triple ? readMultiline(code, i, triple, at) : readString(code, i, at);
       tokens.push({
         kind: 'string',
         text: code.slice(i, end),
         value,
-        ...span(line, column, end + 1),
+        ...spanOf(at, i, end),
       });
       i = end;
       continue;
@@ -277,7 +362,7 @@ function tokenize(code: string, line: number, keywords: ReadonlySet<string>): To
       ) {
         throw new PineCompileError(
           `"${code.slice(i, Math.max(j, i + 1))}" isn't a color: write #RRGGBB or #RRGGBBAA`,
-          span(line, column, j + 1),
+          spanOf(at, i, Math.max(j, i + 1)),
         );
       }
       const n = (k: number) => Number.parseInt(hex.slice(k, k + 2), 16);
@@ -286,18 +371,18 @@ function tokenize(code: string, line: number, keywords: ReadonlySet<string>): To
         kind: 'color',
         text: code.slice(i, j),
         value: packColor(n(0), n(2), n(4), 100 * (1 - alpha / 255)),
-        ...span(line, column, j + 1),
+        ...spanOf(at, i, j),
       });
       i = j;
       continue;
     }
     const op = OPERATORS.find((candidate) => code.startsWith(candidate, i));
     if (op) {
-      tokens.push({ kind: 'op', text: op, ...span(line, column, column + op.length) });
+      tokens.push({ kind: 'op', text: op, ...spanOf(at, i, i + op.length) });
       i += op.length;
       continue;
     }
-    throw new PineCompileError(`Unexpected character "${c}"`, span(line, column, column + 1));
+    throw new PineCompileError(`Unexpected character "${c}"`, spanOf(at, i, i + 1));
   }
   return tokens;
 }
@@ -313,28 +398,110 @@ function indentOf(text: string): number {
   return spaces;
 }
 
+/** A line as the lexer reads it: physical lines joined where a string runs on (below). */
+interface SourceLine {
+  text: string;
+  line: number;
+  pieces: Piece[];
+}
+
+/**
+ * The physical lines, joined where a string runs on. A multiline string (v6) takes its line
+ * breaks and indentation into its text. A one-line string left open at a line's end inside
+ * brackets goes on at the next line, the line break and the next line's indentation dropped, as
+ * TradingView's manual writes a long log message over several lines and its Pine Logs show it on
+ * one (Time, Figure 295).
+ */
+function joinLines(source: string, multiline: boolean): SourceLine[] {
+  const out: SourceLine[] = [];
+  const physical = source.split(/\r?\n/);
+  let depth = 0;
+  for (let index = 0; index < physical.length; index++) {
+    let text = physical[index] as string;
+    const line = index + 1;
+    const pieces: Piece[] = [{ offset: 0, line, column: 1 }];
+    for (;;) {
+      const end = scanLine(text, depth, multiline);
+      const more = end.quote !== null && index + 1 < physical.length;
+      if (more && end.quote?.length === 3) {
+        index++;
+        text += '\n';
+        pieces.push({ offset: text.length, line: index + 1, column: 1 });
+        text += physical[index] as string;
+        continue;
+      }
+      if (!more || end.depth === 0) {
+        depth = end.depth;
+        break;
+      }
+      index++;
+      const next = physical[index] as string;
+      const indent = (/^\s*/.exec(next)?.[0] ?? '').length;
+      pieces.push({ offset: text.length, line: index + 1, column: indent + 1 });
+      text += next.slice(indent);
+    }
+    out.push({ text, line, pieces });
+    // Lines joined to this one leave blanks, so the next keeps its number.
+    while (out.length < index + 1) {
+      const blank = out.length + 1;
+      out.push({ text: '', line: blank, pieces: [{ offset: 0, line: blank, column: 1 }] });
+    }
+  }
+  return out;
+}
+
+/**
+ * Where a line leaves its brackets and strings: the open quote, if any (""" or ''' for a
+ * multiline string), and the depth.
+ */
+function scanLine(
+  text: string,
+  depth: number,
+  multiline: boolean,
+): { quote: string | null; depth: number } {
+  let quote: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] as string;
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    const triple = multiline ? tripleAt(text, i) : null;
+    if (triple) {
+      const end = tripleEnd(text, i + 3, triple);
+      if (end < 0) return { quote: triple, depth };
+      i = end - 1;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '/' && text[i + 1] === '/') break;
+    else if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+  }
+  return { quote, depth };
+}
+
 /**
  * Splits a script into its logical lines, after comments and Pine's line wrapping. A script with
  * no `//@version` is read as `fallbackVersion` (1, as Pine assumes; tests of v6 code pass 6).
  */
 export function lex(source: string, fallbackVersion = 1): Lexed {
-  const physical = source.split(/\r?\n/);
   const lines: LogicalLine[] = [];
   const annotations: { line: number; text: string }[] = [];
   const version = versionIn(source);
   const keywords = keywordsOf(version ?? fallbackVersion);
+  const multiline = (version ?? fallbackVersion) >= 6;
   let current: LogicalLine | null = null;
   let depth = 0;
 
-  physical.forEach((text, index) => {
-    const line = index + 1;
-    const { code, comment } = splitComment(text, line);
+  for (const { text, line, pieces } of joinLines(source, multiline)) {
+    const at = locator(pieces);
+    const { code, comment } = splitComment(text, at, multiline);
     if (comment?.startsWith('//@') && !/^\/\/@version/.test(comment)) {
       annotations.push({ line, text: comment.slice(3) });
     }
-    if (code.trim() === '') return;
+    if (code.trim() === '') continue;
     const indent = indentOf(code);
-    const tokens = tokenize(code, line, keywords);
+    const tokens = tokenize(code, at, keywords, multiline);
     const last = current?.tokens.at(-1);
     const continues =
       current !== null &&
@@ -361,6 +528,23 @@ export function lex(source: string, fallbackVersion = 1): Lexed {
       if (token.text === '(' || token.text === '[') depth++;
       else if (token.text === ')' || token.text === ']') depth = Math.max(0, depth - 1);
     }
-  });
+  }
+  for (const logical of lines) nameQualifiers(logical.tokens);
   return { lines, version, annotations };
+}
+
+/** The qualifier words, which only qualify a type that follows them. */
+const QUALIFIER_WORDS = new Set(['const', 'simple', 'series']);
+
+/**
+ * `const`, `simple` and `series` qualify a type only when one follows (`series float x`); else
+ * they're names, as TradingView's manual uses them: `series = close >= open ? close : na` (FAQ,
+ * "Query the last non-na value") and `pine_alma(series, windowsize, …)` (ta.alma's reference).
+ */
+function nameQualifiers(tokens: Token[]): void {
+  tokens.forEach((token, i) => {
+    if (token.kind !== 'keyword' || !QUALIFIER_WORDS.has(token.text)) return;
+    const next = tokens[i + 1];
+    if (next?.kind !== 'ident') token.kind = 'ident';
+  });
 }

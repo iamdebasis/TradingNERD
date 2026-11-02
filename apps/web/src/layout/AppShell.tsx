@@ -14,7 +14,9 @@ import { useLogos } from '../logos/LogoContext';
 import { LogoDialog } from '../logos/LogoDialog';
 import { OlderCapsDialog } from '../olderCaps/OlderCapsDialog';
 import { librariesStore } from '../pine/librariesStore';
+import { logsStore, useLogs } from '../pine/logsStore';
 import { PineEditor } from '../pine/PineEditor';
+import { PineLogs } from '../pine/PineLogs';
 import { pineStore, usePine } from '../pine/pineStore';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { searchKey } from '../search/searchPrefs';
@@ -24,7 +26,7 @@ import { Watchlist } from '../watchlist/Watchlist';
 import styles from './AppShell.module.css';
 import { type RightPanel, RightToolbar } from './RightToolbar';
 import { Splitter } from './Splitter';
-import { usePanelWidth } from './usePanelWidth';
+import { usePanelHeight, usePanelWidth } from './usePanelWidth';
 import { useWatchlistWidth } from './useWatchlistWidth';
 import { PINE_DEFAULT_WIDTH, PINE_MIN_WIDTH } from './watchlistWidth';
 
@@ -34,6 +36,8 @@ export const LAST_SYMBOL_KEY = 'tn.chart.symbol';
 /** Whether the watchlist panel is open (the right toolbar's Watchlist button). */
 export const WATCHLIST_OPEN_KEY = 'tn.layout.watchlistOpen';
 const PINE_WIDTH_KEY = 'tn.layout.pineWidth';
+const PINE_HEIGHT_KEY = 'tn.layout.pineHeight';
+const LOGS_WIDTH_KEY = 'tn.layout.logsWidth';
 
 export function AppShell({ route }: { route: ChartRoute }) {
   const gateway = useGateway();
@@ -42,10 +46,30 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const watchlist = useWatchlistWidth(workspaceRef);
   const pineWidth = usePanelWidth(workspaceRef, PINE_WIDTH_KEY, PINE_DEFAULT_WIDTH, PINE_MIN_WIDTH);
   const pine = usePine();
+  const logs = useLogs();
+  const columnRef = useRef<HTMLDivElement>(null);
+  // The Pine Editor below the chart (Move script to bottom): its height, as chosen (provisional).
+  const pineHeight = usePanelHeight(columnRef, PINE_HEIGHT_KEY, 320, 160);
+  const logsWidth = usePanelWidth(workspaceRef, LOGS_WIDTH_KEY, 420, 280);
   const [watchlistOpen, setWatchlistOpen] = useState(() => readJson(WATCHLIST_OPEN_KEY) !== false);
-  // One panel at a time on the right: the Pine Editor over the watchlist while it's open.
-  const rightPanel: RightPanel | null = pine.open ? 'pine' : watchlistOpen ? 'watchlist' : null;
-  const panelWidth = rightPanel === 'pine' ? pineWidth : watchlist;
+  const pineRight = pine.open && pine.dock === 'right';
+  const pineBottom = pine.open && pine.dock === 'bottom';
+  // One panel at a time on the right: Pine Logs, else the Pine Editor docked there, else the
+  // watchlist.
+  const rightPanel: RightPanel | 'logs' | null = logs.open
+    ? 'logs'
+    : pineRight
+      ? 'pine'
+      : watchlistOpen
+        ? 'watchlist'
+        : null;
+  const panelWidth =
+    rightPanel === 'pine' ? pineWidth : rightPanel === 'logs' ? logsWidth : watchlist;
+  // The toolbar lights the watchlist when it shows, and Pine wherever the editor is.
+  const lit: RightPanel[] = [
+    ...(rightPanel === 'watchlist' ? (['watchlist'] as const) : []),
+    ...(pine.open ? (['pine'] as const) : []),
+  ];
   const [resolution, setResolution] = useState(route.resolution);
   const [symbol, setSymbol] = useState(route.symbol);
   const [prompt, setPrompt] = useState<string | null>(null);
@@ -139,6 +163,9 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const previewWidth = (width: number) => {
     workspaceRef.current?.style.setProperty('--panel-width', `${width}px`);
   };
+  const previewHeight = (height: number) => {
+    columnRef.current?.style.setProperty('--bottom-height', `${height}px`);
+  };
 
   const showWatchlist = (open: boolean) => {
     setWatchlistOpen(open);
@@ -146,13 +173,28 @@ export function AppShell({ route }: { route: ChartRoute }) {
   };
   const togglePanel = (panel: RightPanel) => {
     if (panel === 'pine') {
-      pineStore.setOpen(!pine.open);
-    } else if (pine.open) {
-      pineStore.setOpen(false);
-      showWatchlist(true);
+      // The editor docked behind Pine Logs comes forward; otherwise Pine opens or closes it.
+      if (pineRight && logs.open) logsStore.close();
+      else pineStore.setOpen(!pine.open);
+    } else if (rightPanel === 'watchlist') {
+      showWatchlist(false);
     } else {
-      showWatchlist(!watchlistOpen);
+      // The watchlist takes the right from Pine Logs and from the editor docked there.
+      logsStore.close();
+      if (pineRight) pineStore.setOpen(false);
+      showWatchlist(true);
     }
+  };
+
+  /**
+   * A Pine Logs entry's Source code: its script in the editor at its line. Below the chart the
+   * editor shows beside the logs (as Figure 350); on the right it takes their place.
+   */
+  const showSource = (id: string, line: number) => {
+    const indicator = indicatorStore.get().list.find((item) => item.id === id);
+    if (!indicator) return;
+    pineStore.showLine(indicator, line);
+    if (pineStore.get().dock === 'right') logsStore.close();
   };
 
   return (
@@ -194,19 +236,44 @@ export function AppShell({ route }: { route: ChartRoute }) {
           className={styles.workspace}
           style={{ '--panel-width': `${panelWidth.width}px` } as CSSProperties}
         >
-          <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
-            <ChartPane symbol={symbol} resolution={resolution} onInfo={setChartInfo} />
-            {prompt !== null && (
-              <IntervalPrompt
-                initial={prompt}
-                onSubmit={(next) => {
-                  setPrompt(null);
-                  if (next !== resolution) changeInterval(next);
-                }}
-                onClose={() => setPrompt(null)}
-              />
+          <div
+            ref={columnRef}
+            className={styles.column}
+            style={{ '--bottom-height': `${pineHeight.width}px` } as CSSProperties}
+          >
+            <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
+              <ChartPane symbol={symbol} resolution={resolution} onInfo={setChartInfo} />
+              {prompt !== null && (
+                <IntervalPrompt
+                  initial={prompt}
+                  onSubmit={(next) => {
+                    setPrompt(null);
+                    if (next !== resolution) changeInterval(next);
+                  }}
+                  onClose={() => setPrompt(null)}
+                />
+              )}
+            </main>
+            {pineBottom && (
+              <>
+                <Splitter
+                  axis="y"
+                  label="Resize Pine Editor"
+                  width={pineHeight.width}
+                  min={pineHeight.min}
+                  max={pineHeight.max}
+                  onPreview={previewHeight}
+                  onCommit={pineHeight.commit}
+                />
+                <section
+                  className={`${styles.panel} ${styles.bottom}`}
+                  aria-label="Pine Editor panel"
+                >
+                  <PineEditor onClose={() => pineStore.setOpen(false)} />
+                </section>
+              </>
             )}
-          </main>
+          </div>
           {rightPanel && (
             <Splitter
               key={rightPanel}
@@ -231,6 +298,11 @@ export function AppShell({ route }: { route: ChartRoute }) {
               <PineEditor onClose={() => pineStore.setOpen(false)} />
             </aside>
           )}
+          {rightPanel === 'logs' && (
+            <aside className={`${styles.panel} ${styles.side}`} aria-label="Pine Logs panel">
+              <PineLogs onClose={() => logsStore.close()} onSource={showSource} />
+            </aside>
+          )}
           <aside
             className={`${styles.panel} ${styles.side}`}
             aria-label="Watchlist"
@@ -249,7 +321,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
             />
           </aside>
         </div>
-        <RightToolbar open={rightPanel} onToggle={togglePanel} />
+        <RightToolbar open={lit} onToggle={togglePanel} />
       </div>
     </div>
   );

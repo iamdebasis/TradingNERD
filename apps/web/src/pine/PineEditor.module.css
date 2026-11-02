@@ -379,3 +379,10 @@
   line-height: 16px;
   text-align: center;
 }
+
+/* The More menu opens to the left of its button, at the panel's edge. */
+.menuRight {
+  right: 0;
+  left: auto;
+  min-width: 180px;
+}

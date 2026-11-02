@@ -1,0 +1,374 @@
+/*
+ * TradingView's Pine Logs pane (Pine docs, Debugging, Figures 347 to 358): the script's title and
+ * Close, then Pause on the left and Search, Start date and Filter levels on the right; entries in
+ * a monospace font, gray, orange or red by level, matches in blue. Its sizes follow our Pine
+ * Editor panel and its colors TradingView's palette; both are provisional until measured
+ * (docs/SPEC.md §11).
+ */
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: #000000;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.top,
+.tools {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 12px;
+}
+
+.top {
+  height: 40px;
+}
+
+.tools {
+  height: 36px;
+  padding-left: 8px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.pickerWrap,
+.menuWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.title:hover:not(:disabled) {
+  background: var(--color-gutter);
+}
+
+.title:disabled {
+  cursor: default;
+}
+
+.iconButton {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #a1a1a1;
+  cursor: pointer;
+}
+
+.iconButton:hover,
+.iconButton[aria-expanded="true"] {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+/* An active Search or Start date shows in blue (Figure 353). */
+.iconButton[aria-pressed="true"] {
+  color: var(--color-accent);
+}
+
+.popup {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+}
+
+.right {
+  right: 0;
+  left: auto;
+  min-width: 150px;
+}
+
+.heading {
+  padding: 6px 16px 4px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.option {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--color-gutter);
+}
+
+/* The chosen script, in blue (Figure 352). */
+.option[aria-selected="true"] {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.check:hover {
+  background: var(--color-gutter);
+}
+
+.search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  margin: 0 8px 4px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--color-separator);
+  color: #a1a1a1;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+}
+
+.searchInput[aria-invalid="true"] {
+  color: #f23645;
+}
+
+.tags {
+  display: flex;
+  flex: none;
+  padding: 4px 12px 8px;
+}
+
+/* The start date's tag above the entries (Figure 357). */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--color-separator);
+  border-radius: 14px;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.tagClear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #a1a1a1;
+  cursor: pointer;
+}
+
+.tagClear:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.entries {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 8px;
+  overflow-y: auto;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.entry {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 3px 12px;
+  /* Entries off screen skip layout: a script may keep 10,000 of them. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 24px;
+}
+
+.entry:hover {
+  background: var(--color-gutter);
+}
+
+/* Each level's color (Pine docs: info gray, warning orange, error red). */
+.entry[data-level="info"] {
+  color: #9598a1;
+}
+
+.entry[data-level="warning"] {
+  color: #ff9800;
+}
+
+.entry[data-level="error"] {
+  color: #f23645;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A search's match, in blue (Figure 353). */
+.match {
+  background: transparent;
+  color: #2962ff;
+}
+
+.actions {
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+
+.entry:hover .actions,
+.entry:focus-within .actions {
+  display: flex;
+}
+
+.rowButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #a1a1a1;
+  cursor: pointer;
+}
+
+.rowButton:hover {
+  background: var(--color-separator);
+  color: var(--color-text);
+}
+
+.note {
+  margin: 12px;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+/* Start date (Figure 356): a popup under the toolbar. */
+.startDate {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 4px);
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 260px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+  font-family: inherit;
+}
+
+.startTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.startFields {
+  display: flex;
+  gap: 8px;
+}
+
+.field {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--color-separator);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  color-scheme: dark;
+}
+
+.field:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.setButton {
+  height: 34px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

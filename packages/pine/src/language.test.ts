@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { closes, compileError, indicator, plots, runScript, series } from './testing.ts';
+import { closes, compileError, indicator, plots, program, runScript, series } from './testing.ts';
+import { COLORS, withTransparency } from './values.ts';
 
 /** Ten bars with these closes; each bar opens at the close before. */
 const BARS = closes([10, 11, 12, 11, 13, 14, 12, 15, 16, 14]);
@@ -115,6 +116,20 @@ describe('Pine structures (Pine docs, Conditional structures and Loops)', () => 
 
   it('runs a while loop while its condition holds', () => {
     expect(series('k = 1\nwhile k < 100\n    k *= 3\nplot(k)', ONE)).toEqual([243]);
+  });
+
+  it('gives a for…in loop its last iteration’s value, as the reference’s example returns it', () => {
+    // The v6 reference's for...in: how many of the bar's OHLC values are above a value.
+    const body = `values = array.from(1.0, 5.0, 3.0, 8.0)
+countAbove(value, array) =>
+    int result = 0
+    for item in array
+        if item > value
+            result += 1
+        result
+plot(countAbove(2.5, values))
+plot(countAbove(2.5, array.new<float>()))`;
+    expect(plots(indicator(body), ONE).map((values) => values[0])).toEqual([3, NA]);
   });
 });
 
@@ -252,8 +267,42 @@ describe('Pine’s compile errors, in its own words where it has them (Pine docs
       /must declare indicator\(\) or library\(\)/,
     );
     expect(compileError('//@version=6\nindicator("x")\na = 1').message).toMatch(
-      /must draw something/,
+      /must have an output/,
     );
+  });
+
+  it('runs a script whose only output is its logs, as the manual’s debugging examples do', () => {
+    const run = runScript(
+      indicator('if barstate.isfirst\n    log.info("first")\n    log.warning("careful")'),
+      closes([1, 2, 3]),
+    );
+    expect(run.error).toBeNull();
+    expect(run.logs.map((entry) => [entry.level, entry.message])).toEqual([
+      ['info', 'first'],
+      ['warning', 'careful'],
+    ]);
+    // Each says where it came from: its bar and that bar's time, and its line for Source code.
+    expect(run.logs[0]).toMatchObject({ bar: 0, line: 4, realtime: false });
+    expect(run.logs[0]?.time).toBe((closes([1])[0]?.time ?? 0) * 1000);
+    expect(run.logging).toBe(true);
+    expect(run.logsWritten).toBe(2);
+    expect(runScript(indicator('plot(close)'), closes([1])).logging).toBe(false);
+  });
+
+  it('joins a string wrapped inside parentheses, its line break and indentation dropped', () => {
+    // TradingView's manual writes a long log over several lines; its Pine Logs show each
+    // message line once, without the indentation (Time, Figure 295).
+    const run = runScript(
+      indicator(`if barstate.isfirst
+    log.info(
+         "a: {0}\\n
+         b: {1}",
+         1, 2
+     )
+plot(close)`),
+      closes([1, 2]),
+    );
+    expect(run.logs[0]?.message).toBe('a: 1\nb: 2');
   });
 
   it('says plainly what tradingNerd doesn\u2019t run yet, without milestone codes', () => {
@@ -275,6 +324,16 @@ describe('Pine’s compile errors, in its own words where it has them (Pine docs
   });
 });
 
+describe('A variable declared simple (the v6 reference, simple)', () => {
+  it('takes a simple value, and refuses a series one in v6', () => {
+    const body = 'simple float myVar = 5.0\nmyVar := close\nplot(myVar)';
+    expect(compileError(indicator(body)).message).toBe(
+      '"myVar" is declared simple, so it can\'t take a series value',
+    );
+    expect(() => program(indicator('simple float x = 5.0\nx := 6.0\nplot(x)'))).not.toThrow();
+  });
+});
+
 describe('Pine’s runtime errors (Pine docs, Errors)', () => {
   it('stop the script with runtime.error()’s message, on its bar', () => {
     const run = runScript(
@@ -290,5 +349,115 @@ describe('Pine’s runtime errors (Pine docs, Errors)', () => {
       /Invalid value of the 'length' argument \(-2\) in the 'ta.sma' function/,
     );
     expect(run.error?.bar).toBe(0);
+  });
+
+  it('stop on a negative history offset; an na one reads na, as HalfTrend needs', () => {
+    // HalfTrend reads high[math.abs(ta.highestbars(amplitude))], na over its first bars.
+    const na = 'n = int(na)\nx = close * 2\nplot(close[n] + x[n] + (close + 1)[n])';
+    expect(series(na, ONE)).toEqual([NA]);
+    const run = runScript(indicator('n = bar_index - 1\nplot(close[n])'), BARS);
+    expect(run.error).toMatchObject({
+      message: expect.stringMatching(/Invalid history reference \[-1\]/),
+      bar: 0,
+    });
+  });
+});
+
+describe('An if’s or a switch’s value known before the bars (the v6 migration guide)', () => {
+  // The guide's "`na` and unique types demo", cut to two options.
+  const STYLES = `string inputStyle = input.string("Area", "Plot style", options = ["Area", "Columns"])
+selectedPlotStyle = switch inputStyle
+    "Area"    => plot.style_area
+    "Columns" => plot.style_columns
+plot(close, style = selectedPlotStyle)
+cross = input.bool(true, "Crosses")
+hundredStyle = if cross
+    plot.style_cross
+plot(100, style = hundredStyle)`;
+
+  it('gives an input plot style from a switch or an if on an input, na being a line in v5', () => {
+    const p = program(`//@version=5\nindicator("x")\n${STYLES}`);
+    expect(p.describe([]).plots.map((plot) => plot.style)).toEqual(['area', 'cross']);
+    expect(p.describe(['Columns', false]).plots.map((plot) => plot.style)).toEqual([
+      'columns',
+      'line',
+    ]);
+  });
+
+  it('needs a default block and an else block in v6, as the value could be na otherwise', () => {
+    expect(compileError(indicator(STYLES))).toMatchObject({
+      message: expect.stringMatching(/A switch that returns a 'plot_style' must have a default/),
+      line: 4,
+    });
+    const ifOnly = STYLES.replace('"Columns" => plot.style_columns', '=> plot.style_columns');
+    expect(compileError(indicator(ifOnly)).message).toMatch(
+      /An if that returns a 'plot_style' must have an else block/,
+    );
+  });
+
+  it('takes the strongest qualifier of its parts: simple on the timeframe, series on a close', () => {
+    const ema = (cond: string) =>
+      indicator(`len = if ${cond}\n    14\nelse\n    20\nplot(ta.ema(close, len))`);
+    expect(() => program(ema('timeframe.isdaily'))).not.toThrow();
+    expect(compileError(ema('close > 10')).message).toMatch(/'series int' type was used/);
+  });
+
+  it('gives a function’s result its arguments’ qualifier, each call its own', () => {
+    // The manual's fillColor(color.lime) for a fill between hlines (Fills between levels), and a
+    // call inside a function, which is one call site for every call of that function.
+    const p = program(
+      indicator(`h1 = hline(1)
+h2 = hline(2)
+fillColor(color col) =>
+    color.new(col, 90)
+fill(h1, h2, fillColor(color.lime))
+lw(x) => x
+twice(x) =>
+    y = lw(x) * 2
+    y
+plot(close, linewidth = twice(1))
+plot(close, linewidth = twice(input.int(2)))`),
+    );
+    expect(p.describe([]).fills[0]?.color).toBe(withTransparency(COLORS.lime as number, 90));
+    // The v6 reference's `const` example: a function ending in a const declaration.
+    const titled = program(
+      indicator(`concatStrings(const string x, const string y) =>
+    const string result = x + y
+const string myTitle = concatStrings("My ", "Plot")
+plot(close, myTitle)`),
+    );
+    expect(titled.describe([]).plots[0]?.title).toBe('My Plot');
+    expect(p.describe([]).plots.map((plot) => plot.linewidth)).toEqual([2, 4]);
+    expect(p.describe([3]).plots.map((plot) => plot.linewidth)).toEqual([2, 6]);
+  });
+});
+
+describe('Two ints divided (Pine docs: the v6 migration guide; Arrays; Colors)', () => {
+  it('keep the fraction but stay an int, which an int parameter takes the floor of', () => {
+    const bars = closes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    // The manual's "Distance from high": array.get(fillColors, fillNo) with fillNo from int
+    // division, "the equivalent of floor(fillNo)"; and ta.atr(lengthInput / 5) (CCI DC).
+    const values = plots(
+      indicator(`n = input.int(5)
+half = n / 2
+arr = array.from(10, 20, 30)
+plot(half)
+plot(arr.get(n / 2))
+plot(ta.sma(close, n / 2))
+int fromDivision = n / 2
+plot(fromDivision)`),
+      bars,
+    );
+    expect(values[0]?.[9]).toBe(2.5);
+    expect(values[1]?.[9]).toBe(30);
+    // A length of 2.5 is 2: the mean of the last two closes.
+    expect(values[2]?.[9]).toBe(9.5);
+    expect(values[3]?.[9]).toBe(2.5);
+  });
+
+  it('divide as integers when both are const in v5, as the guide says', () => {
+    const v5 = (body: string) => `//@version=5\nindicator("x")\n${body}`;
+    expect(plots(v5('plot(5 / 2)'), closes([1]))[0]?.[0]).toBe(2);
+    expect(plots(indicator('plot(5 / 2)'), closes([1]))[0]?.[0]).toBe(2.5);
   });
 });

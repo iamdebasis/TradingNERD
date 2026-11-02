@@ -14,6 +14,7 @@ import {
   type Span,
 } from './diagnostics.ts';
 import { upgrade } from './dialect.ts';
+import { type ConversionEdit, type EditSink, repeatedArg } from './edits.ts';
 import { parse } from './parser.ts';
 import { Runtime, type Slot } from './runtime.ts';
 import {
@@ -35,8 +36,10 @@ import {
   isNumeric,
   isNumericSlot,
   isReferenceType,
+  isUniqueType,
   maxQual,
   naOf,
+  QUAL_NAMES,
   type Qual,
   SERIES,
   SIMPLE,
@@ -216,6 +219,13 @@ interface Var {
   span: Span;
   /** Where it was declared, for functions that may only see what came before them. */
   line: number;
+  /**
+   * A const or input variable's value, worked out before the bars from its declaration (or a
+   * parameter's from its argument): each call of a function declares its own.
+   */
+  fold?: Fold;
+  /** Declared `simple`: v6 refuses to reassign it a series value (the v6 reference, simple). */
+  simpleOnly?: boolean;
 }
 
 export class Scope {
@@ -297,6 +307,8 @@ export type LibraryResolver = (publisher: string, name: string, version: number)
 
 export interface CompileOptions {
   resolveLibrary?: LibraryResolver;
+  /** Collects the changes Convert code to v6 makes to a v5 script (convert.ts). */
+  edits?: EditSink;
 }
 
 /** A compiled statement: runs it and gives its value (a block's value is its last statement's). */
@@ -307,6 +319,8 @@ interface CompiledBlock {
   base: Base;
   items?: Base[];
   qual: Qual;
+  /** A block whose value is const or input: its value, worked out before the bars. */
+  fold?: Fold;
 }
 
 /** Everything one compile pass makes. */
@@ -322,6 +336,7 @@ export interface CompiledProgram {
   warnings: PineDiagnostic[];
   /** Each declaration's strongest qualifier this pass found. */
   quals: Map<object, Qual>;
+  logging: boolean;
 }
 
 /** Names the script reads history of (`x[k]`): their variables keep every value. */
@@ -440,6 +455,13 @@ export class Compiler {
   readonly hlines: HlineDef[] = [];
   readonly fills: FillDef[] = [];
   readonly bgcolors: BgcolorDef[] = [];
+  /**
+   * Outputs that draw nothing: log.*(), alert() and alertcondition() calls. A script with only
+   * these runs, as TradingView's manual's log-only examples do (Debugging; Time, Figure 295).
+   */
+  otherOutputs = 0;
+  /** Calls log.info(), log.warning() or log.error() somewhere (the Pine Logs pane lists it). */
+  logging = false;
   indicator: IndicatorDecl | null = null;
   readonly warnings: PineDiagnostic[] = [];
   readonly quals = new Map<object, Qual>();
@@ -456,6 +478,8 @@ export class Compiler {
   private readonly calling: string[] = [];
   /** How many loops the code being compiled is inside (in the function it's in). */
   private loops = 0;
+  /** The expression of the statement being compiled, whose value nobody reads. */
+  private unusedValue: Expr | null = null;
   private readonly script: Script;
   private readonly options: CompileOptions;
   /** The module whose code is being compiled (a library's, inside its functions). */
@@ -495,9 +519,21 @@ export class Compiler {
       this.fail('A script must declare indicator() or library()', first);
     }
     const decl = this.indicator as IndicatorDecl;
-    if (!decl.library && this.plots.length + this.bgcolors.length + this.hlines.length === 0) {
+    // "Each library must have at least one exported function or user-defined type (UDT)" (the
+    // v6 reference, export); an exported enum is one too.
+    const exports = this.script.statements.some(
+      (stmt) =>
+        (stmt.kind === 'func' || stmt.kind === 'typeDecl' || stmt.kind === 'enumDecl') &&
+        stmt.exported,
+    );
+    if (decl.library && !exports) {
+      this.fail('A library must export at least one function or type', decl.span);
+    }
+    const outputs =
+      this.plots.length + this.bgcolors.length + this.hlines.length + this.otherOutputs;
+    if (!decl.library && outputs === 0) {
       this.fail(
-        'An indicator must draw something: plot(), hline(), fill(), bgcolor() or another output',
+        'An indicator must have an output: plot(), hline(), fill(), bgcolor(), a log or an alert',
         decl.span,
       );
     }
@@ -514,6 +550,7 @@ export class Compiler {
       indicator: decl,
       warnings: this.warnings,
       quals: this.quals,
+      logging: this.logging,
     };
   }
 
@@ -700,6 +737,16 @@ export class Compiler {
     if (this.strict) this.warnings.push({ severity: 'warning', message, ...span });
   }
 
+  /** Whether the code being compiled is the script's own, not an imported library's. */
+  get inScript(): boolean {
+    return this.module?.key === '';
+  }
+
+  /** Records a change Convert code to v6 makes here, in the script's own v5 code. */
+  convertEdit(edit: ConversionEdit): void {
+    if (this.version === 5 && this.inScript) this.options.edits?.add(edit);
+  }
+
   /** The script's text at a span on one line, for messages that quote it. */
   text(span: Span): string {
     if (span.line !== span.endLine) return '…';
@@ -762,7 +809,13 @@ export class Compiler {
               for (let i = 0; i < count; i++) value = (runs[i] as Run)(rt);
               return value;
             };
-    return { run, base: last.base, items: last.items, qual: last.qual };
+    return {
+      run,
+      base: last.base,
+      items: last.items,
+      qual: last.qual,
+      fold: last.fold,
+    };
   }
 
   private block(block: Block, parent: Scope, kind: 'local' | 'function' = 'local'): CompiledBlock {
@@ -801,8 +854,10 @@ export class Compiler {
         };
       }
       case 'expr': {
+        // An if or a switch on a line of its own: nothing reads its value.
+        this.unusedValue = stmt.expr;
         const c = this.expr(stmt.expr, scope);
-        return { run: c.ev, base: c.base, items: c.items, qual: c.qual };
+        return { run: c.ev, base: c.base, items: c.items, qual: c.qual, fold: c.fold };
       }
     }
   }
@@ -891,13 +946,16 @@ export class Compiler {
       stmt.mode,
       stmt.qualifier === 'const',
     );
-    if (value.fold && v.qual <= INPUT) this.registerFold(stmt, value.fold);
+    if (v.qual <= INPUT) v.fold = value.fold;
+    if (stmt.qualifier === 'simple' && this.version >= 6) v.simpleOnly = true;
     const slot = v.slot;
     const cast = castTo(value, base);
     return {
       run: slot.mode ? (rt) => slot.push(slot.kept ? null : cast(rt)) : (rt) => slot.push(cast(rt)),
       base,
       qual: v.qual,
+      // A function ending in a declaration gives its value (the reference's `const` example).
+      fold: v.fold,
     };
   }
 
@@ -983,6 +1041,12 @@ export class Compiler {
     if (!v) this.fail(`Undeclared identifier "${name}"`, target.span);
     if (v.isConst) this.fail(`"${name}" is const: it can't be reassigned`, target.span);
     const value = this.expr(stmt.value, scope);
+    if (v.simpleOnly && value.qual > SIMPLE) {
+      this.fail(
+        `"${name}" is declared simple, so it can't take a ${QUAL_NAMES[value.qual]} value`,
+        stmt.value.span,
+      );
+    }
     // A variable reassigned inside a block, or a var reassigned at all, changes from bar to bar:
     // it's a series from then on; elsewhere it takes the value's qualifier (Pine docs, Qualifiers).
     this.raise(v.key, scope.global && !v.slot.mode ? value.qual : SERIES);
@@ -1209,7 +1273,7 @@ export class Compiler {
       base,
       qual: v.qual,
       ev: base === 'bool' ? () => slot.get() === true : () => slot.get() ?? na,
-      fold: v.qual <= INPUT ? (env) => this.foldVar(v, env) : undefined,
+      fold: v.qual <= INPUT ? v.fold : undefined,
       span,
     };
   }
@@ -1302,24 +1366,13 @@ export class Compiler {
     };
   }
 
-  /** Const and input variables are worked out from their declaration. */
-  private readonly folds = new Map<object, (env: FoldEnv) => Value>();
-
-  registerFold(key: object, fold: (env: FoldEnv) => Value): void {
-    this.folds.set(key, fold);
-  }
-
-  private foldVar(v: Var, env: FoldEnv): Value {
-    const fold = this.folds.get(v.key);
-    if (!fold) throw new PineCompileError('This value is only known on the chart', v.span);
-    return fold(env);
-  }
-
   /** A value where a bool is needed: v5 and older cast numbers (0 and na are false). */
   toBool(c: Compiled): Compiled {
     if (c.base === 'bool') return c;
     if (c.base === 'na') return { ...c, base: 'bool', ev: () => false, fold: () => false };
     if (this.version <= 5 && isNumeric(c.base)) {
+      // v6 asks for the cast: "Wrap the numeric value with the bool() function" (v6 guide).
+      this.convertEdit({ span: c.span, before: 'bool(', after: ')' });
       const ev = c.ev;
       const fold = c.fold;
       const cast = (x: Value) => !Number.isNaN(x as number) && x !== 0;
@@ -1350,6 +1403,7 @@ export class Compiler {
         span: expr.span,
       };
     }
+    operand = this.numberOfBool(operand);
     const ev = operand.ev;
     const fold = operand.fold;
     if (!isNumeric(operand.base)) {
@@ -1417,7 +1471,27 @@ export class Compiler {
     };
   }
 
-  binary(op: string, left: Compiled, right: Compiled, span: Span): Compiled {
+  /**
+   * v1 and v2 read a bool as a number in arithmetic: v3 forbade it (the manual's "Math
+   * operations with booleans are forbidden", whose v2 example counts rising bars as s + s1 + s2,
+   * true 1 and false 0).
+   */
+  private numberOfBool(c: Compiled): Compiled {
+    if (this.version > 2 || c.base !== 'bool') return c;
+    const ev = c.ev;
+    const fold = c.fold;
+    return {
+      ...c,
+      base: 'int',
+      ev: (rt) => (ev(rt) === true ? 1 : 0),
+      fold: fold && ((env) => (fold(env) === true ? 1 : 0)),
+    };
+  }
+
+  binary(op: string, leftRaw: Compiled, rightRaw: Compiled, span: Span): Compiled {
+    const equality = op === '==' || op === '!=';
+    const left = equality ? leftRaw : this.numberOfBool(leftRaw);
+    const right = equality ? rightRaw : this.numberOfBool(rightRaw);
     const qual = maxQual(left.qual, right.qual);
     const a = left.ev;
     const b = right.ev;
@@ -1532,8 +1606,13 @@ export class Compiler {
         };
       case '/':
         // v5 and older divided two const ints as integers (v6 guide: Fractional division of
-        // constants); otherwise division by zero is na and ints divide to a fraction.
+        // constants); otherwise division by zero is na and ints divide to a fraction. Two ints
+        // stay an "int" all the same, its value keeping the fraction: TradingView's manual passes
+        // such a value as array.get()'s index, "the equivalent of floor(fillNo)" (Arrays), and as
+        // ta.atr()'s length (Colors), so an int parameter takes its floor (Args.int).
         if (this.version <= 5 && ints && qual === CONST) {
+          // "wrap the division with the int() function" to keep the int (v6 guide).
+          this.convertEdit({ span, before: 'int(', after: ')' });
           return {
             base: 'int',
             qual,
@@ -1543,7 +1622,7 @@ export class Compiler {
           };
         }
         return {
-          base: 'float',
+          base: ints ? 'int' : 'float',
           qual,
           ev: (rt) => divide(x(rt), y(rt)),
           fold: both((p, q) => divide(p as number, q as number)).fold,
@@ -1617,7 +1696,8 @@ export class Compiler {
           qual: SERIES,
           ev: (rt) => {
             const n = Math.floor(k(rt) as number);
-            if (!(n >= 0)) throw historyError(n, expr.span);
+            if (Number.isNaN(n)) return na;
+            if (n < 0) throw historyError(n, expr.span);
             const value = slot.back(n);
             return value === undefined || value === null ? na : value;
           },
@@ -1646,6 +1726,8 @@ export class Compiler {
         expr.span,
       );
     }
+    // "Remove any [] operators used with literals or constants" (v6 guide).
+    if (target.literal) this.convertEdit({ span: expr.span, replace: this.text(target.span) });
     const slot = this.rt.slot(null, true, isNumericSlot(target.base));
     const ev = target.ev;
     const na = naOf(target.base);
@@ -1655,7 +1737,8 @@ export class Compiler {
       ev: (rt) => {
         slot.push(ev(rt));
         const n = Math.floor(k(rt) as number);
-        if (!(n >= 0)) throw historyError(n, expr.span);
+        if (Number.isNaN(n)) return na;
+        if (n < 0) throw historyError(n, expr.span);
         const value = slot.back(n);
         return value === undefined || value === null ? na : value;
       },
@@ -1664,28 +1747,75 @@ export class Compiler {
   }
 
   private ifStructure(expr: Extract<Expr, { kind: 'if' }>, scope: Scope): Compiled {
-    const conds = expr.branches.map((branch) => this.condition(this.expr(branch.cond, scope)).ev);
+    const used = this.unusedValue !== expr;
+    const conds = expr.branches.map((branch) => this.condition(this.expr(branch.cond, scope)));
     const bodies = expr.branches.map((branch) => this.blockValue(branch.body, scope));
     const otherwise = expr.otherwise ? this.blockValue(expr.otherwise, scope) : null;
     const all = otherwise ? [...bodies, otherwise] : bodies;
     const { base, items } = this.unifyBlocks(all, expr.span);
+    if (used && !otherwise) this.needWhole(base, 'An if', 'an else', expr.span);
     // No block ran: na, false for bool (Pine docs, if structure).
     const empty = base === 'tuple' ? (items ?? []).map(naOf) : naOf(base);
+    const evs = conds.map((cond) => cond.ev);
     const runs = bodies.map((body) => body.run);
     const otherRun = otherwise?.run ?? null;
-    const count = conds.length;
+    const count = evs.length;
+    const known = this.knownEarly(conds, all, (env, folds, values) => {
+      for (let i = 0; i < count; i++) {
+        if ((folds[i] as Fold)(env) as boolean) return (values[i] as Fold)(env);
+      }
+      return otherwise ? (values[count] as Fold)(env) : empty;
+    });
     return {
       base,
       items,
-      qual: SERIES,
+      ...known,
       ev: (rt) => {
         for (let i = 0; i < count; i++) {
-          if ((conds[i] as (rt: Runtime) => Value)(rt) as boolean) return (runs[i] as Run)(rt);
+          if ((evs[i] as (rt: Runtime) => Value)(rt) as boolean) return (runs[i] as Run)(rt);
         }
         return otherRun ? otherRun(rt) : empty;
       },
       span: expr.span,
     };
+  }
+
+  /**
+   * An if's or switch's qualifier: the strongest of its conditions' and its values' (the v6
+   * migration guide's `switch` on an input string gives an "input plot_style"). When every part
+   * is known before the bars the value is too; one that can't be worked out early here counts as
+   * simple at least.
+   */
+  private knownEarly(
+    tests: readonly (Compiled | null)[],
+    values: readonly CompiledBlock[],
+    pick: (env: FoldEnv, tests: readonly (Fold | null)[], values: readonly Fold[]) => Value,
+  ): { qual: Qual; fold?: Fold } {
+    const qual = maxQual(
+      ...tests.map((test) => test?.qual ?? CONST),
+      ...values.map((value) => value.qual),
+    );
+    const testFolds = tests.map((test) => (test ? (test.fold ?? null) : null));
+    const valueFolds = values.map((value) => value.fold ?? null);
+    const folds =
+      qual <= INPUT &&
+      tests.every((test, i) => !test || testFolds[i]) &&
+      valueFolds.every((fold) => fold !== null);
+    if (!folds) return { qual: maxQual(qual, SIMPLE) };
+    const known = valueFolds as Fold[];
+    return { qual, fold: (env) => pick(env, testFolds, known) };
+  }
+
+  /**
+   * v6 refuses na for its unique types (plot styles, shapes, locations …), so an if or a switch
+   * giving one must always give a value (v6 migration guide, na and unique types).
+   */
+  private needWhole(base: Base, what: string, block: string, span: Span): void {
+    if (this.version < 6 || !isUniqueType(base)) return;
+    this.fail(
+      `${what} that returns a '${displayType(base)}' must have ${block} block, as it would be na otherwise (Pine v6)`,
+      span,
+    );
   }
 
   private unifyBlocks(
@@ -1712,28 +1842,37 @@ export class Compiler {
   }
 
   private switchStructure(expr: Extract<Expr, { kind: 'switch' }>, scope: Scope): Compiled {
+    const used = this.unusedValue !== expr;
     const subject = expr.subject ? this.expr(expr.subject, scope) : null;
     const matches = expr.cases.map((c) => {
       if (!c.match) return null;
       const match = this.expr(c.match, scope);
-      if (subject) {
-        const eq = this.binary('==', subject, match, c.match.span);
-        return eq.ev;
-      }
-      return this.condition(match).ev;
+      if (subject) return this.binary('==', subject, match, c.match.span);
+      return this.condition(match);
     });
     const bodies = expr.cases.map((c) => this.blockValue(c.body, scope));
     const { base, items } = this.unifyBlocks(bodies, expr.span);
+    if (used && matches.every((match) => match !== null)) {
+      this.needWhole(base, 'A switch', 'a default', expr.span);
+    }
     const empty = base === 'tuple' ? (items ?? []).map(naOf) : naOf(base);
+    const evs = matches.map((match) => match?.ev ?? null);
     const runs = bodies.map((body) => body.run);
     const count = runs.length;
+    const known = this.knownEarly(matches, bodies, (env, folds, values) => {
+      for (let i = 0; i < count; i++) {
+        const fold = folds[i];
+        if (!fold || (fold(env) as boolean)) return (values[i] as Fold)(env);
+      }
+      return empty;
+    });
     return {
       base,
       items,
-      qual: SERIES,
+      ...known,
       ev: (rt) => {
         for (let i = 0; i < count; i++) {
-          const match = matches[i];
+          const match = evs[i];
           if (!match || (match(rt) as boolean)) return (runs[i] as Run)(rt);
         }
         return empty;
@@ -1877,49 +2016,59 @@ export class Compiler {
     const collection = target.ev;
     const empty = naOf(body.base);
     const elem = elemOf(base);
+    // Its value is its body's on the last iteration that ran to its end, as a for loop's (Pine
+    // docs, Loops): the reference's for...in example returns it from a function.
+    let last: Value = empty;
     const step = (rt: Runtime, key: Value, item: Value): number => {
       keySlot?.push(key);
       itemSlot.push(item);
       rt.tick();
-      run(rt);
+      const result = run(rt);
       if (rt.signal === 1) {
         rt.signal = 0;
         return 1;
       }
-      rt.signal = 0;
+      if (rt.signal === 2) {
+        rt.signal = 0;
+        return 0;
+      }
+      last = result;
       return 0;
     };
     let ev: (rt: Runtime) => Value;
     if (isArrayType(base)) {
       ev = (rt) => {
+        last = empty;
         const array = collection(rt) as PineArray | null;
         if (!array) return empty;
         for (let i = 0; i < array.items.length; i++) {
           if (step(rt, i, array.items[i] ?? null) === 1) break;
         }
-        return empty;
+        return last;
       };
     } else if (isMatrixType(base)) {
       ev = (rt) => {
+        last = empty;
         const m = collection(rt) as PineMatrix | null;
         if (!m) return empty;
         for (let r = 0; r < m.rows; r++) {
           const row = new PineArray(elem, m.data.slice(r * m.cols, (r + 1) * m.cols));
           if (step(rt, r, row) === 1) break;
         }
-        return empty;
+        return last;
       };
     } else {
       ev = (rt) => {
+        last = empty;
         const m = collection(rt) as PineMap | null;
         if (!m) return empty;
         for (const [key, value] of [...m.entries]) {
           if (step(rt, key, value) === 1) break;
         }
-        return empty;
+        return last;
       };
     }
-    return { base: 'void', qual: SERIES, ev, span: expr.span };
+    return { base: body.base, items: body.items, qual: SERIES, ev, span: expr.span };
   }
 
   private whileLoop(expr: Extract<Expr, { kind: 'while' }>, scope: Scope): Compiled {
@@ -2195,16 +2344,17 @@ export class Compiler {
   ): Compiled {
     const positional: Compiled[] = receiver ? [receiver] : [];
     const named = new Map<string, { value: Compiled; span: Span }>();
-    for (const arg of expr.args) {
+    expr.args.forEach((arg, k) => {
       const value = this.expr(arg.value, scope);
       if (arg.name === null) positional.push(value);
       else {
         if (named.has(arg.name) && this.version >= 6) {
           this.fail(`The '${arg.name}' argument is given twice`, arg.span);
         }
-        if (!named.has(arg.name)) named.set(arg.name, { value, span: arg.span });
+        if (named.has(arg.name)) this.convertEdit(repeatedArg(expr.args, k));
+        else named.set(arg.name, { value, span: arg.span });
       }
-    }
+    });
     let firstError: PineCompileError | null = null;
     for (const fn of candidates) {
       try {
@@ -2295,7 +2445,7 @@ export class Compiler {
       const qual = param.qualifier === 'series' ? SERIES : arg.qual;
       const key = stableKey(param, expr);
       const v = this.define(fnScope, param.name, param.span, base, qual, key, null, false);
-      if (arg.fold) this.registerFold(key, arg.fold);
+      v.fold = arg.fold;
       return { slot: v.slot, ev: castTo(arg, base) };
     });
     this.calling.push(id);
@@ -2312,10 +2462,16 @@ export class Compiler {
     }
     const run = body.run;
     const count = params.length;
+    // A function of const or input arguments gives a value known before the bars, as the
+    // manual's `fillColor(color.lime)` for fill() (Fills between levels); one that can't be
+    // worked out early here gives a simple value at least.
+    const tuple = body.base === 'tuple';
+    const fold = tuple || body.qual > INPUT ? undefined : body.fold;
     return {
       base: body.base,
       items: body.items,
-      qual: body.base === 'tuple' ? maxQual(SIMPLE, body.qual) : body.qual,
+      qual: tuple || (body.qual <= INPUT && !fold) ? maxQual(SIMPLE, body.qual) : body.qual,
+      fold,
       ev: (rt) => {
         for (let i = 0; i < count; i++) {
           const p = params[i] as { slot: Slot; ev: (rt: Runtime) => Value };
@@ -2368,6 +2524,11 @@ const intDivide = (x: number, y: number) => (y === 0 ? Number.NaN : Math.trunc(x
 // The Pine docs' own formula, a - b * math.floor(nz(a / b)): so x % 0 is x.
 const remainder = (x: number, y: number) => (y === 0 ? x : mod(x, y));
 
+/**
+ * A negative offset stops the script. An na one reads na: HalfTrend, a widely used community
+ * script, reads high[math.abs(ta.highestbars(amplitude))], na over its first bars, and runs on
+ * TradingView (provisional, docs/SPEC.md §11).
+ */
 function historyError(n: number, span: Span): PineRuntimeError {
   return new PineRuntimeError(
     `Invalid history reference [${Number.isNaN(n) ? 'na' : n}]: the offset must be 0 or more`,

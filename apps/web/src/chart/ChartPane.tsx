@@ -17,6 +17,7 @@ import { IndicatorSettingsDialog } from '../indicators/IndicatorSettingsDialog';
 import { indicatorStore, useIndicators } from '../indicators/indicatorStore';
 import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
 import { librariesStore, useLibraries } from '../pine/librariesStore';
+import { logsStore } from '../pine/logsStore';
 import { pineStore } from '../pine/pineStore';
 import { useStockKeys } from '../stocks/stockKeys';
 import { darkTheme } from '../theme/tokens';
@@ -77,6 +78,8 @@ export function ChartPane({
   const [editing, setEditing] = useState<string | null>(null);
   /** Why each script on the chart draws nothing, for its legend row. */
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  /** A Pine Logs entry's bar, brought into view: its time over it for a moment. */
+  const [barTip, setBarTip] = useState<{ x: number; label: string } | null>(null);
 
   // The session talks to the legend; the indicators' rows follow the same bar.
   const legendView = useMemo(
@@ -85,9 +88,10 @@ export function ChartPane({
       showBar: (bar, previous, index) => {
         legend.current?.showBar(bar, previous, index);
         values.show(index);
-        // A script can stop on a live bar: its row says so.
+        // A script can stop on a live bar: its row says so. Its logs may have grown too.
         const now = values.chart?.indicatorErrors();
         if (now) setErrors((before) => (sameErrors(before, now) ? before : now));
+        if (values.chart) logsStore.setScripts(values.chart.scriptLogs());
       },
       setBook: (bid, ask) => legend.current?.setBook(bid, ask),
       setStatus: (status, message) => legend.current?.setStatus(status, message),
@@ -127,8 +131,34 @@ export function ChartPane({
   useEffect(() => {
     chart?.setIndicators(indicators.list);
     values.refresh();
-    if (chart) setErrors(chart.indicatorErrors());
+    if (!chart) return;
+    setErrors(chart.indicatorErrors());
+    logsStore.setScripts(chart.scriptLogs());
   }, [chart, indicators.list, values]);
+
+  // A Pine Logs entry's Scroll to bar: the bar comes into view, then its time shows over it for a
+  // moment, written as the crosshair writes it (Pine docs, Debugging; 2 s is provisional, §11).
+  useEffect(() => {
+    if (!chart) return;
+    let timer = 0;
+    let frame = 0;
+    const stop = logsStore.onScrollToBar(({ bar }) => {
+      const label = chart.scrollToBar(bar);
+      if (label === null) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const x = chart.barX(bar);
+        setBarTip(x === null ? null : { x, label });
+        clearTimeout(timer);
+        timer = window.setTimeout(() => setBarTip(null), 2000);
+      });
+    });
+    return () => {
+      stop();
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [chart]);
 
   // Scripts that import compile again when a library is added or removed (SPEC §5.17).
   // biome-ignore lint/correctness/useExhaustiveDependencies: the libraries' revision is the change
@@ -137,6 +167,7 @@ export function ChartPane({
     chart.setLibraries(librariesStore.compileOptions());
     values.refresh();
     setErrors(chart.indicatorErrors());
+    logsStore.setScripts(chart.scriptLogs());
   }, [chart, libraries.revision, values]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new key, session or time zone restarts the session
@@ -154,6 +185,7 @@ export function ChartPane({
         values.hasVolume = hasRealVolume(info);
         values.priceDecimals = info.pricePrecision;
         setSymbolContext({ base: volumeUnit(info), hasVolume: hasRealVolume(info) });
+        logsStore.setZone(info.timezone);
         onInfoRef.current?.(info);
       },
       onError: (code) => {
@@ -221,6 +253,12 @@ export function ChartPane({
       />
       {editing !== null && (
         <IndicatorSettingsDialog id={editing} onClose={() => setEditing(null)} />
+      )}
+      {barTip && (
+        <div className={styles.barTip} style={{ left: barTip.x }} role="tooltip">
+          {/* The date over the time, as Figure 351 shows them. */}
+          {barTip.label.replace(/ (\d{1,2}:\d{2}(?::\d{2})?)$/, '\n$1')}
+        </div>
       )}
     </div>
   );

@@ -22,6 +22,7 @@ export type {
   IndicatorDebugState,
   IndicatorValues,
   ScriptLibraries,
+  ScriptLogs,
 } from './indicators/IndicatorLayer';
 export {
   type ChartIndicator,

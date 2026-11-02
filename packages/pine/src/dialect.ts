@@ -1,6 +1,13 @@
 import type { Arg, Block, Expr, Script, Stmt } from './ast.ts';
 import { versionOf } from './ast.ts';
-import type { Span } from './diagnostics.ts';
+import { PineCompileError, type Span } from './diagnostics.ts';
+import { type EditSink, repeatedArg } from './edits.ts';
+
+/** Where Convert code to v6 hears the changes a v5 script needs, and how it reads the code. */
+export interface Converting {
+  edits: EditSink;
+  text: (span: Span) => string;
+}
 
 /**
  * Older Pine versions in today's words (TradingView's Pine docs, migration guides "To Pine Script
@@ -10,11 +17,11 @@ import type { Span } from './diagnostics.ts';
  * division of constants, a for loop's end read once, the old colours) the compiler applies by the
  * script's version. Names the script declares itself are never renamed.
  */
-export function upgrade(script: Script): Script {
+export function upgrade(script: Script, converting?: Converting): Script {
   const version = versionOf(script);
   if (version >= 6) return script;
   const declared = declaredNames(script.statements);
-  const rewriter = new Rewriter(version, declared.variables, declared.functions);
+  const rewriter = new Rewriter(version, declared.variables, declared.functions, converting);
   let statements = script.statements.map((stmt) => rewriter.stmt(stmt));
   if (version <= 2) statements = selfReferences(statements);
   return { ...script, statements };
@@ -69,7 +76,7 @@ const V5_FUNCTIONS: Readonly<Record<string, string>> = {
     'vwma',
     'wma',
     'wpr',
-    'barsince',
+    'barssince',
     'change',
     'correlation',
     'cross',
@@ -283,11 +290,18 @@ class Rewriter {
   /** Variables and functions the script declares: Pine keeps their names apart. */
   private readonly variables: ReadonlySet<string>;
   private readonly functions: ReadonlySet<string>;
+  private readonly converting: Converting | null;
 
-  constructor(version: number, variables: ReadonlySet<string>, functions: ReadonlySet<string>) {
+  constructor(
+    version: number,
+    variables: ReadonlySet<string>,
+    functions: ReadonlySet<string>,
+    converting?: Converting,
+  ) {
     this.version = version;
     this.variables = variables;
     this.functions = functions;
+    this.converting = converting ?? null;
   }
 
   stmt(stmt: Stmt): Stmt {
@@ -395,6 +409,14 @@ class Rewriter {
     let callee = expr.callee;
     if (this.version <= 3 && callee === 'color') callee = 'color.new';
     if (this.version <= 4) {
+      // indicator() came with v5, renamed from study(): "Pine Script v1 has no function named
+      // indicator(), so the script will not compile" (the v6 reference, //@version=).
+      if (callee === 'indicator') {
+        throw new PineCompileError(
+          "Could not find function or function reference 'indicator'",
+          expr.calleeSpan,
+        );
+      }
       if (callee === 'input') return this.input(expr, args);
       if (callee === 'offset' && args.length === 2) {
         // offset(x, n) is x[n] (v5 guide: Removed iff() and offset()).
@@ -449,6 +471,20 @@ class Rewriter {
     if (!transp && defaultTransp === null) return args;
     const colorIndex = colorArgIndex(callee, args);
     const rest = args.filter((arg) => arg !== transp);
+    if (transp && this.version === 5 && this.converting) {
+      // TradingView's converter drops transp, its guide's fix being color.new(): we write that
+      // fix, so the converted script draws the same (docs/SPEC.md §3).
+      const { edits, text } = this.converting;
+      edits.add(repeatedArg(args, args.indexOf(transp)));
+      const colorArg = args[colorIndex];
+      if (colorArg) {
+        edits.add({
+          span: colorArg.value.span,
+          before: 'color.new(',
+          after: `, ${text(transp.value.span)})`,
+        });
+      }
+    }
     if (colorIndex < 0) return rest;
     const colorArg = args[colorIndex] as Arg;
     if (defaultTransp !== null && !isPlainColor(colorArg.value)) return rest;

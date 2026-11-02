@@ -36,6 +36,14 @@ const fail = (message: string, span: Span): never => {
 };
 
 /** Saves an array's elements before it changes on the live bar. */
+/** An array's most elements (Arrays, Error handling: "Array is too large. Maximum size is 100000"). */
+export const MAX_ARRAY = 100_000;
+
+/** Stops when an array would grow past the most elements it may hold. */
+const roomFor = (a: PineArray, more: number, span: Span) => {
+  if (a.items.length + more > MAX_ARRAY) fail('Array is too large. Maximum size is 100000', span);
+};
+
 const touchArray = (rt: Runtime, a: PineArray) =>
   rt.touch(a, () => {
     const items = a.items.slice();
@@ -97,12 +105,19 @@ function collection<T>(
   }
   const ev = value.ev;
   const fn = args.fn;
+  // An array's and a matrix's are TradingView's own messages (Arrays, Matrices: Error handling).
+  const naMessage =
+    what === 'an array'
+      ? "Cannot call array methods when ID of array is 'na'"
+      : what === 'a matrix'
+        ? "Cannot call matrix methods when the ID of matrix is 'na'."
+        : `Cannot call '${fn}' on a collection that is na`;
   return {
     base: value.base,
     c: value,
     ev: (rt) => {
       const v = ev(rt);
-      if (v === null) return fail(`Cannot call '${fn}' on a collection that is na`, span);
+      if (v === null) return fail(naMessage, span);
       return v as T;
     },
   };
@@ -181,7 +196,10 @@ function newArray(c: Compiler, call: Call, scope: Scope, elem: Base): Compiled {
     arrayOf(elem),
     (rt) => {
       const n = size(rt);
-      if (!(n >= 0)) fail(`An array can't have ${n} elements`, span);
+      // TradingView's own messages (Arrays, Error handling).
+      if (n < 0) fail('Cannot create an array with a negative size', span);
+      if (!(n >= 0)) fail("An array's size can't be na", span);
+      if (n > MAX_ARRAY) fail('Array is too large. Maximum size is 100000', span);
       const value = init(rt);
       return new PineArray(elem, new Array(Math.trunc(n)).fill(value));
     },
@@ -366,7 +384,11 @@ function arrayCalls(): Record<string, Handler> {
         elem,
         (rt) => {
           const x = id.ev(rt);
-          return x.items[index(c, i(rt), x.items.length, 'array.get', call.span)] ?? naOf(elem);
+          const at = i(rt);
+          // An na index reads na: the manual's "Distance from high" (Arrays) runs on TradingView
+          // with ta.highestbars na over its first bars (provisional, docs/SPEC.md §11).
+          if (Number.isNaN(at)) return naOf(elem);
+          return x.items[index(c, at, x.items.length, 'array.get', call.span)] ?? naOf(elem);
         },
         call.span,
       );
@@ -420,6 +442,7 @@ function arrayCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const x = id.ev(rt);
+          roomFor(x, 1, call.span);
           touchArray(rt, x);
           x.items.push(value(rt));
           return null;
@@ -434,6 +457,7 @@ function arrayCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const x = id.ev(rt);
+          roomFor(x, 1, call.span);
           touchArray(rt, x);
           x.items.unshift(value(rt));
           return null;
@@ -448,7 +472,7 @@ function arrayCalls(): Record<string, Handler> {
         elem,
         (rt) => {
           const x = id.ev(rt);
-          if (x.items.length === 0) fail("Cannot call 'array.pop' on an empty array", call.span);
+          if (x.items.length === 0) fail('Cannot use pop() if array is empty.', call.span);
           touchArray(rt, x);
           return x.items.pop() ?? naOf(elem);
         },
@@ -462,7 +486,7 @@ function arrayCalls(): Record<string, Handler> {
         elem,
         (rt) => {
           const x = id.ev(rt);
-          if (x.items.length === 0) fail("Cannot call 'array.shift' on an empty array", call.span);
+          if (x.items.length === 0) fail('Cannot use shift() if array is empty.', call.span);
           touchArray(rt, x);
           return x.items.shift() ?? naOf(elem);
         },
@@ -478,6 +502,7 @@ function arrayCalls(): Record<string, Handler> {
         (rt) => {
           const x = id.ev(rt);
           const at = index(c, i(rt), x.items.length, 'array.insert', call.span, true);
+          roomFor(x, 1, call.span);
           touchArray(rt, x);
           x.items.splice(at, 0, value(rt));
           return null;
@@ -521,6 +546,7 @@ function arrayCalls(): Record<string, Handler> {
         (rt) => {
           const x = id1.ev(rt);
           const y = id2.ev(rt);
+          roomFor(x, y.items.length, call.span);
           touchArray(rt, x);
           x.items.push(...y.items);
           return x;
@@ -1009,14 +1035,23 @@ function mapCalls(): Record<string, Handler> {
 
 const at = (m: PineMatrix, r: number, c: number) => m.data[r * m.cols + c] as Value;
 
-function rowIndex(raw: number, size: number, fn: string, span: Span, allowEnd = false) {
+/** A row's or a column's index, stopping with TradingView's message (Matrices, Error handling). */
+function rowIndex(raw: number, size: number, kind: 'row' | 'column', span: Span, allowEnd = false) {
   const i = Math.trunc(raw);
   const limit = allowEnd ? size : size - 1;
   if (!(i >= 0 && i <= limit)) {
-    fail(`Index ${i} is out of bounds in '${fn}': the matrix has ${size}`, span);
+    fail(`The ${kind} index (${i}) is out of bounds, ${kind} size is (${size}).`, span);
   }
   return i;
 }
+
+/** A matrix's most elements (Matrices, Error handling). */
+const MAX_MATRIX = 100_000;
+const matrixRoom = (elements: number, span: Span) => {
+  if (elements > MAX_MATRIX) {
+    fail('Matrix is too large. Maximum size of the matrix is 100,000 elements.', span);
+  }
+};
 
 const matrixValues = (m: PineMatrix) => numbers(m.data);
 
@@ -1130,19 +1165,19 @@ function matrixCalls(): Record<string, Handler> {
   const m1 = (
     _fn: string,
     result: (c: Compiler, base: Base) => Base,
-    f: (m: PineMatrix, rt: Runtime) => Value,
+    f: (m: PineMatrix, rt: Runtime, span: Span) => Value,
   ) =>
     handler(['id'], 1, (c, a, call) => {
       const id = matrixArg(c, a, 'id', call.span);
       const base = result(c, id.base);
       if (isReferenceType(base)) c.usesObjects();
-      return series(base, (rt) => f(id.ev(rt), rt), call.span);
+      return series(base, (rt) => f(id.ev(rt), rt, call.span), call.span);
     });
-  const numeric = (fn: string, f: (m: PineMatrix) => Value, base: Base = 'float') =>
+  const numeric = (fn: string, f: (m: PineMatrix, span: Span) => Value, base: Base = 'float') =>
     m1(
       fn,
       () => base,
-      (m) => f(m),
+      (m, _rt, span) => f(m, span),
     );
   const predicate = (fn: string, f: (m: PineMatrix) => boolean) =>
     m1(
@@ -1151,6 +1186,10 @@ function matrixCalls(): Record<string, Handler> {
       (m) => f(m),
     );
   const square = (m: PineMatrix) => m.rows === m.cols;
+  // TradingView's own message (Matrices, Error handling): inv, det, eigenvalues, eigenvectors.
+  const needSquare = (m: PineMatrix, span: Span) => {
+    if (!square(m)) fail('Operation not available for non-square matrices.', span);
+  };
   const calls: Record<string, Handler> = {
     'matrix.new': (c, call, scope) => {
       const type = call.typeArgs?.[0];
@@ -1167,6 +1206,7 @@ function matrixCalls(): Record<string, Handler> {
         (rt) => {
           const r = Math.max(0, Math.trunc(rows(rt)));
           const k = Math.max(0, Math.trunc(cols(rt)));
+          matrixRoom(r * k, call.span);
           return new PineMatrix(elem, r, k, new Array(r * k).fill(init(rt)));
         },
         call.span,
@@ -1201,8 +1241,8 @@ function matrixCalls(): Record<string, Handler> {
         elem,
         (rt) => {
           const m = id.ev(rt);
-          const r = rowIndex(row(rt), m.rows, 'matrix.get', call.span);
-          const k = rowIndex(col(rt), m.cols, 'matrix.get', call.span);
+          const r = rowIndex(row(rt), m.rows, 'row', call.span);
+          const k = rowIndex(col(rt), m.cols, 'column', call.span);
           return at(m, r, k) ?? naOf(elem);
         },
         call.span,
@@ -1217,8 +1257,8 @@ function matrixCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const m = id.ev(rt);
-          const r = rowIndex(row(rt), m.rows, 'matrix.set', call.span);
-          const k = rowIndex(col(rt), m.cols, 'matrix.set', call.span);
+          const r = rowIndex(row(rt), m.rows, 'row', call.span);
+          const k = rowIndex(col(rt), m.cols, 'column', call.span);
           touchMatrix(rt, m);
           m.data[r * m.cols + k] = value(rt);
           return null;
@@ -1235,7 +1275,7 @@ function matrixCalls(): Record<string, Handler> {
         arrayOf(elem),
         (rt) => {
           const m = id.ev(rt);
-          const r = rowIndex(row(rt), m.rows, 'matrix.row', call.span);
+          const r = rowIndex(row(rt), m.rows, 'row', call.span);
           return new PineArray(elem, m.data.slice(r * m.cols, (r + 1) * m.cols));
         },
         call.span,
@@ -1250,7 +1290,7 @@ function matrixCalls(): Record<string, Handler> {
         arrayOf(elem),
         (rt) => {
           const m = id.ev(rt);
-          const k = rowIndex(col(rt), m.cols, 'matrix.col', call.span);
+          const k = rowIndex(col(rt), m.cols, 'column', call.span);
           return new PineArray(
             elem,
             Array.from({ length: m.rows }, (_, r) => at(m, r, k)),
@@ -1268,15 +1308,13 @@ function matrixCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const m = id.ev(rt);
-          const r = row ? rowIndex(row(rt), m.rows, 'matrix.add_row', call.span, true) : m.rows;
+          const r = row ? rowIndex(row(rt), m.rows, 'row', call.span, true) : m.rows;
           const values = arrayEv ? ((arrayEv(rt) as PineArray | null)?.items ?? []) : [];
           const cols = m.rows === 0 && m.cols === 0 ? values.length : m.cols;
           if (values.length > 0 && values.length !== cols) {
-            fail(
-              `The array has ${values.length} elements; the matrix's rows have ${cols}`,
-              call.span,
-            );
+            fail('The array size does not match the number of columns in the matrix.', call.span);
           }
+          matrixRoom((m.rows + 1) * cols, call.span);
           touchMatrix(rt, m);
           m.cols = cols;
           const filled = values.length > 0 ? values : new Array(cols).fill(naOf(m.elem));
@@ -1296,15 +1334,13 @@ function matrixCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const m = id.ev(rt);
-          const k = col ? rowIndex(col(rt), m.cols, 'matrix.add_col', call.span, true) : m.cols;
+          const k = col ? rowIndex(col(rt), m.cols, 'column', call.span, true) : m.cols;
           const values = arrayEv ? ((arrayEv(rt) as PineArray | null)?.items ?? []) : [];
           const rows = m.rows === 0 && m.cols === 0 ? values.length : m.rows;
           if (values.length > 0 && values.length !== rows) {
-            fail(
-              `The array has ${values.length} elements; the matrix's columns have ${rows}`,
-              call.span,
-            );
+            fail('The array size does not match the number of rows in the matrix.', call.span);
           }
+          matrixRoom(rows * (m.cols + 1), call.span);
           touchMatrix(rt, m);
           const data: Value[] = [];
           for (let r = 0; r < rows; r++) {
@@ -1330,7 +1366,7 @@ function matrixCalls(): Record<string, Handler> {
         arrayOf(elem),
         (rt) => {
           const m = id.ev(rt);
-          const r = rowIndex(row ? row(rt) : m.rows - 1, m.rows, 'matrix.remove_row', call.span);
+          const r = rowIndex(row ? row(rt) : m.rows - 1, m.rows, 'row', call.span);
           touchMatrix(rt, m);
           const removed = m.data.splice(r * m.cols, m.cols);
           m.rows--;
@@ -1348,7 +1384,7 @@ function matrixCalls(): Record<string, Handler> {
         arrayOf(elem),
         (rt) => {
           const m = id.ev(rt);
-          const k = rowIndex(col ? col(rt) : m.cols - 1, m.cols, 'matrix.remove_col', call.span);
+          const k = rowIndex(col ? col(rt) : m.cols - 1, m.cols, 'column', call.span);
           touchMatrix(rt, m);
           const removed: Value[] = [];
           const data: Value[] = [];
@@ -1370,8 +1406,8 @@ function matrixCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const m = id.ev(rt);
-          const p = rowIndex(r1(rt), m.rows, 'matrix.swap_rows', call.span);
-          const q = rowIndex(r2(rt), m.rows, 'matrix.swap_rows', call.span);
+          const p = rowIndex(r1(rt), m.rows, 'row', call.span);
+          const q = rowIndex(r2(rt), m.rows, 'row', call.span);
           touchMatrix(rt, m);
           for (let k = 0; k < m.cols; k++) {
             const t = m.data[p * m.cols + k] as Value;
@@ -1391,8 +1427,8 @@ function matrixCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const m = id.ev(rt);
-          const p = rowIndex(c1(rt), m.cols, 'matrix.swap_columns', call.span);
-          const q = rowIndex(c2(rt), m.cols, 'matrix.swap_columns', call.span);
+          const p = rowIndex(c1(rt), m.cols, 'column', call.span);
+          const q = rowIndex(c2(rt), m.cols, 'column', call.span);
           touchMatrix(rt, m);
           for (let r = 0; r < m.rows; r++) {
             const t = m.data[r * m.cols + p] as Value;
@@ -1493,7 +1529,7 @@ function matrixCalls(): Record<string, Handler> {
         'void',
         (rt) => {
           const m = id.ev(rt);
-          const k = rowIndex(col(rt), m.cols, 'matrix.sort', call.span);
+          const k = rowIndex(col(rt), m.cols, 'column', call.span);
           const up = ascending(rt);
           const rows = Array.from({ length: m.rows }, (_, r) =>
             m.data.slice(r * m.cols, (r + 1) * m.cols),
@@ -1515,6 +1551,7 @@ function matrixCalls(): Record<string, Handler> {
           const m = id1.ev(rt);
           const n = id2.ev(rt);
           if (m.cols !== n.cols) fail('Matrices joined by rows need as many columns', call.span);
+          matrixRoom(m.data.length + n.data.length, call.span);
           touchMatrix(rt, m);
           m.data.push(...n.data);
           m.rows += n.rows;
@@ -1543,7 +1580,7 @@ function matrixCalls(): Record<string, Handler> {
             const n = ev2(rt) as PineMatrix;
             if (m.cols !== n.rows)
               fail(
-                "Multiplied matrices need the first's columns to match the second's rows",
+                "The number of columns in the 'id1' matrix must equal the number of rows in the matrix (or the number of elements in the array) 'id2'.",
                 call.span,
               );
             return multiply(m, n);
@@ -1559,7 +1596,10 @@ function matrixCalls(): Record<string, Handler> {
             const m = id1.ev(rt);
             const v = (ev2(rt) as PineArray).items as number[];
             if (m.cols !== v.length)
-              fail('The array needs as many elements as the matrix has columns', call.span);
+              fail(
+                "The number of columns in the 'id1' matrix must equal the number of rows in the matrix (or the number of elements in the array) 'id2'.",
+                call.span,
+              );
             return new PineArray(
               'float',
               Array.from({ length: m.rows }, (_, r) =>
@@ -1586,12 +1626,16 @@ function matrixCalls(): Record<string, Handler> {
         call.span,
       );
     }),
-    'matrix.det': numeric('matrix.det', (m) => (square(m) ? gauss(m, false).det : Number.NaN)),
+    'matrix.det': numeric('matrix.det', (m, span) => {
+      needSquare(m, span);
+      return gauss(m, false).det;
+    }),
     'matrix.inv': m1(
       'matrix.inv',
       () => matrixOf('float'),
-      (m) => {
-        const inverse = square(m) ? gauss(m, true).inverse : null;
+      (m, _rt, span) => {
+        needSquare(m, span);
+        const inverse = gauss(m, true).inverse;
         return new PineMatrix(
           'float',
           m.rows,
@@ -1655,15 +1699,17 @@ function matrixCalls(): Record<string, Handler> {
     'matrix.eigenvalues': m1(
       'matrix.eigenvalues',
       () => arrayOf('float'),
-      (m) => {
-        return new PineArray('float', square(m) ? eigen(m).values : []);
+      (m, _rt, span) => {
+        needSquare(m, span);
+        return new PineArray('float', eigen(m).values);
       },
     ),
     'matrix.eigenvectors': m1(
       'matrix.eigenvectors',
       () => matrixOf('float'),
-      (m) => {
-        return new PineMatrix('float', m.rows, m.cols, square(m) ? eigen(m).vectors : []);
+      (m, _rt, span) => {
+        needSquare(m, span);
+        return new PineMatrix('float', m.rows, m.cols, eigen(m).vectors);
       },
     ),
     'matrix.kron': handler(['id1', 'id2'], 2, (c, a, call) => {
@@ -1697,7 +1743,7 @@ function matrixCalls(): Record<string, Handler> {
         matrixOf('float'),
         (rt) => {
           const m = id.ev(rt);
-          if (!square(m)) fail('Only a square matrix can be raised to a power', call.span);
+          needSquare(m, call.span);
           let result = new PineMatrix(
             'float',
             m.rows,
@@ -1797,7 +1843,12 @@ function arith(fn: string, f: (x: number, y: number) => number): Handler {
         if (isMatrix) {
           const n = y as PineMatrix;
           if (n.rows !== m.rows || n.cols !== m.cols)
-            fail(`'${fn}' needs matrices of the same size`, call.span);
+            fail(
+              fn === 'matrix.sum'
+                ? "Matrices 'id1' and 'id2' must have an equal number of rows and columns to be added."
+                : `Matrices 'id1' and 'id2' must have an equal number of rows and columns ('${fn}')`,
+              call.span,
+            );
           return new PineMatrix(
             m.elem,
             m.rows,

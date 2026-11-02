@@ -97,6 +97,44 @@ describe('the lexer', () => {
     expect(() => lex('s = "open')).toThrow(/no closing quote/);
     expect(() => lex('x = 1 $ 2')).toThrow(/Unexpected character "\$"/);
   });
+
+  it('reads a multiline string over its lines, its line breaks and indentation its text (v6)', () => {
+    // The April 2026 release notes' examples: an indented one in a block, and two concatenated.
+    const source = [
+      '//@version=6',
+      'if barstate.isfirst',
+      '    s = """---',
+      'No indentation.',
+      '    Indented by four spaces. ',
+      '    """',
+      '    t = """String 1',
+      '""" + \'\'\'String 2',
+      "''' // a comment",
+      'u = "after"',
+    ].join('\n');
+    const { lines } = lex(source);
+    const strings = lines.flatMap((line) => line.tokens.filter((t) => t.kind === 'string'));
+    expect(strings.map((t) => t.value)).toEqual([
+      '---\nNo indentation.\n    Indented by four spaces. \n    ',
+      'String 1\n',
+      'String 2\n',
+      'after',
+    ]);
+    expect(lines.map((line) => [line.line, line.indent])).toEqual([
+      [2, 0],
+      [3, 4],
+      [7, 4],
+      [10, 0],
+    ]);
+    // Each string's span runs from its opening delimiter to its closing one, for the editor.
+    expect(strings[1]).toMatchObject({ line: 7, column: 9, endLine: 8, endColumn: 4 });
+    expect(strings[2]).toMatchObject({ line: 8, column: 7, endLine: 9, endColumn: 4 });
+  });
+
+  it('refuses a multiline string before v6, and one left open', () => {
+    expect(() => lex('//@version=5\ns = """a"""')).toThrow(/need \/\/@version=6/);
+    expect(() => lex('s = """a\nb', 6)).toThrow(/no closing """/);
+  });
 });
 
 describe('the parser', () => {

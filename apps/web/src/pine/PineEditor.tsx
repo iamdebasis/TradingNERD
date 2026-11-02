@@ -1,4 +1,10 @@
-import { compileCached, PINE_VERSION, type PineDiagnostic } from '@tradingnerd/pine';
+import {
+  compileCached,
+  convertToV6,
+  PINE_VERSION,
+  type PineDiagnostic,
+  versionIn,
+} from '@tradingnerd/pine';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIndicators } from '../indicators/indicatorStore';
 import { CloseIcon } from '../toolbar/icons';
@@ -6,6 +12,7 @@ import { type CodeEdit, CodeEditor, type CodeEditorEvents, type CodeReveal } fro
 import {
   ChevronIcon,
   ConsoleIcon,
+  MoreIcon,
   NoticeIcon,
   PanelIcon,
   PlayIcon,
@@ -14,6 +21,7 @@ import {
 } from './icons';
 import { LibrariesDialog } from './LibrariesDialog';
 import { librariesStore, useLibraries } from './librariesStore';
+import { logsStore } from './logsStore';
 import { OpenScriptDialog } from './OpenScriptDialog';
 import styles from './PineEditor.module.css';
 import {
@@ -75,8 +83,10 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   const { document } = state;
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [edit, setEdit] = useState<CodeEdit | null>(null);
-  const [reveal, setReveal] = useState<CodeReveal | null>(null);
+  /** Where to put the cursor, for the code it was asked for (its document's key). */
+  const [reveal, setReveal] = useState<(CodeReveal & { key: string }) | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   /** The dialog showing: naming a save, a copy or a rename, Open script, Version history. */
   const [dialog, setDialog] = useState<'save' | 'copy' | 'rename' | 'open' | 'history' | null>(
     null,
@@ -92,6 +102,25 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   useEffect(() => {
     if (!document && !state.busy) pineStore.openNew();
   }, [document, state.busy]);
+
+  // A Pine Logs entry's Source code: once its script's code is open, its line is selected, once
+  // (typing changes the document, and mustn't select it again).
+  const lineRequest = state.line;
+  const lineShown = useRef(0);
+  const documentKey = document?.key;
+  const documentChart = document?.chartId;
+  useEffect(() => {
+    if (!lineRequest || lineRequest.serial === lineShown.current) return;
+    if (!documentKey || documentChart !== lineRequest.chartId) return;
+    lineShown.current = lineRequest.serial;
+    setReveal({
+      line: lineRequest.line,
+      column: 1,
+      select: true,
+      serial: lineRequest.serial,
+      key: documentKey,
+    });
+  }, [lineRequest, documentKey, documentChart]);
 
   const onChart = useMemo(
     () => document?.chartId != null && indicators.list.some((item) => item.id === document.chartId),
@@ -123,6 +152,15 @@ export function PineEditor({ onClose }: { onClose(): void }) {
   );
 
   const edited = document !== null && document.text !== document.original;
+  // Convert code to v6: for v5 code, once it compiles (v6 migration guide).
+  const convert =
+    document && versionIn(document.text) === 5 ? (errors > 0 ? 'blocked' : 'ready') : null;
+  const convertCode = () => {
+    if (!document) return;
+    const result = convertToV6(document.text, librariesStore.compileOptions());
+    // One edit of the whole code, so Undo brings the v5 code back; errors left show as usual.
+    if (result.ok) setEdit({ text: result.source, serial: Date.now() });
+  };
   const close = () => {
     setMenuOpen(false);
     onClose();
@@ -173,11 +211,19 @@ export function PineEditor({ onClose }: { onClose(): void }) {
             {menuOpen && (
               <ScriptMenu
                 saved={document.origin.kind === 'saved'}
+                convert={convert}
+                dock={state.dock}
                 recent={state.recent}
                 onPick={(pick) => {
                   setMenuOpen(false);
                   if (pick === 'save') save();
-                  else if (pick === 'indicator' || pick === 'library') pineStore.openNew(pick);
+                  else if (pick === 'convert') convertCode();
+                  else if (pick === 'dock') {
+                    // Back on the right, the editor takes the panel from Pine Logs.
+                    const next = state.dock === 'right' ? 'bottom' : 'right';
+                    pineStore.setDock(next);
+                    if (next === 'right') logsStore.close();
+                  } else if (pick === 'indicator' || pick === 'library') pineStore.openNew(pick);
                   else if (pick === 'libraries') setLibrariesFor(null);
                   else setDialog(pick);
                 }}
@@ -204,6 +250,28 @@ export function PineEditor({ onClose }: { onClose(): void }) {
             <SaveIcon />
             Save script
           </button>
+          <div className={styles.menuWrap}>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="More"
+              title="More"
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((open) => !open)}
+            >
+              <MoreIcon />
+            </button>
+            {moreOpen && (
+              <MoreMenu
+                onPineLogs={() => {
+                  setMoreOpen(false);
+                  logsStore.open(onChart && document.chartId ? document.chartId : null);
+                }}
+                onDismiss={() => setMoreOpen(false)}
+              />
+            )}
+          </div>
         </div>
       )}
       {document?.origin.kind === 'builtin' && (
@@ -238,7 +306,7 @@ export function PineEditor({ onClose }: { onClose(): void }) {
           text={document.text}
           diagnostics={diagnostics}
           edit={edit}
-          reveal={reveal}
+          reveal={reveal?.key === document.key ? reveal : null}
           events={events}
         />
       ) : (
@@ -264,7 +332,13 @@ export function PineEditor({ onClose }: { onClose(): void }) {
                   className={styles.consoleLine}
                   data-severity={item.severity}
                   onClick={() =>
-                    setReveal({ line: item.line, column: item.column, serial: Date.now() })
+                    document &&
+                    setReveal({
+                      line: item.line,
+                      column: item.column,
+                      serial: Date.now(),
+                      key: document.key,
+                    })
                   }
                 >
                   {item.severity === 'error' ? 'Error' : 'Warning'} at {item.line}:{item.column}{' '}
@@ -367,6 +441,8 @@ type MenuPick =
   | 'copy'
   | 'rename'
   | 'history'
+  | 'dock'
+  | 'convert'
   | 'indicator'
   | 'library'
   | 'open'
@@ -377,16 +453,21 @@ type MenuPick =
  * "How to work with Pine Editor"): Save script, Make a copy…, Rename…, Version history…, Create
  * new (Indicator, Strategy, Library, Built-in…), Recently used, Open script…; and My libraries,
  * which TradingView doesn't need (§5.17). Make a copy, Rename and Version history are for one of
- * My scripts. A strategy comes later (P5).
+ * My scripts. A strategy comes later (P5). Convert code to v6 shows for v5 code, which must compile
+ * (v6 migration guide); its place in the menu is provisional (§11).
  */
 function ScriptMenu({
   saved,
+  convert,
+  dock,
   recent,
   onPick,
   onRecent,
   onDismiss,
 }: {
   saved: boolean;
+  convert: 'ready' | 'blocked' | null;
+  dock: 'right' | 'bottom';
   recent: readonly RecentScript[];
   onPick(pick: MenuPick): void;
   onRecent(item: RecentScript): void;
@@ -408,12 +489,19 @@ function ScriptMenu({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [onDismiss]);
-  const item = (pick: MenuPick, label: string, shortcut?: string, disabled = false) => (
+  const item = (
+    pick: MenuPick,
+    label: string,
+    shortcut?: string,
+    disabled = false,
+    title?: string,
+  ) => (
     <button
       type="button"
       role="menuitem"
       className={styles.menuItem}
       disabled={disabled}
+      title={title}
       onClick={() => onPick(pick)}
     >
       {label}
@@ -428,6 +516,15 @@ function ScriptMenu({
       {item('copy', 'Make a copy…', undefined, !saved)}
       {item('rename', 'Rename…', undefined, !saved)}
       {item('history', 'Version history…', undefined, !saved)}
+      {item('dock', dock === 'right' ? 'Move script to bottom' : 'Move script to right')}
+      {convert &&
+        item(
+          'convert',
+          'Convert code to v6…',
+          undefined,
+          convert === 'blocked',
+          convert === 'blocked' ? 'A script converts once its v5 code compiles' : undefined,
+        )}
       <div className={styles.submenuWrap}>
         <button
           type="button"
@@ -473,6 +570,35 @@ function ScriptMenu({
       <div className={styles.menuSeparator} />
       {item('open', 'Open script…', 'Ctrl + O')}
       {item('libraries', 'My libraries…')}
+    </div>
+  );
+}
+
+/**
+ * The editor's More menu (⋯; TradingView's Help Center, "How to work with Pine Editor"): Pine
+ * Logs… here; its other items (new window or tab, editor settings, Profiler mode) come later.
+ */
+function MoreMenu({ onPineLogs, onDismiss }: { onPineLogs(): void; onDismiss(): void }) {
+  const menu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!menu.current?.parentElement?.contains(event.target as Node)) onDismiss();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onDismiss]);
+  return (
+    <div ref={menu} className={`${styles.menu} ${styles.menuRight}`} role="menu" aria-label="More">
+      <button type="button" role="menuitem" className={styles.menuItem} onClick={onPineLogs}>
+        Pine Logs…
+      </button>
     </div>
   );
 }

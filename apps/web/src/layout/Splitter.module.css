@@ -18,3 +18,14 @@
 .splitter:focus-visible {
   background: var(--color-accent);
 }
+
+/* Above a panel below the chart: a row of gutter, dragged up and down. */
+.across {
+  width: auto;
+  height: var(--size-gutter);
+  cursor: row-resize;
+}
+
+.across::before {
+  inset: -3px 0;
+}

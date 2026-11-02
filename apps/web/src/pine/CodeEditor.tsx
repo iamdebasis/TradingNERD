@@ -29,6 +29,8 @@ export interface CodeReveal {
   line: number;
   column: number;
   serial: number;
+  /** Select the whole line, as a Pine Logs entry's Source code highlights it (Figure 350). */
+  select?: boolean;
 }
 
 /**
@@ -85,6 +87,31 @@ export function CodeEditor({
       });
       editor.current = created;
       created.onDidChangeModelContent(() => eventsRef.current.onChange(created?.getValue() ?? ''));
+      // A v5 script's //@version=5 shows in yellow, as TradingView's editor marks it to offer
+      // Convert code to v6 (v6 migration guide); the yellow is provisional (docs/SPEC.md §11).
+      const versionMark = created.createDecorationsCollection();
+      const markVersion = () => {
+        const match = created
+          ?.getModel()
+          ?.findMatches('//\\s*@version\\s*=\\s*5\\b', false, true, false, null, false, 1)[0];
+        versionMark.set(
+          match
+            ? [
+                {
+                  range: match.range,
+                  options: {
+                    inlineClassName: styles.versionToConvert,
+                    hoverMessage: {
+                      value: 'Pine Script® v5: **Convert code to v6** in the script menu',
+                    },
+                  },
+                },
+              ]
+            : [],
+        );
+      };
+      markVersion();
+      created.onDidChangeModelContent(markVersion);
       created.onDidChangeCursorPosition(({ position }) =>
         eventsRef.current.onCursor(position.lineNumber, position.column),
       );
@@ -181,12 +208,26 @@ export function CodeEditor({
     editor.current?.pushUndoStop();
   }, [edit]);
 
+  // Again once Monaco has loaded, for a script opened to show a line.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `loading` re-runs it once the editor exists
   useEffect(() => {
-    if (!reveal || !editor.current) return;
-    editor.current.setPosition({ lineNumber: reveal.line, column: reveal.column });
-    editor.current.revealLineInCenter(reveal.line);
-    editor.current.focus();
-  }, [reveal]);
+    const current = editor.current;
+    const model = current?.getModel();
+    if (!reveal || !current || !model) return;
+    if (reveal.select) {
+      const line = Math.min(reveal.line, model.getLineCount());
+      current.setSelection({
+        startLineNumber: line,
+        startColumn: model.getLineFirstNonWhitespaceColumn(line) || 1,
+        endLineNumber: line,
+        endColumn: model.getLineMaxColumn(line),
+      });
+    } else {
+      current.setPosition({ lineNumber: reveal.line, column: reveal.column });
+    }
+    current.revealLineInCenter(reveal.line);
+    current.focus();
+  }, [reveal, loading]);
 
   return (
     <div className={styles.frame}>

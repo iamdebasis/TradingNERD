@@ -23,7 +23,7 @@ import {
   maxQual,
   SERIES,
 } from './types.ts';
-import { PineArray, PineMatrix, type Value } from './values.ts';
+import { PineArray, PineEnum, PineMatrix, type Value } from './values.ts';
 
 /**
  * Pine's strings (the v6 reference's str.* functions, log.* and alert()). An na string is the
@@ -209,13 +209,16 @@ function formatted(c: Compiler, call: Call, scope: Scope, nameOfPattern: string)
 
 function logCall(level: 'info' | 'warning' | 'error'): Handler {
   return (c, call, scope) => {
+    c.otherOutputs++;
+    c.logging = true;
     const message = formatted(c, call, scope, 'message');
     const ev = message.ev;
+    const line = c.inScript ? call.span.line : null;
     return {
       base: 'void',
       qual: SERIES,
       ev: (rt) => {
-        rt.log(level, ev(rt));
+        rt.log(level, ev(rt), line);
         return null;
       },
       span: call.span,
@@ -228,6 +231,19 @@ export function stringCalls(): Record<string, Handler> {
     'str.tostring': (c, call, scope) => {
       const args = new Args(c, call, scope, ['value', 'format'], 1);
       const value = args.get('value') as Compiled;
+      // An enum's member is written as its title: the reference's input.enum() example passes
+      // str.tostring(tz.ny) as a time zone, its member being `ny = "America/New_York"`.
+      if (c.enums.has(value.base)) {
+        const member = value.ev;
+        const title = (v: Value) => (v instanceof PineEnum ? v.title : '');
+        return {
+          base: 'string',
+          qual: value.qual,
+          ev: (rt) => title(member(rt)),
+          fold: value.fold ? (env) => title((value.fold as (e: FoldEnv) => Value)(env)) : undefined,
+          span: call.span,
+        };
+      }
       if (
         value.base === 'void' ||
         value.base === 'tuple' ||
@@ -364,6 +380,7 @@ export function stringCalls(): Record<string, Handler> {
     // Alerts come with the alerts dialog: until then an alert() call does nothing, as on a
     // TradingView chart without an alert set on the script.
     alert: (c, call, scope) => {
+      c.otherOutputs++;
       const args = new Args(c, call, scope, ['message', 'freq'], 1);
       args.string('message');
       args.string('freq');

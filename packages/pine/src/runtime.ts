@@ -161,11 +161,17 @@ const BAR_BUDGET_MS = 500;
 export interface LogEntry {
   level: 'info' | 'warning' | 'error';
   message: string;
-  /** The bar it was logged on, and that bar's opening time (ms). */
+  /** The bar it was logged on. */
   bar: number;
+  /**
+   * When (ms): the bar's opening time, or on a live bar's update the time it ran, to the
+   * millisecond, as TradingView's pane stamps realtime entries (Pine docs, Debugging: Figure 348).
+   */
   time: number;
   /** Logged on the live bar's update rather than a closed bar. */
   realtime: boolean;
+  /** The script's line that logged it (Source code shows it), null for a library's code. */
+  line: number | null;
 }
 
 /** The most messages a run keeps (the oldest go first). */
@@ -285,6 +291,8 @@ export class Runtime {
   usesObjects = false;
   /** Its Pine Logs, oldest first. */
   logs: LogEntry[] = [];
+  /** How many messages it has logged in all, so a reader can tell when there are new ones. */
+  logsWritten = 0;
   outputs: Outputs = { plots: [], plotColors: [], backgrounds: [], fillColors: [] };
   private lastIndex = -1;
   /** The last execution committed: nothing to roll back before the next. */
@@ -365,15 +373,18 @@ export class Runtime {
     this.journal.push(save());
   }
 
-  log(level: LogEntry['level'], message: string): void {
+  log(level: LogEntry['level'], message: string, line: number | null): void {
     const bar = this.bar;
+    const realtime = this.index >= this.realtimeFrom;
     this.logs.push({
       level,
       message,
       bar: this.index,
-      time: bar ? (bar.start ?? bar.time * 1000) : Number.NaN,
-      realtime: this.index >= this.realtimeFrom,
+      time: realtime ? this.now : bar ? (bar.start ?? bar.time * 1000) : Number.NaN,
+      realtime,
+      line,
     });
+    this.logsWritten++;
     if (this.logs.length > MAX_LOGS) this.logs.splice(0, this.logs.length - MAX_LOGS);
   }
 
