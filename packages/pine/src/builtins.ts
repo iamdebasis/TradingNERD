@@ -16,6 +16,7 @@ import type { Compiler, EnumDef, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import { markCalls, markConstant } from './marks.ts';
 import { requestCalls } from './requestCalls.ts';
+import { canonicalTimeframe } from './requests.ts';
 import { DEFAULT_SYMBOL, type Runtime } from './runtime.ts';
 import { stringCalls } from './strings.ts';
 import {
@@ -79,6 +80,7 @@ import {
   VwapFn,
   WprFn,
 } from './taTrend.ts';
+import { tickerCalls, tickerConstant } from './tickers.ts';
 import { barCloseTime, calendarValue, sessionOf, timeCalls, timeName } from './timeBuiltins.ts';
 import {
   type Base,
@@ -161,14 +163,21 @@ const LATER: readonly [RegExp, string][] = [
     "isn't supported in tradingNerd yet: this data comes from TradingView's own feeds",
   ],
   [
-    /^request\.(security_lower_tf|currency_rate)$/,
-    "isn't supported in tradingNerd yet: it comes in the next update",
+    /^ticker\.(renko|linebreak|kagi|pointfigure)$/,
+    "isn't supported in tradingNerd yet: Renko, Line Break, Kagi and Point & Figure data come with those chart types",
   ],
   [
     /^strategy(\.|$)/,
     "isn't supported in tradingNerd yet: strategies come with the Strategy Tester in a later update",
   ],
 ];
+
+/** The currency.* constants (the v6 reference). */
+const CURRENCIES = new Set(
+  'AED ARS AUD BDT BHD BRL BTC CAD CHF CLP CNY COP CZK DKK EGP ETH EUR GBP HKD HUF IDR ILS INR ISK JPY KES KRW KWD LKR MAD MXN MYR NGN NOK NONE NZD PEN PHP PKR PLN QAR RON RSD RUB SAR SEK SGD THB TND TRY TWD USD USDT VES VND ZAR'.split(
+    ' ',
+  ),
+);
 
 /** A bar's value by name: open … hlcc4, time, bar_index. */
 function barValue(name: string): ((rt: Runtime, k: number) => number) | null {
@@ -288,6 +297,17 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
       if (member === 'right' || member === 'left' || member === 'none') {
         return constant('scale_style', member, span);
       }
+      break;
+    case 'adjustment':
+    case 'backadjustment':
+    case 'settlement_as_close': {
+      const setting = tickerConstant(space, member, span);
+      if (setting) return setting;
+      break;
+    }
+    case 'currency':
+      // The currencies' codes (the v6 reference, currency.*); currency.NONE is none.
+      if (CURRENCIES.has(member)) return constant('string', member === 'NONE' ? '' : member, span);
       break;
     case 'barmerge':
       // request.security()'s merge settings (the v6 reference, barmerge.*).
@@ -769,6 +789,7 @@ const CALLS: Record<string, Handler> = {
   ...stringCalls(),
   ...markCalls(),
   ...requestCalls(),
+  ...tickerCalls(),
 };
 
 /** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
@@ -846,12 +867,18 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     1,
   );
   const title = String(args.constant('title', '', 'string') ?? '');
-  const timeframe = args.constant('timeframe', '', 'string');
-  if (timeframe !== '' && timeframe !== null) {
-    c.fail(
-      'An indicator on another timeframe isn\'t supported in tradingNerd yet: leave timeframe = ""',
-      args.get('timeframe')?.span as Span,
-    );
+  // timeframe = "" runs on the chart's (the built-in RSI's code declares it so); either way the
+  // settings get its two inputs (Pine docs, Inputs: Other features affecting Inputs).
+  if (args.has('timeframe')) {
+    const timeframe = args.constant('timeframe', '', 'string');
+    if (timeframe !== '' && typeof timeframe === 'string' && !canonicalTimeframe(timeframe)) {
+      c.fail(`"${timeframe}" isn't a timeframe`, args.get('timeframe')?.span as Span);
+    }
+    c.declaredTimeframe = {
+      defval: typeof timeframe === 'string' ? timeframe : '',
+      gaps: args.constant('timeframe_gaps', true, 'bool') !== false,
+      span: args.get('timeframe')?.span ?? call.span,
+    };
   }
   // scale and calc_bars_count are taken; the script draws on its own scale over every bar
   // (provisional, docs/SPEC.md §11).
@@ -881,6 +908,7 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     precision: typeof precision === 'number' && !Number.isNaN(precision) ? precision : null,
     library: false,
     dynamicRequests: dynamicRequests(c, args),
+    timeframe: null,
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };
@@ -909,6 +937,7 @@ function libraryCall(c: Compiler, call: Call, scope: Scope): Compiled {
     precision: null,
     library: true,
     dynamicRequests: dynamicRequests(c, args),
+    timeframe: null,
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };

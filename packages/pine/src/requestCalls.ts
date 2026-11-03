@@ -3,7 +3,17 @@ import type { Expr } from './ast.ts';
 import type { Compiler, Scope, Var } from './compiler.ts';
 import { capturedValue, requestNa, type SecurityOptions } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { type Base, CONST, type Compiled, type FoldEnv, maxQual, SERIES, SIMPLE } from './types.ts';
+import {
+  arrayOf,
+  type Base,
+  CONST,
+  type Compiled,
+  type FoldEnv,
+  isCollection,
+  maxQual,
+  SERIES,
+  SIMPLE,
+} from './types.ts';
 import type { Value } from './values.ts';
 
 /**
@@ -85,31 +95,10 @@ const securityCall: Handler = (c, call, scope) => {
   const args = new Args(c, call, scope, SECURITY_PARAMS, 3);
   // In a request's context program, the call being copied gives its expression's value on each
   // of the context's bars.
-  if (c.capturing(call)) {
-    const value = expressionOf(c, call, scope, args);
-    const ev = value.ev;
-    return {
-      base: 'void',
-      qual: SERIES,
-      ev: (rt) => {
-        rt.capture(capturedValue(ev(rt)));
-        return null;
-      },
-      span: call.span,
-    };
-  }
+  if (c.capturing(call)) return capture(expressionOf(c, call, scope, args), call.span);
   const reads = new Set<Var>();
   const value = c.collectReads(reads, () => expressionOf(c, call, scope, args));
-  if (value.base === 'tuple') {
-    const total = (tupleElements.get(c) ?? 0) + (value.items?.length ?? 0);
-    tupleElements.set(c, total);
-    if (total > MAX_TUPLE_ELEMENTS) {
-      c.fail(
-        `The requests return ${total} tuple elements in all: the limit is ${MAX_TUPLE_ELEMENTS}`,
-        value.span,
-      );
-    }
-  }
+  countTuple(c, value);
   // Without dynamic requests, the context can't change from bar to bar (Pine docs, "series"
   // arguments): the symbol and the timeframe must be known by the first bar.
   const most = c.dynamicRequests() ? SERIES : SIMPLE;
@@ -167,7 +156,143 @@ const securityCall: Handler = (c, call, scope) => {
   };
 };
 
+const LOWER_TF_PARAMS = [
+  'symbol',
+  'timeframe',
+  'expression',
+  'ignore_invalid_symbol',
+  'currency',
+  'ignore_invalid_timeframe',
+  'calc_bars_count',
+] as const;
+
+/**
+ * request.security_lower_tf(): every intrabar's value in each chart bar, as an array (a tuple of
+ * arrays for a tuple). Its expression can't be a collection: "arrays cannot directly reference
+ * other collections" (Pine docs, request.security_lower_tf(): Requesting collections).
+ */
+const lowerTfCall: Handler = (c, call, scope) => {
+  const args = new Args(c, call, scope, LOWER_TF_PARAMS, 3);
+  if (c.capturing(call)) return capture(expressionOf(c, call, scope, args), call.span);
+  const reads = new Set<Var>();
+  const value = c.collectReads(reads, () => expressionOf(c, call, scope, args));
+  const parts = value.base === 'tuple' ? (value.items ?? []) : [value.base];
+  for (const part of parts) {
+    if (isCollection(part)) {
+      c.fail(
+        `'request.security_lower_tf' can't request a collection: wrap it in a user-defined type's field`,
+        value.span,
+      );
+    }
+  }
+  countTuple(c, value);
+  const most = c.dynamicRequests() ? SERIES : SIMPLE;
+  const symbol = (args.string('symbol', most) as Compiled).ev;
+  const timeframe = (args.string('timeframe', most) as Compiled).ev;
+  const ignore = args.foldedAs('ignore_invalid_symbol', 'bool', false);
+  const ignoreTimeframe = args.foldedAs('ignore_invalid_timeframe', 'bool', false);
+  const currency = args.string('currency')?.ev ?? null;
+  const calcBars = args.foldedAs('calc_bars_count', 'int', Number.NaN, SIMPLE);
+  const elem = (base: Base): Base => arrayOf(base === 'na' ? 'float' : base);
+  const items = value.base === 'tuple' ? (value.items ?? []).map(elem) : undefined;
+  const base: Base = value.base === 'tuple' ? 'tuple' : elem(value.base);
+  const site = c.requestSite(call, reads, { base, items });
+  const na = requestNa(base, items);
+  let seen: readonly Value[] | null = null;
+  let options: (SecurityOptions & { ignoreInvalidTimeframe: boolean }) | null = null;
+  const optionsOf = (rt: Runtime) => {
+    if (options && seen === rt.inputs) return options;
+    const env: FoldEnv = { inputs: rt.inputs };
+    const bars = calcBars(env);
+    options = {
+      gaps: false,
+      lookahead: false,
+      ignoreInvalid: ignore(env) === true,
+      ignoreInvalidTimeframe: ignoreTimeframe(env) === true,
+      calcBars: typeof bars === 'number' && bars > 0 ? Math.floor(bars) : null,
+    };
+    seen = rt.inputs;
+    return options;
+  };
+  return {
+    base,
+    items,
+    qual: SERIES,
+    ev: (rt) => {
+      const broker = rt.requests;
+      if (!broker) return na;
+      return broker.lowerTf(
+        site,
+        String(symbol(rt) ?? ''),
+        String(timeframe(rt) ?? ''),
+        optionsOf(rt),
+        rt,
+        currency ? String(currency(rt) ?? '') : '',
+      );
+    },
+    span: call.span,
+  };
+};
+
+/** In a context program, the request being copied: its expression's value on each bar. */
+function capture(value: Compiled, span: Compiled['span']): Compiled {
+  const ev = value.ev;
+  return {
+    base: 'void',
+    qual: SERIES,
+    ev: (rt) => {
+      rt.capture(capturedValue(ev(rt)));
+      return null;
+    },
+    span,
+  };
+}
+
+/** Counts a request's tuple elements toward Pine's limit for the whole script. */
+function countTuple(c: Compiler, value: Compiled): void {
+  if (value.base !== 'tuple') return;
+  const total = (tupleElements.get(c) ?? 0) + (value.items?.length ?? 0);
+  tupleElements.set(c, total);
+  if (total > MAX_TUPLE_ELEMENTS) {
+    c.fail(
+      `The requests return ${total} tuple elements in all: the limit is ${MAX_TUPLE_ELEMENTS}`,
+      value.span,
+    );
+  }
+}
+
+/**
+ * request.currency_rate(from, to, ignore_invalid_currency): the daily rate converting `from` into
+ * `to`, from the day before each bar (Pine docs, request.currency_rate()).
+ */
+const currencyRateCall: Handler = (c, call, scope) => {
+  const args = new Args(c, call, scope, ['from', 'to', 'ignore_invalid_currency'], 2);
+  const from = (args.string('from') as Compiled).ev;
+  const to = (args.string('to') as Compiled).ev;
+  const ignore = args.foldedAs('ignore_invalid_currency', 'bool', false);
+  return {
+    base: 'float',
+    qual: SERIES,
+    ev: (rt) => {
+      const broker = rt.requests;
+      if (!broker) return Number.NaN;
+      return broker.currencyRate(
+        String(from(rt) ?? ''),
+        String(to(rt) ?? ''),
+        ignore({ inputs: rt.inputs }) === true,
+        rt,
+        call.span,
+      );
+    },
+    span: call.span,
+  };
+};
+
 /** The request.*() functions built so far. */
 export function requestCalls(): Record<string, Handler> {
-  return { 'request.security': securityCall };
+  return {
+    'request.security': securityCall,
+    'request.security_lower_tf': lowerTfCall,
+    'request.currency_rate': currencyRateCall,
+  };
 }

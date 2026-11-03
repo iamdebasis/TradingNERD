@@ -10,7 +10,8 @@ import type { CompiledProgram } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import { CHECKS, Execution, type RunClock, type ScriptError, scaledBar } from './execution.ts';
 import type { Runtime, ScriptSymbol } from './runtime.ts';
-import { type Base, naOf } from './types.ts';
+import { parseTickerId } from './tickers.ts';
+import { type Base, elemOf, naOf } from './types.ts';
 import { PineArray, PineMap, PineMatrix, PineObject, type Value } from './values.ts';
 import { Agreement, drawnFrom } from './warmup.ts';
 
@@ -24,15 +25,20 @@ import { Agreement, drawnFrom } from './warmup.ts';
  * those bars are then merged onto the chart's bars by TradingView's rules (alignBar).
  */
 
-/** A context a request asks for: a symbol on a timeframe. */
+/** A context a request asks for: a symbol on a timeframe, and its hours and adjustment. */
 export interface RequestKey {
-  /** The ticker id, upper case ("BINANCE:BTCUSDT"); the chart's when the script gives "". */
+  /** The symbol, upper case ("BINANCE:BTCUSDT"); the chart's when the script gives "". */
   readonly symbol: string;
   /** The timeframe in TradingView's notation, written the standard way ("60", "1D", "1W"). */
   readonly timeframe: string;
+  /** Intraday bars with the hours before and after the session (ticker.new's session.extended). */
+  readonly session?: 'extended';
+  /** A stock's prices adjusted otherwise than for splits alone: "dividends" too, or "none". */
+  readonly adjustment?: 'none' | 'dividends';
 }
 
-export const requestKeyText = (key: RequestKey): string => `${key.symbol}@${key.timeframe}`;
+export const requestKeyText = (key: RequestKey): string =>
+  `${key.symbol}@${key.timeframe}${key.session ? ':extended' : ''}${key.adjustment ? `:${key.adjustment}` : ''}`;
 
 /** A context's bars, as the app has them. */
 export interface ContextData {
@@ -63,6 +69,18 @@ export interface RequestFeed {
    * loaded yet (the run then lists it as missing, and the app loads it and runs the script again).
    */
   data(key: RequestKey): ContextData | 'invalid' | null;
+  /**
+   * How prices in `from` convert into `to`: the currency pairs whose daily closes do it, each
+   * read as its price or its inverse (TRY to KRW might go through USD, as the Pine docs'
+   * request.currency_rate() example does); null when there's no way. Absent: none convert.
+   */
+  rates?(from: string, to: string): readonly CurrencyLeg[] | null;
+}
+
+/** One step of a currency conversion: a pair's daily close, or its inverse. */
+export interface CurrencyLeg {
+  readonly symbol: string;
+  readonly invert: boolean;
 }
 
 /**
@@ -105,6 +123,8 @@ export interface SecurityOptions {
   readonly ignoreInvalid: boolean;
   /** calc_bars_count: only this many of the context's latest bars count, null for all. */
   readonly calcBars: number | null;
+  /** `currency`: the currency to convert the context's prices to; "" for its own. */
+  readonly currency?: string;
 }
 
 /** "A script can use up to 40 unique calls to the functions in the request.*() namespace" (Pine docs, Limitations). */
@@ -282,6 +302,25 @@ export function canonicalTimeframe(text: string): string | null {
   return resolution ? formatResolution(resolution) : null;
 }
 
+/** Whether bars of `a` are shorter than bars of `b` (two timeframes in TradingView's notation). */
+export function isLower(a: string, b: string): boolean {
+  const ra = parseResolution(a);
+  const rb = parseResolution(b);
+  return ra !== null && rb !== null && spanOf(ra) < spanOf(rb);
+}
+
+/** Bars' opening and closing times, ms, by their symbol's clock. */
+export function timesOf(
+  bars: readonly Bar[],
+  symbol: ScriptSymbol,
+  timeframe: string,
+): { opens: Float64Array; closes: Float64Array } {
+  const resolution = parseResolution(timeframe) ?? { count: 1, unit: 'day' };
+  const opens = new Float64Array(bars.length);
+  for (let i = 0; i < bars.length; i++) opens[i] = openOf(bars[i] as Bar);
+  return { opens, closes: closesOf(bars, symbol, resolution) };
+}
+
 /** A bar's opening time, ms (a tick bar's `time` is its number; `start` its time). */
 const openOf = (bar: Bar): number => bar.start ?? bar.time * 1000;
 
@@ -301,6 +340,43 @@ function closesOf(
   }
   return out;
 }
+
+// ---- non-standard bars ----
+
+/**
+ * Heikin Ashi's bars from a symbol's own (Pine docs, Non-standard charts data): the close is the
+ * bar's average price, the open the middle of the one before's open and close (the first's, of
+ * its own open and close), and the high and low the extremes of those and the bar's.
+ */
+export function heikinAshiBars(bars: readonly Bar[]): Bar[] {
+  const out: Bar[] = [];
+  let open = Number.NaN;
+  let close = Number.NaN;
+  for (const bar of bars) {
+    const haClose = (bar.open + bar.high + bar.low + bar.close) / 4;
+    const haOpen = Number.isNaN(open) ? (bar.open + bar.close) / 2 : (open + close) / 2;
+    out.push({
+      ...bar,
+      open: haOpen,
+      close: haClose,
+      high: Math.max(bar.high, haOpen, haClose),
+      low: Math.min(bar.low, haOpen, haClose),
+    });
+    open = haOpen;
+    close = haClose;
+  }
+  return out;
+}
+
+/**
+ * How many of Heikin Ashi's bars its first bar still shows in: each open halves the one before's
+ * weight, so after this many it's below the warm-up rule's SETTLED_WEIGHT (1e-9).
+ */
+const HEIKIN_ASHI_WARMUP = 30;
+
+/** A request whose prices nothing converts to the currency it asks for. */
+const noRate = (symbol: string, currency: string, span: Span): PineRuntimeError =>
+  new PineRuntimeError(`Cannot convert ${symbol}'s prices to ${currency}: no rate is known`, span);
 
 // ---- contexts ----
 
@@ -326,17 +402,21 @@ export class ContextRun {
   private readonly store: ContextStore;
   private readonly plan: ContextPlan;
   private readonly calcBars: number | null;
+  /** Bars its data's own making needs before it's trusted (Heikin Ashi's opens): 0 for none. */
+  private readonly warmup: number;
 
   constructor(
     store: ContextStore,
     plan: ContextPlan,
     resolution: Resolution,
     calcBars: number | null,
+    warmup = 0,
   ) {
     this.store = store;
     this.plan = plan;
     this.resolution = resolution;
     this.calcBars = calcBars;
+    this.warmup = warmup;
   }
 
   get error(): ScriptError | null {
@@ -433,6 +513,7 @@ export class ContextRun {
     for (const check of this.checks) check.all(bars);
     this.times(bars, data);
     this.settledFrom = this.settle(bars.length, data.fromListing || this.from > 0);
+    if (!data.fromListing) this.settledFrom = Math.max(this.settledFrom, this.warmup);
   }
 
   private times(bars: readonly Bar[], data: ContextData): void {
@@ -533,13 +614,30 @@ export class ContextStore {
     this.clock = clock;
   }
 
-  /** The run of a context for a request, or why there's none. */
+  /** Bars made from the feed's (Heikin Ashi's), by the key's text, with what they came from. */
+  private readonly made = new Map<string, { from: ContextData; data: ContextData }>();
+  /** Prices converted to another currency, by the key's text, with what they came from. */
+  private readonly converted = new Map<
+    string,
+    { from: ContextData; legs: readonly ContextData[]; data: ContextData }
+  >();
+  /** Each currency pair's way, by "FROM>TO". */
+  private readonly ways = new Map<string, readonly CurrencyLeg[] | null>();
+  /** Each pair's days' closing times. */
+  private readonly legCloses = new WeakMap<ContextData, Float64Array>();
+
+  /**
+   * The run of a context for a request, or why there's none. `type` asks for non-standard bars
+   * made from the symbol's own ("heikinashi").
+   */
   run(
     site: RequestSite,
     key: RequestKey,
     options: SecurityOptions,
-  ): ContextRun | 'missing' | 'invalid' {
-    const text = requestKeyText(key);
+    type: string | null = null,
+  ): ContextRun | 'missing' | 'invalid' | 'no rate' {
+    const currency = (options.currency ?? '').toUpperCase();
+    const text = `${requestKeyText(key)}${type ? `#${type}` : ''}${currency ? `$${currency}` : ''}`;
     this.used.set(text, key);
     const resolution = parseResolution(key.timeframe);
     if (!resolution) return 'invalid';
@@ -553,20 +651,143 @@ export class ContextStore {
         );
       }
     }
-    const data = this.feed.data(key);
-    if (data === null) {
-      this.missing.set(text, key);
+    const fed = this.feed.data(key);
+    if (fed === null) {
+      this.missing.set(requestKeyText(key), key);
       return 'missing';
     }
-    if (data === 'invalid') return 'invalid';
+    if (fed === 'invalid') return 'invalid';
+    if (type !== null && type !== 'heikinashi') return 'invalid';
+    let data = fed;
+    if (currency && currency !== fed.symbol.currency.toUpperCase()) {
+      const made = this.convert(text, fed, currency);
+      if (made === 'missing' || made === 'no rate')
+        return made === 'missing' ? 'missing' : 'no rate';
+      data = made;
+    }
+    if (type === 'heikinashi') data = this.heikinAshi(text, data);
     const id = `${site.shared ?? site.id}|${text}|${options.calcBars}`;
     let run = this.runs.get(id);
     if (!run) {
-      run = new ContextRun(this, site.plan, resolution, options.calcBars);
+      const warmup = type === 'heikinashi' ? HEIKIN_ASHI_WARMUP : 0;
+      run = new ContextRun(this, site.plan, resolution, options.calcBars, warmup);
       this.runs.set(id, run);
     }
     run.ensure(data);
     return run;
+  }
+
+  /**
+   * A currency's rate into another at a moment: the product of its pairs' last daily closes
+   * before it ("the previous daily value", the v6 reference), so it never repaints. 'missing'
+   * while a pair's days load; 'no rate' when nothing converts them.
+   */
+  rateAt(from: string, to: string, ms: number): number | 'missing' | 'no rate' {
+    const legs = this.legs(from, to);
+    if (legs === 'missing' || legs === 'no rate') return legs;
+    return this.rateWith(legs, ms);
+  }
+
+  private rateWith(
+    legs: readonly { leg: CurrencyLeg; data: ContextData; closes: Float64Array }[],
+    ms: number,
+  ): number {
+    let rate = 1;
+    for (const { leg, data, closes } of legs) {
+      const closed = data.live ? data.bars.length - 1 : data.bars.length;
+      const j = lastAtMost(closes, closed, ms, false);
+      if (j < 0) return Number.NaN;
+      const close = (data.bars[j] as Bar).close;
+      rate *= leg.invert ? 1 / close : close;
+    }
+    return rate;
+  }
+
+  /** The pairs that convert `from` into `to`, with their days, or why there are none. */
+  private legs(
+    from: string,
+    to: string,
+  ): { leg: CurrencyLeg; data: ContextData; closes: Float64Array }[] | 'missing' | 'no rate' {
+    const name = `${from.toUpperCase()}>${to.toUpperCase()}`;
+    let way = this.ways.get(name);
+    if (way === undefined) {
+      way = this.feed.rates?.(from.toUpperCase(), to.toUpperCase()) ?? null;
+      this.ways.set(name, way);
+    }
+    if (!way) return 'no rate';
+    const out: { leg: CurrencyLeg; data: ContextData; closes: Float64Array }[] = [];
+    let missing = false;
+    for (const leg of way) {
+      const key: RequestKey = { symbol: leg.symbol.toUpperCase(), timeframe: '1D' };
+      const data = this.feed.data(key);
+      if (data === null) {
+        this.missing.set(requestKeyText(key), key);
+        missing = true;
+        continue;
+      }
+      if (data === 'invalid') return 'no rate';
+      this.used.set(requestKeyText(key), key);
+      let closes = this.legCloses.get(data);
+      if (!closes) {
+        closes = timesOf(data.bars, data.symbol, '1D').closes;
+        this.legCloses.set(data, closes);
+      }
+      out.push({ leg, data, closes });
+    }
+    return missing ? 'missing' : out;
+  }
+
+  /**
+   * A context's prices in another currency: each bar's open, high, low and close times the
+   * rate before it, so what the code computes from them is in that currency and "literal values
+   * such as 200 are not converted" (the v6 reference, request.security's currency).
+   */
+  private convert(
+    text: string,
+    from: ContextData,
+    currency: string,
+  ): ContextData | 'missing' | 'no rate' {
+    const legs = this.legs(from.symbol.currency, currency);
+    if (legs === 'missing' || legs === 'no rate') return legs;
+    const known = this.converted.get(text);
+    if (
+      known &&
+      known.from === from &&
+      known.legs.length === legs.length &&
+      known.legs.every((data, i) => data === legs[i]?.data)
+    ) {
+      return known.data;
+    }
+    const bars = from.bars.map((bar) => {
+      const k = this.rateWith(legs, openOf(bar));
+      return {
+        ...bar,
+        open: bar.open * k,
+        high: bar.high * k,
+        low: bar.low * k,
+        close: bar.close * k,
+      };
+    });
+    // A pair's history changing changes these bars' history too.
+    let history = from.history;
+    for (const { data } of legs) history = history * 31 + data.history;
+    const data: ContextData = {
+      ...from,
+      symbol: { ...from.symbol, currency },
+      bars,
+      history,
+    };
+    this.converted.set(text, { from, legs: legs.map((l) => l.data), data });
+    return data;
+  }
+
+  /** A context's Heikin Ashi bars, made again only when the feed's change. */
+  private heikinAshi(text: string, from: ContextData): ContextData {
+    const known = this.made.get(text);
+    if (known && known.from === from) return known.data;
+    const data: ContextData = { ...from, bars: heikinAshiBars(from.bars) };
+    this.made.set(text, { from, data });
+    return data;
   }
 }
 
@@ -604,30 +825,16 @@ export class RequestBroker {
     rt: Runtime,
     currency = '',
   ): Value {
-    const key = this.key(symbol, timeframe, rt);
-    if (!key) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
-    // "scripts must request all required datasets while executing on historical bars": a
-    // realtime bar can't ask for a new one (Pine docs, Dynamic requests).
-    const asked = `${site.shared ?? site.id}|${requestKeyText(key)}`;
-    if (rt.index < rt.realtimeFrom) this.store.history.add(asked);
-    else if (rt.realtimeFrom > 0 && !this.store.history.has(asked)) {
-      throw new PineRuntimeError(
-        `A request on a realtime bar can only use data requested on the chart's history: ${key.symbol} on ${key.timeframe} wasn't`,
-        site.span,
-      );
-    }
-    const run = this.store.run(site, key, options);
+    const asking = this.key(symbol, timeframe, rt);
+    if (!asking) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
+    const { key, type } = asking;
+    // A realtime bar can't ask for a new context (Pine docs, Dynamic requests).
+    this.sealed(site, key, rt);
+    const run = this.store.run(site, key, { ...options, currency }, type);
     if (run === 'missing') return requestNa(site.base, site.items);
     if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);
-    const error = run.error;
-    // The context's code stopping stops the script, as one script (Pine docs, Runtime errors).
-    if (error) throw new PineRuntimeError(error.message, error.span);
-    if (currency && currency.toUpperCase() !== run.currency.toUpperCase()) {
-      throw new PineRuntimeError(
-        `Converting a request's values to ${currency} isn't supported in tradingNerd yet: it comes in the next update`,
-        site.span,
-      );
-    }
+    if (run === 'no rate') throw noRate(key.symbol, currency, site.span);
+    this.checked(run);
     const chart = this.chartBar(rt);
     const lower = spanOf(run.resolution) < spanOf(this.resolution(rt));
     const j = alignBar(chart, run, lower, options);
@@ -636,18 +843,125 @@ export class RequestBroker {
     return run.value(j, site.base, site.items);
   }
 
+  /**
+   * request.security_lower_tf()'s value: every bar of a timeframe at most the chart's inside the
+   * chart bar, oldest first, as an array (a tuple of arrays for a tuple), empty for none (Pine
+   * docs, request.security_lower_tf(): Intrabar data arrays). On the realtime bar, those so far.
+   */
+  lowerTf(
+    site: RequestSite,
+    symbol: string,
+    timeframe: string,
+    options: SecurityOptions & { readonly ignoreInvalidTimeframe: boolean },
+    rt: Runtime,
+    currency = '',
+  ): Value {
+    const asking = this.key(symbol, timeframe, rt);
+    if (!asking) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
+    const { key, type } = asking;
+    this.sealed(site, key, rt);
+    const resolution = parseResolution(key.timeframe);
+    if (resolution && spanOf(resolution) > spanOf(this.resolution(rt))) {
+      if (options.ignoreInvalidTimeframe) return requestNa(site.base, site.items);
+      throw new PineRuntimeError(
+        `The timeframe of 'request.security_lower_tf' must be the chart's or lower: "${key.timeframe}" is higher than "${rt.symbol.timeframe}"`,
+        site.span,
+      );
+    }
+    const run = this.store.run(site, key, { ...options, currency }, type);
+    if (run === 'missing') return requestNa(site.base, site.items);
+    if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);
+    if (run === 'no rate') throw noRate(key.symbol, currency, site.span);
+    this.checked(run);
+    const chart = this.chartBar(rt);
+    const first = lastAtMost(run.opens, run.count, chart.open, true) + 1;
+    const last = lastAtMost(run.opens, run.count, chart.close, true);
+    if (first <= last && first < run.settledFrom) {
+      this.unsettledUntil = Math.max(this.unsettledUntil, rt.index);
+    }
+    const values: Value[] = [];
+    for (let j = first; j <= last; j++) values.push(run.value(j, 'na', undefined));
+    if (site.base === 'tuple') {
+      const items = site.items ?? [];
+      return items.map(
+        (item, k) =>
+          new PineArray(
+            elemOf(item),
+            values.map((v) => (Array.isArray(v) ? (v[k] ?? null) : null)),
+          ),
+      );
+    }
+    return new PineArray(elemOf(site.base), values);
+  }
+
+  /** "scripts must request all required datasets while executing on historical bars". */
+  private sealed(site: RequestSite, key: RequestKey, rt: Runtime): void {
+    const asked = `${site.shared ?? site.id}|${requestKeyText(key)}`;
+    if (rt.index < rt.realtimeFrom) this.store.history.add(asked);
+    else if (rt.realtimeFrom > 0 && !this.store.history.has(asked)) {
+      throw new PineRuntimeError(
+        `A request on a realtime bar can only use data requested on the chart's history: ${key.symbol} on ${key.timeframe} wasn't`,
+        site.span,
+      );
+    }
+  }
+
+  /** A context's own runtime error stops the script, as one script (Pine docs, Runtime errors). */
+  private checked(run: ContextRun): void {
+    const error = run.error;
+    if (error) throw new PineRuntimeError(error.message, error.span);
+  }
+
+  /**
+   * request.currency_rate()'s value on the bar being run: the daily rate before the bar opened
+   * (Pine docs, request.currency_rate(): "it ensures non-repainting results"), 1 for a currency
+   * into itself; na while a pair loads, or for no rate with ignore_invalid_currency.
+   */
+  currencyRate(from: string, to: string, ignore: boolean, rt: Runtime, span: Span): number {
+    if (!from || !to) return Number.NaN;
+    if (from.toUpperCase() === to.toUpperCase()) return 1;
+    const rate = this.store.rateAt(from, to, this.chartBar(rt).open);
+    if (rate === 'missing') return Number.NaN;
+    if (rate === 'no rate') {
+      if (ignore) return Number.NaN;
+      throw new PineRuntimeError(`Cannot convert ${from} to ${to}: no rate is known`, span);
+    }
+    return rate;
+  }
+
   private invalid(site: RequestSite, message: string, options: SecurityOptions): Value {
     if (options.ignoreInvalid) return requestNa(site.base, site.items);
     throw new PineRuntimeError(message, site.span);
   }
 
-  /** The context asked for: "" and syminfo.tickerid are this run's own symbol and timeframe. */
-  private key(symbol: string, timeframe: string, rt: Runtime): RequestKey | null {
+  /**
+   * The context asked for: "" and syminfo.tickerid are this run's own symbol and timeframe, with
+   * its hours; a ticker id's settings (ticker.new, ticker.modify) its hours, adjustment and type.
+   */
+  key(
+    symbol: string,
+    timeframe: string,
+    rt: Runtime,
+  ): { key: RequestKey; type: string | null } | null {
     const own = rt.symbol;
-    const sym = (symbol ?? '').trim().toUpperCase() || own.tickerid.toUpperCase();
+    const id = parseTickerId(symbol ?? '');
+    const sym = id.symbol.trim().toUpperCase() || own.tickerid.toUpperCase();
     const tf = (timeframe ?? '').trim() || own.timeframe;
     const canonical = canonicalTimeframe(tf);
-    return canonical ? { symbol: sym, timeframe: canonical } : null;
+    if (!canonical) return null;
+    const inherits = sym === own.tickerid.toUpperCase();
+    const session = id.session ?? (inherits ? own.session : undefined);
+    const adjustment =
+      id.adjustment === 'none' || id.adjustment === 'dividends' ? id.adjustment : undefined;
+    return {
+      key: {
+        symbol: sym,
+        timeframe: canonical,
+        ...(session === 'extended' ? { session: 'extended' as const } : {}),
+        ...(adjustment ? { adjustment } : {}),
+      },
+      type: id.type ?? null,
+    };
   }
 
   private resolution(rt: Runtime): Resolution {

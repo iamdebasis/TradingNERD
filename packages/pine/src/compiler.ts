@@ -212,6 +212,12 @@ export interface IndicatorDecl {
    * `dynamic_requests = false` turns off; v5 turns them on with `dynamic_requests = true`.
    */
   dynamicRequests: boolean;
+  /**
+   * Declared with `timeframe =`: the script runs on that timeframe, its values merged onto the
+   * chart's bars (Pine docs, FAQ: Using timeframe). The two inputs it gets, by index: "Timeframe"
+   * and "Wait for timeframe closes" (`timeframe_gaps`). Null when it isn't declared so.
+   */
+  timeframe: { input: number; gaps: number } | null;
   span: Span;
 }
 
@@ -380,6 +386,10 @@ interface Frame {
   /** A loop's: the requests inside it, and what their expressions need (checked at its end). */
   requests?: { call: Extract<Expr, { kind: 'call' }>; needed: ReadonlySet<Var> }[];
 }
+
+/** Pine's display.all and display.none (builtins.ts DISPLAY), for the inputs the compiler adds. */
+const DISPLAY_ALL = 31;
+const DISPLAY_NONE = 0;
 
 /** Statements a context program always has: the declaration call and global definitions. */
 const DECLARATION_CALLS = new Set(['indicator', 'library', 'strategy']);
@@ -577,6 +587,8 @@ export class Compiler {
   private readonly frames: Frame[] = [];
   /** Extra sets that note every variable read (a request's expression). */
   private readonly collectors: Set<Var>[] = [];
+  /** indicator()'s `timeframe` and `timeframe_gaps`, when it gives them: its inputs come last. */
+  declaredTimeframe: { defval: string; gaps: boolean; span: Span } | null = null;
   /** What opens the next statement list: set just before it's compiled. */
   private pendingFrame: Pick<Frame, 'owner' | 'kind' | 'loopVars' | 'params' | 'exported'> | null =
     null;
@@ -614,6 +626,32 @@ export class Compiler {
       this.fail('A script must declare indicator() or library()', first);
     }
     const decl = this.indicator as IndicatorDecl;
+    // indicator()'s timeframe and timeframe_gaps "populate a script's Settings/Inputs tab with
+    // additional inputs" (Pine docs, Inputs): last, in the Calculation section TradingView's
+    // built-ins show them in (Help Center, multi-timeframe analysis; their place provisional).
+    const timeframe = this.declaredTimeframe;
+    if (timeframe && !this.plan) {
+      const input = this.inputs.length;
+      this.inputs.push({
+        index: input,
+        kind: 'timeframe',
+        title: 'Timeframe',
+        defval: timeframe.defval,
+        group: 'Calculation',
+        display: DISPLAY_ALL,
+        span: timeframe.span,
+      });
+      this.inputs.push({
+        index: input + 1,
+        kind: 'bool',
+        title: 'Wait for timeframe closes',
+        defval: timeframe.gaps,
+        group: 'Calculation',
+        display: DISPLAY_NONE,
+        span: timeframe.span,
+      });
+      decl.timeframe = { input, gaps: input + 1 };
+    }
     // "Each library must have at least one exported function or user-defined type (UDT)" (the
     // v6 reference, export); an exported enum is one too.
     const exports = this.script.statements.some(

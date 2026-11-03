@@ -24,11 +24,16 @@ import { CHECKS, Execution, type RunClock, type ScriptError, scaledBar } from '.
 import { LOCATIONS, SHAPES, SIZES } from './marks.ts';
 import { parse } from './parser.ts';
 import {
+  alignBar,
+  type ContextData,
   type ContextPlan,
   ContextStore,
+  canonicalTimeframe,
+  isLower,
   RequestBroker,
   type RequestFeed,
   type RequestKey,
+  timesOf,
 } from './requests.ts';
 import { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
 import type { FoldEnv, Qual } from './types.ts';
@@ -430,6 +435,19 @@ export class ScriptProgram {
     return this.compiled.requests.length > 0;
   }
 
+  /**
+   * The timeframe it runs on, when its declaration gives one (`timeframe =`) and its Timeframe
+   * input isn't the chart's (""), and whether it waits for that timeframe's closes.
+   */
+  timeframeOf(raw: readonly unknown[]): { timeframe: string; gaps: boolean } | null {
+    const decl = this.compiled.indicator.timeframe;
+    if (!decl) return null;
+    const values = this.sanitize(raw);
+    const timeframe = String(values[decl.input] ?? '');
+    if (!timeframe) return null;
+    return { timeframe, gaps: values[decl.gaps] !== false };
+  }
+
   /** The script's Pine version (1 when it has no annotation). */
   get version(): number {
     return this.script.version ?? 1;
@@ -532,6 +550,16 @@ export class ScriptRun {
   requested: readonly RequestKey[] = [];
   private main: Execution | null = null;
   private store: ContextStore | null = null;
+  /**
+   * Set when it runs on another timeframe (indicator()'s `timeframe =`): that timeframe's bars,
+   * which its own run is over, and whether to wait for their closes; its values are then merged
+   * onto the chart's bars (`merge`).
+   */
+  private on: { key: RequestKey; gaps: boolean; data: ContextData | null } | null = null;
+  /** The chart's bars, when it runs on another timeframe's. */
+  private chartBars: readonly Bar[] = [];
+  /** Whether the bars it runs over start at the symbol's listing (the chart's, or the timeframe's). */
+  private ownListing = false;
   private checks: Execution[] = [];
   /** Per output, its agreement with each check run (by check). */
   private agreements: OutputAgreements = {
@@ -562,7 +590,7 @@ export class ScriptRun {
   }
 
   get length(): number {
-    return this.main?.length ?? 0;
+    return this.on ? this.chartBars.length : (this.main?.length ?? 0);
   }
 
   /** The script's Pine Logs from its run over the chart's bars, oldest first (Pine docs, Debugging). */
@@ -586,7 +614,24 @@ export class ScriptRun {
    */
   setBars(bars: readonly Bar[], fromListing: boolean): void {
     this.fromListing = fromListing;
-    const realtimeFrom = Math.max(0, bars.length - 1);
+    this.chartBars = bars;
+    const timeframe = this.ownTimeframe();
+    if (timeframe) {
+      this.loadTimeframe(bars, timeframe);
+      return;
+    }
+    this.on = null;
+    this.load(bars, fromListing, this.symbol, Math.max(0, bars.length - 1));
+  }
+
+  /** Runs the script afresh over `bars`: the chart's, or its own timeframe's. */
+  private load(
+    bars: readonly Bar[],
+    fromListing: boolean,
+    symbol: ScriptSymbol,
+    realtimeFrom: number,
+  ): void {
+    this.ownListing = fromListing;
     // One clock and seed for the whole load: the check runs must see what the main run sees.
     const clock: RunClock = { now: Date.now(), seed: (Math.random() * 2 ** 31) | 0 };
     // The contexts its requests use, shared by all its runs (requests.ts).
@@ -602,7 +647,7 @@ export class ScriptRun {
       const execution = new Execution(
         this.program.instance(),
         this.inputs,
-        this.symbol,
+        symbol,
         start,
         changed,
         realtimeFrom,
@@ -633,6 +678,7 @@ export class ScriptRun {
    * changed, or 'all' when the script ran afresh.
    */
   update(bars: readonly Bar[], change: BarChange, index: number): number[] | 'all' {
+    if (this.on) return this.updateTimeframe(bars);
     const main = this.main;
     const last = bars.length - 1;
     if (!main || last < 0) {
@@ -667,6 +713,147 @@ export class ScriptRun {
     }
     this.settle(bars.length);
     return changed;
+  }
+
+  /** The timeframe it runs on, when its declaration asks for one other than the chart's. */
+  private ownTimeframe(): { key: RequestKey; gaps: boolean } | null {
+    const asked = this.program.timeframeOf(this.inputs);
+    if (!asked) return null;
+    const timeframe = canonicalTimeframe(asked.timeframe);
+    if (!timeframe || timeframe === canonicalTimeframe(this.symbol.timeframe)) return null;
+    const key: RequestKey = {
+      symbol: this.symbol.tickerid.toUpperCase(),
+      timeframe,
+      ...(this.symbol.session === 'extended' ? { session: 'extended' as const } : {}),
+    };
+    return { key, gaps: asked.gaps };
+  }
+
+  /**
+   * Runs it on its own timeframe's bars, then merges its values onto the chart's (Pine docs, FAQ:
+   * Using timeframe; Help Center, multi-timeframe analysis: "Wait for timeframe closes" shows a
+   * value once its bar closes, unticked the gaps take the latest value, live too).
+   */
+  private loadTimeframe(chart: readonly Bar[], asked: { key: RequestKey; gaps: boolean }): void {
+    const data = this.feed.data(asked.key);
+    if (data === null || data === 'invalid') {
+      this.on = { ...asked, data: null };
+      this.main = null;
+      this.checks = [];
+      this.store = null;
+      this.missing = data === null ? [asked.key] : [];
+      this.requested = [asked.key];
+      this.error =
+        data === 'invalid'
+          ? { message: `Invalid timeframe "${asked.key.timeframe}"`, span: null, bar: 0 }
+          : null;
+      const empty = () => new Float64Array(chart.length).fill(Number.NaN);
+      const d = this.description;
+      this.values = d.plots.map(empty);
+      this.plotColors = d.plots.map((plot) => (plot.colorChanges ? empty() : null));
+      this.backgrounds = d.backgrounds.map(empty);
+      this.fillColors = d.fills.map((fill) => (fill.colorChanges ? empty() : null));
+      this.plotStarts = d.plots.map(() => Number.POSITIVE_INFINITY);
+      this.backgroundStarts = d.backgrounds.map(() => Number.POSITIVE_INFINITY);
+      this.fillStarts = d.fills.map(() => Number.POSITIVE_INFINITY);
+      return;
+    }
+    this.on = { ...asked, data };
+    const symbol: ScriptSymbol = { ...this.symbol, timeframe: asked.key.timeframe };
+    const realtimeFrom = data.live ? Math.max(0, data.bars.length - 1) : data.bars.length;
+    this.load(data.bars, data.fromListing, symbol, realtimeFrom);
+    this.requested = [asked.key, ...this.requested];
+    this.merge(chart);
+  }
+
+  /** The chart's bars moved: its own timeframe's bars may have too. */
+  private updateTimeframe(chart: readonly Bar[]): number[] | 'all' {
+    const on = this.on as NonNullable<ScriptRun['on']>;
+    const main = this.main;
+    const data = this.feed.data(on.key);
+    const before = on.data;
+    if (
+      !main ||
+      !before ||
+      data === null ||
+      data === 'invalid' ||
+      data.history !== before.history ||
+      data.bars.length < main.length
+    ) {
+      this.setBars(chart, this.fromListing);
+      return 'all';
+    }
+    if (data.version !== before.version) {
+      const runs = [main, ...this.checks];
+      if (data.bars.length === main.length) {
+        for (const run of runs) run.tick(data.bars);
+      } else {
+        for (let n = main.length + 1; n <= data.bars.length; n++) {
+          const upTo = n === data.bars.length ? data.bars : data.bars.slice(0, n);
+          for (const run of runs) run.next(upTo);
+        }
+      }
+      on.data = data;
+      this.adopt();
+      this.agreements = this.compare(data.bars.length);
+      this.settle(data.bars.length);
+    }
+    this.chartBars = chart;
+    this.merge(chart);
+    return 'all';
+  }
+
+  /** Its own timeframe's values onto the chart's bars, as request.security() merges them. */
+  private merge(chart: readonly Bar[]): void {
+    const on = this.on as NonNullable<ScriptRun['on']>;
+    const data = on.data as ContextData;
+    const main = this.main as Execution;
+    const own = timesOf(data.bars, data.symbol, on.key.timeframe);
+    const charted = timesOf(chart, this.symbol, this.symbol.timeframe);
+    const lower = isLower(on.key.timeframe, this.symbol.timeframe);
+    const map = new Int32Array(chart.length);
+    const context = {
+      opens: own.opens,
+      closes: own.closes,
+      count: data.bars.length,
+      live: data.live,
+    };
+    for (let i = 0; i < chart.length; i++) {
+      map[i] = alignBar(
+        {
+          open: charted.opens[i] as number,
+          close: charted.closes[i] as number,
+          prevOpen: i > 0 ? (charted.opens[i - 1] as number) : Number.NaN,
+          prevClose: i > 0 ? (charted.closes[i - 1] as number) : Number.NaN,
+          realtime: i >= chart.length - 1,
+        },
+        context,
+        lower,
+        { gaps: on.gaps, lookahead: false },
+      );
+    }
+    const pick = (values: Float64Array): Float64Array => {
+      const out = new Float64Array(chart.length).fill(Number.NaN);
+      for (let i = 0; i < chart.length; i++) {
+        const j = map[i] as number;
+        if (j >= 0) out[i] = values[j] as number;
+      }
+      return out;
+    };
+    const o = main.outputs;
+    this.values = o.plots.map(pick);
+    this.plotColors = o.plotColors.map((colors) => colors && pick(colors));
+    this.backgrounds = o.backgrounds.map(pick);
+    this.fillColors = o.fillColors.map((colors) => colors && pick(colors));
+    // Where each output is drawn from, in the chart's bars: the first whose bar is trusted.
+    const toChart = (start: number): number => {
+      if (!Number.isFinite(start)) return start;
+      for (let i = 0; i < chart.length; i++) if ((map[i] as number) >= start) return i;
+      return Number.POSITIVE_INFINITY;
+    };
+    this.plotStarts = this.plotStarts.map(toChart);
+    this.backgroundStarts = this.backgroundStarts.map(toChart);
+    this.fillStarts = this.fillStarts.map(toChart);
   }
 
   /** Each plot's value on a bar (NaN where it has none, or past either end). */
@@ -766,7 +953,7 @@ export class ScriptRun {
         (check: Execution) => Float64Array,
       ])[],
     ): number => {
-      if (this.fromListing) return 0;
+      if (this.ownListing) return 0;
       if (length < 2 || !usable.includes(true)) return Number.POSITIVE_INFINITY;
       let last = -1;
       let remembers = false;

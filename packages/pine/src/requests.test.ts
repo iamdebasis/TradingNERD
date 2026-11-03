@@ -617,3 +617,226 @@ plot(security(syminfo.tickerid, "D", close, false, lookahead = true))`);
     expect(plotOf(r, 1)[0]).toBe(123);
   });
 });
+
+describe('Custom contexts: ticker.*() (Pine docs, Other timeframes and data: Custom contexts)', () => {
+  it('writes ticker ids with their settings, and reads them back', () => {
+    const r = run(
+      v6(`aapl = ticker.new("NASDAQ", "AAPL", session.extended)
+plot(aapl == '={"session":"extended","symbol":"NASDAQ:AAPL"}' ? 1 : 0)
+adjusted = ticker.modify(syminfo.tickerid, adjustment = adjustment.dividends)
+plot(adjusted == '={"adjustment":"dividends","symbol":"BINANCE:BTCUSDT"}' ? 1 : 0)
+plot(ticker.standard(adjusted) == "BINANCE:BTCUSDT" ? 1 : 0)
+plot(ticker.inherit(aapl, "NASDAQ:MSFT") == '={"session":"extended","symbol":"NASDAQ:MSFT"}' ? 1 : 0)
+plot(syminfo.prefix(aapl) == "NASDAQ" and syminfo.ticker(aapl) == "AAPL" ? 1 : 0)`),
+    );
+    expect(r.error).toBeNull();
+    for (let p = 0; p < 5; p++) expect(plotOf(r, p)[0]).toBe(1);
+  });
+
+  it("asks the feed for a ticker id's hours and adjustment", () => {
+    const asked: string[] = [];
+    const feed: RequestFeed = {
+      data: (key) => {
+        asked.push(JSON.stringify(key));
+        return FEED.data({ symbol: key.symbol, timeframe: key.timeframe });
+      },
+    };
+    run(
+      v6(`plot(request.security(ticker.new("BINANCE", "BTCUSDT", session.extended), "D", close))
+plot(request.security(ticker.modify(syminfo.tickerid, adjustment = adjustment.dividends), "D", close))`),
+      feed,
+    );
+    expect(asked).toContain(
+      JSON.stringify({ symbol: 'BINANCE:BTCUSDT', timeframe: '1D', session: 'extended' }),
+    );
+    expect(asked).toContain(
+      JSON.stringify({ symbol: 'BINANCE:BTCUSDT', timeframe: '1D', adjustment: 'dividends' }),
+    );
+  });
+
+  it("makes Heikin Ashi's bars from the symbol's own (ticker.heikinashi)", () => {
+    const r = run(
+      v6(`ha = ticker.heikinashi(syminfo.tickerid)
+[o, c] = request.security(ha, timeframe.period, [open, close])
+plot(o)
+plot(c)`),
+    );
+    // The close: the bar's average price; the open: the middle of the bar before's.
+    expect(plotOf(r, 1)[0]).toBe(100 - 0.125);
+    expect(plotOf(r, 0)[0]).toBe(100 - 0.25);
+    expect(plotOf(r, 0)[1]).toBe((100 - 0.25 + (100 - 0.125)) / 2);
+  });
+
+  it('says plainly that Renko and the other chart types come later', () => {
+    const result = compileScript(
+      v6('plot(request.security(ticker.renko(syminfo.tickerid, "ATR", 10), "D", close))'),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0]?.message).toMatch(/come with those chart types/);
+  });
+});
+
+describe('request.security_lower_tf() (Pine docs: Intrabar data arrays)', () => {
+  it("gives each chart bar its intrabars' values, oldest first", () => {
+    const r = run(
+      v6(`arr = request.security_lower_tf(syminfo.tickerid, "15", close)
+plot(array.size(arr))
+plot(array.get(arr, 0))
+plot(array.last(arr))
+[o, c] = request.security_lower_tf(syminfo.tickerid, "15", [open, close])
+plot(array.size(o) + array.size(c))`),
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[5]).toBe(4);
+    expect(plotOf(r, 1)[5]).toBe(105 - 0.75);
+    expect(plotOf(r, 2)[5]).toBe(105);
+    expect(plotOf(r, 3)[5]).toBe(8);
+  });
+
+  it('stops on a timeframe higher than the chart’s, or gives na with ignore_invalid_timeframe', () => {
+    const stops = run(
+      v6('plot(array.size(request.security_lower_tf(syminfo.tickerid, "D", close)))'),
+    );
+    expect(stops.error?.message).toMatch(/must be the chart's or lower/);
+    const ignores = run(
+      v6(`arr = request.security_lower_tf(syminfo.tickerid, "D", close, ignore_invalid_timeframe = true)
+plot(na(arr) ? 1 : 0)`),
+    );
+    expect(ignores.error).toBeNull();
+    expect(plotOf(ignores, 0)[5]).toBe(1);
+  });
+
+  it('refuses a collection as its expression', () => {
+    const result = compileScript(
+      v6('arr = request.security_lower_tf(syminfo.tickerid, "15", array.from(close))\nplot(1)'),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0]?.message).toMatch(/can't request a collection/);
+  });
+});
+
+describe('indicator(timeframe =): the whole script on another timeframe (Pine docs, FAQ)', () => {
+  const code = `//@version=6
+indicator("Daily close", timeframe = "D")
+plot(close)`;
+
+  it('gives its two inputs, last: Timeframe and Wait for timeframe closes', () => {
+    const result = compileScript(code);
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const inputs = result.program.inputs.map((input) => [input.title, input.kind, input.defval]);
+    expect(inputs).toEqual([
+      ['Timeframe', 'timeframe', 'D'],
+      ['Wait for timeframe closes', 'bool', true],
+    ]);
+    // The built-in RSI's own code declares timeframe = "": the chart's, with the same inputs.
+    const rsi = compileScript('//@version=6\nindicator("RSI", timeframe = "")\nplot(close)');
+    expect(rsi.ok && rsi.program.inputs.map((input) => input.defval)).toEqual(['', true]);
+  });
+
+  it("waits for each day's close by default: a value once a day, none yet on the live bar", () => {
+    const r = run(code);
+    expect(r.error).toBeNull();
+    const shown = plotOf(r, 0).flatMap((v, i) => (Number.isNaN(v) ? [] : [[i, v]]));
+    expect(shown).toEqual([
+      [23, 123],
+      [47, 147],
+    ]);
+  });
+
+  it('unticked, fills the gaps with the latest value and shows the forming day live', () => {
+    const result = compileScript(code);
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, ['D', false], CHART, FEED);
+    r.setBars(HOURS, true);
+    const values = plotOf(r, 0);
+    expect(values[23]).toBe(123);
+    expect(values[46]).toBe(123);
+    expect(values[47]).toBe(147);
+    expect(values[71]).toBe(171);
+    // The Timeframe input at "Chart" runs it on the chart's own bars.
+    const chart = new ScriptRun(result.program, ['', true], CHART, FEED);
+    chart.setBars(HOURS, true);
+    expect(plotOf(chart, 0)[5]).toBe(105);
+  });
+
+  it("waits for its timeframe's bars to load, then runs on them", () => {
+    const entries: Record<string, ContextData | null> = { 'BINANCE:BTCUSDT@1D': null };
+    const result = compileScript(code);
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults(), CHART, feedOf(entries));
+    r.setBars(HOURS, true);
+    expect(r.waiting).toBe(true);
+    expect(r.missing).toEqual([{ symbol: 'BINANCE:BTCUSDT', timeframe: '1D' }]);
+    expect(r.length).toBe(HOURS.length);
+    entries['BINANCE:BTCUSDT@1D'] = context(CHART, DAYS, '1D');
+    r.setBars(HOURS, true);
+    expect(r.waiting).toBe(false);
+    expect(plotOf(r, 0)[23]).toBe(123);
+  });
+});
+
+describe('Currencies: request.currency_rate() and request.security()’s currency', () => {
+  const USDT_USD = DAYS.map((d, i) => bar(d.time, 1.001 + i * 0.001));
+  const PAIR: ScriptSymbol = {
+    ...DEFAULT_SYMBOL,
+    ticker: 'USDTUSD',
+    tickerid: 'KRAKEN:USDTUSD',
+    currency: 'USD',
+  };
+  const feed: RequestFeed = {
+    data: (key) =>
+      key.symbol === 'KRAKEN:USDTUSD' && key.timeframe === '1D'
+        ? context(PAIR, USDT_USD, '1D')
+        : FEED.data(key),
+    rates: (from, to) =>
+      from === 'USDT' && to === 'USD'
+        ? [{ symbol: 'KRAKEN:USDTUSD', invert: false }]
+        : from === 'USD' && to === 'USDT'
+          ? [{ symbol: 'KRAKEN:USDTUSD', invert: true }]
+          : null,
+  };
+
+  it("gives the day before's rate, never the forming day's", () => {
+    const r = run(
+      v6(`plot(request.currency_rate("USDT", "USD"))
+plot(request.currency_rate(currency.USD, currency.USDT))
+plot(request.currency_rate("USD", "USD"))`),
+      feed,
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[5]).toBeNaN();
+    expect(plotOf(r, 0)[30]).toBe(1.001);
+    expect(plotOf(r, 0)[71]).toBe(USDT_USD[1]?.close);
+    expect(plotOf(r, 1)[30]).toBe(1 / 1.001);
+    expect(plotOf(r, 2)[5]).toBe(1);
+  });
+
+  it("converts the context's prices before its code runs; literals stay as written", () => {
+    const r = run(
+      v6(`plot(request.security(syminfo.tickerid, "D", close, currency = currency.USD))
+plot(request.security(syminfo.tickerid, "D", 200, currency = currency.USD))
+plot(request.security(syminfo.tickerid, "D", close, currency = currency.USDT))`),
+      feed,
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[47]).toBeCloseTo(147 * 1.001, 10);
+    expect(plotOf(r, 1)[47]).toBe(200);
+    expect(plotOf(r, 2)[47]).toBe(147);
+  });
+
+  it('stops when no rate converts them, unless told to ignore it', () => {
+    const stops = run(
+      v6('plot(request.security(syminfo.tickerid, "D", close, currency = currency.JPY))'),
+      feed,
+    );
+    expect(stops.error?.message).toBe(
+      "Cannot convert BINANCE:BTCUSDT's prices to JPY: no rate is known",
+    );
+    const ignores = run(
+      v6('plot(request.currency_rate("EUR", "JPY", ignore_invalid_currency = true))'),
+      feed,
+    );
+    expect(ignores.error).toBeNull();
+    expect(plotOf(ignores, 0)[5]).toBeNaN();
+  });
+});

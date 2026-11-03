@@ -21,7 +21,7 @@ import {
   typeArgs,
   unify,
 } from './types.ts';
-import { PineArray, PineMap, PineMatrix, type Value } from './values.ts';
+import { PineArray, PineMap, PineMatrix, PineObject, type Value } from './values.ts';
 
 /**
  * Pine's arrays, maps and matrices (the v6 reference's array.*, map.* and matrix.*; Pine docs,
@@ -309,6 +309,35 @@ const compareValues = (a: Value, b: Value) => {
   return (a as number) - (b as number);
 };
 
+/**
+ * What a sort compares: an element itself, or for objects of a user-defined type one of their
+ * int, float or string fields, named or numbered by `sort_field` (the first by default; Pine's
+ * release notes, 2025: "sort UDT collections by comparing values from one of the int, float, or
+ * string fields").
+ */
+function sortKey(c: Compiler, args: Args, id: Compiled): (value: Value) => Value {
+  const def = c.types.get(elemOf(id.base));
+  if (!def) {
+    if (args.has('sort_field')) {
+      c.fail("'sort_field' only sorts objects of a user-defined type", args.span);
+    }
+    return (value) => value;
+  }
+  const given = args.has('sort_field') ? args.constant('sort_field', 0) : 0;
+  const index =
+    typeof given === 'string'
+      ? def.fields.findIndex((field) => field.name === given)
+      : Math.floor(Number(given));
+  const field = def.fields[index];
+  if (!field || !['int', 'float', 'string'].includes(field.type)) {
+    return c.fail(
+      `'sort_field' must name an int, float or string field of '${def.name}'`,
+      args.span,
+    );
+  }
+  return (value) => (value instanceof PineObject ? (value.fields[index] ?? null) : null);
+}
+
 /** order.ascending or order.descending, as the sort functions take it. */
 function orderArg(c: Compiler, args: Args, name: string): Ev<boolean> {
   const value = args.get(name);
@@ -586,24 +615,28 @@ function arrayCalls(): Record<string, Handler> {
         call.span,
       );
     }),
-    'array.sort': handler(['id', 'order'], 1, (c, a, call) => {
+    'array.sort': handler(['id', 'order', 'sort_field'], 1, (c, a, call) => {
       const id = arrayArg(c, a, 'id', call.span);
       const ascending = orderArg(c, a, 'order');
+      const key = sortKey(c, a, a.get('id') as Compiled);
       return series(
         'void',
         (rt) => {
           const x = id.ev(rt);
           touchArray(rt, x);
           const up = ascending(rt);
-          x.items.sort((p, q) => (up ? compareValues(p, q) : compareValues(q, p)));
+          x.items.sort((p, q) =>
+            up ? compareValues(key(p), key(q)) : compareValues(key(q), key(p)),
+          );
           return null;
         },
         call.span,
       );
     }),
-    'array.sort_indices': handler(['id', 'order'], 1, (c, a, call) => {
+    'array.sort_indices': handler(['id', 'order', 'sort_field'], 1, (c, a, call) => {
       const id = arrayArg(c, a, 'id', call.span);
       const ascending = orderArg(c, a, 'order');
+      const key = sortKey(c, a, a.get('id') as Compiled);
       c.usesObjects();
       return series(
         arrayOf('int'),
@@ -612,7 +645,7 @@ function arrayCalls(): Record<string, Handler> {
           const up = ascending(rt);
           const order = x.items.map((_, i) => i);
           order.sort((p, q) => {
-            const d = compareValues(x.items[p] ?? null, x.items[q] ?? null);
+            const d = compareValues(key(x.items[p] ?? null), key(x.items[q] ?? null));
             return up ? d : -d;
           });
           return new PineArray('int', order);

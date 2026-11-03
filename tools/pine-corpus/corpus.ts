@@ -111,11 +111,12 @@ const ERROR_INTRO =
   /(compil\w+ error|cause[sd]? an? error|raise[sd]? an? error|will (not|n't) compile|does(n't| not) compile|won't compile|not allowed|is invalid|error:|throws? an? error|runtime error|fails? to compile|generates? (the|an?|this) error|raises? (this|the) error|gives? an? [^.]{0,40}\berror\b|no viable alternative|mismatched input|could not be translated)/;
 /**
  * Words that name an error without giving one: "does not raise an error" (its emphasis too: "it
- * *does not* raise an error"), "the risk of errors", and what another version would do ("In Pine
- * v5, this script would cause a compilation error unless…").
+ * *does not* raise an error"), "the risk of errors", what another version would do ("In Pine
+ * v5, this script would cause a compilation error unless…"), and a script's own guard ("The
+ * script triggers a runtime error if the chart's timeframe exceeds…").
  */
 const NOT_AN_ERROR =
-  /\b(does not|doesn't|do not|don't|will not|won't|without|never|no longer|avoid\w*|prevent\w*|risk of|reduc\w*)\**\s+(\w+\s+){0,3}?(an?\s+)?(compilation |runtime )?errors?\b|\bin pine v\d\b[^.]*/g;
+  /\b(does not|doesn't|do not|don't|will not|won't|without|never|no longer|avoid\w*|prevent\w*|risk of|reduc\w*)\**\s+(\w+\s+){0,3}?(an?\s+)?(compilation |runtime )?errors?\b|\bin pine v\d\b[^.]*|\b(triggers?|raises?) an? (custom )?(\[)?runtime error(\]\([^)]*\))? (if|when)\b[^.]*/g;
 
 /**
  * The paragraph that introduces a code block: the last one before it, past any image. A fix
@@ -381,7 +382,17 @@ const CORPUS_FEED: RequestFeed = {
     contexts.set(text, data);
     return data ?? 'invalid';
   },
+  // Any currency into any other through one pair of their own (made, as the symbols are).
+  rates: (from, to) => [{ symbol: `FX:${from}${to}`, invert: false }],
 };
+
+/**
+ * An hourly chart over the last 25 days, cut from the same days the requests' bars are made
+ * from: for scripts that refuse a daily chart (their own "the timeframe is smaller than the
+ * chart's" error, as on TradingView with their default inputs).
+ */
+const HOURS = split(BARS, 3_600_000).slice(-600);
+const HOURLY = { ...DEFAULT_SYMBOL, timeframe: '60' };
 
 /** Shorter bars from the last days: each day's split into equal parts along a smooth path. */
 function split(days: readonly Bar[], span: number): Bar[] {
@@ -425,13 +436,12 @@ function runOne(
     });
     if (!result.ok)
       return { ok: false, stage: 'compile', message: result.errors[0]?.message ?? '?' };
-    const run = new ScriptRun(
-      result.program,
-      result.program.defaults(),
-      DEFAULT_SYMBOL,
-      CORPUS_FEED,
-    );
+    let run = new ScriptRun(result.program, result.program.defaults(), DEFAULT_SYMBOL, CORPUS_FEED);
     run.setBars(BARS, true);
+    if (run.error && /timeframe/i.test(run.error.message) && /chart/i.test(run.error.message)) {
+      run = new ScriptRun(result.program, result.program.defaults(), HOURLY, CORPUS_FEED);
+      run.setBars(HOURS, true);
+    }
     if (run.error) return { ok: false, stage: 'runtime', message: run.error.message };
     if (run.waiting) {
       return { ok: false, stage: 'data', message: `waiting for ${run.missing.length} contexts` };
