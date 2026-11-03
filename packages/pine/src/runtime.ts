@@ -6,6 +6,7 @@ import {
   UTC_ZONE,
 } from '@tradingnerd/core';
 import { PineRuntimeError } from './diagnostics.ts';
+import type { RequestBroker } from './requests.ts';
 import type { Stateful } from './ta.ts';
 import type { Value } from './values.ts';
 
@@ -294,6 +295,17 @@ export class Runtime {
   /** How many messages it has logged in all, so a reader can tell when there are new ones. */
   logsWritten = 0;
   outputs: Outputs = { plots: [], plotColors: [], backgrounds: [], fillColors: [] };
+  /** A context program's values, by bar: what its request expression gives (requests.ts). */
+  captured: Value[] = [];
+  /**
+   * This runs a request's copy of the script's code in another context: its logs say nothing
+   * (only the code its expression depends on is copied, Pine docs: Other timeframes and data).
+   */
+  secondary = false;
+  /** The chart's symbol, when this runs a request's context (syminfo.main_tickerid). */
+  main: ScriptSymbol | null = null;
+  /** Where this run's request calls get their values; null when there's no feed (requests.ts). */
+  requests: RequestBroker | null = null;
   private lastIndex = -1;
   /** The last execution committed: nothing to roll back before the next. */
   private committed = true;
@@ -374,6 +386,7 @@ export class Runtime {
   }
 
   log(level: LogEntry['level'], message: string, line: number | null): void {
+    if (this.secondary) return;
     const bar = this.bar;
     const realtime = this.index >= this.realtimeFrom;
     this.logs.push({
@@ -386,6 +399,11 @@ export class Runtime {
     });
     this.logsWritten++;
     if (this.logs.length > MAX_LOGS) this.logs.splice(0, this.logs.length - MAX_LOGS);
+  }
+
+  /** A request's value on the bar being run, in a context program (requests.ts). */
+  capture(value: Value): void {
+    this.captured[this.index] = value;
   }
 
   /**

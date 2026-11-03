@@ -16,6 +16,7 @@ import {
 import { upgrade } from './dialect.ts';
 import { type ConversionEdit, type EditSink, repeatedArg } from './edits.ts';
 import { parse } from './parser.ts';
+import type { ContextPlan, RequestSite } from './requests.ts';
 import { Runtime, type Slot } from './runtime.ts';
 import {
   assignable,
@@ -48,10 +49,11 @@ import {
   unify,
 } from './types.ts';
 import {
+  enumMember,
   mod,
   type OutputRef,
   PineArray,
-  PineEnum,
+  type PineEnum,
   type PineMap,
   type PineMatrix,
   PineObject,
@@ -209,7 +211,7 @@ export interface IndicatorDecl {
 }
 
 /** A variable in a scope. */
-interface Var {
+export interface Var {
   base: Base;
   qual: Qual;
   slot: Slot;
@@ -309,6 +311,11 @@ export interface CompileOptions {
   resolveLibrary?: LibraryResolver;
   /** Collects the changes Convert code to v6 makes to a v5 script (convert.ts). */
   edits?: EditSink;
+  /**
+   * Compiles a request's context program instead of the script: only the code its expression
+   * depends on, and the expression captured on each bar (requests.ts).
+   */
+  context?: ContextPlan;
 }
 
 /** A compiled statement: runs it and gives its value (a block's value is its last statement's). */
@@ -337,6 +344,68 @@ export interface CompiledProgram {
   /** Each declaration's strongest qualifier this pass found. */
   quals: Map<object, Qual>;
   logging: boolean;
+  /** Its request.*() calls (requests.ts). */
+  requests: RequestSite[];
+}
+
+/** What one statement reads and writes: a request copies the statements its expression needs. */
+interface StmtInfo {
+  stmt: Stmt;
+  reads: Set<Var>;
+  writes: Set<Var>;
+}
+
+/**
+ * A statement list being compiled: the statements done so far, the one being compiled, and what
+ * opened it (an if's, switch's or loop's expression, or the call of the function whose body it
+ * is). A request call finds the code before it that its expression depends on from these.
+ */
+interface Frame {
+  infos: StmtInfo[];
+  current: StmtInfo | null;
+  owner: Expr | null;
+  kind: 'global' | 'block' | 'loop' | 'function';
+  /** A loop's own variables: its counter, its items. */
+  loopVars: Var[];
+}
+
+/** Statements a context program always has: the declaration call and global definitions. */
+const DECLARATION_CALLS = new Set(['indicator', 'library', 'strategy']);
+
+function isDeclaration(stmt: Stmt): boolean {
+  if (
+    stmt.kind === 'func' ||
+    stmt.kind === 'typeDecl' ||
+    stmt.kind === 'enumDecl' ||
+    stmt.kind === 'import'
+  ) {
+    return true;
+  }
+  return (
+    stmt.kind === 'expr' && stmt.expr.kind === 'call' && DECLARATION_CALLS.has(stmt.expr.callee)
+  );
+}
+
+/** Where something is in the code, as a key: "line:column". */
+export const spanKey = (span: Span): string => `${span.line}:${span.column}`;
+
+/** The blocks of an if, a switch or a loop. */
+function blocksOf(expr: Expr): Block[] {
+  switch (expr.kind) {
+    case 'if':
+      return [
+        ...expr.branches.map((branch) => branch.body),
+        ...(expr.otherwise ? [expr.otherwise] : []),
+      ];
+    case 'switch':
+      return expr.cases.map((c) => c.body);
+    case 'for':
+    case 'forIn':
+    case 'while':
+      return [expr.body];
+    default:
+      return [];
+  }
 }
 
 /** Names the script reads history of (`x[k]`): their variables keep every value. */
@@ -486,6 +555,18 @@ export class Compiler {
   private module!: Module;
   /** Libraries loaded in this pass, by "user/name/version". */
   private readonly modules = new Map<string, Module>();
+  /** The request calls compiled (requests.ts). */
+  readonly requests: RequestSite[] = [];
+  /** Set when this compile is a request's context program: what it copies (requests.ts). */
+  readonly plan: ContextPlan | null;
+  /** In a context program: compiling the way down to its request, not code beside it. */
+  private onPath = true;
+  /** The statement lists being compiled, outermost first. */
+  private readonly frames: Frame[] = [];
+  /** Extra sets that note every variable read (a request's expression). */
+  private readonly collectors: Set<Var>[] = [];
+  /** What opens the next statement list: set just before it's compiled. */
+  private pendingFrame: { owner: Expr; kind: Frame['kind']; loopVars: Var[] } | null = null;
 
   constructor(
     script: Script,
@@ -501,6 +582,7 @@ export class Compiler {
     this.options = options;
     this.version = versionOf(script);
     this.history = historyNames(script.statements);
+    this.plan = options.context ?? null;
   }
 
   compile(): CompiledProgram {
@@ -508,7 +590,7 @@ export class Compiler {
     const main = new Module('', this.version, global);
     this.module = main;
     this.declareAll(main, this.script.statements);
-    const body = this.statements(this.script.statements, global);
+    const body = this.statements(this.script.statements, global, this.plan !== null);
     if (!this.indicator) {
       const first = this.script.statements[0]?.span ?? {
         line: 1,
@@ -531,7 +613,7 @@ export class Compiler {
     }
     const outputs =
       this.plots.length + this.bgcolors.length + this.hlines.length + this.otherOutputs;
-    if (!decl.library && outputs === 0) {
+    if (!decl.library && outputs === 0 && !this.plan) {
       this.fail(
         'An indicator must have an output: plot(), hline(), fill(), bgcolor(), a log or an alert',
         decl.span,
@@ -551,6 +633,7 @@ export class Compiler {
       warnings: this.warnings,
       quals: this.quals,
       logging: this.logging,
+      requests: this.requests,
     };
   }
 
@@ -587,9 +670,8 @@ export class Compiler {
           const def: EnumDef = {
             key,
             name: stmt.name,
-            members: stmt.members.map(
-              (member, i) =>
-                new PineEnum(key, member.name, enumTitle(member.title, member.name), i),
+            members: stmt.members.map((member, i) =>
+              enumMember(key, member.name, enumTitle(member.title, member.name), i),
             ),
             module,
             exported: stmt.exported,
@@ -783,32 +865,57 @@ export class Compiler {
 
   // ---- statements ----
 
-  private statements(statements: readonly Stmt[], scope: Scope): CompiledBlock {
+  private statements(
+    statements: readonly Stmt[],
+    scope: Scope,
+    filter = false,
+    tail?: { stmt: Stmt; compile: () => void },
+  ): CompiledBlock {
+    const pending = this.pendingFrame;
+    this.pendingFrame = null;
+    const frame: Frame = {
+      infos: [],
+      current: null,
+      owner: pending?.owner ?? null,
+      kind: pending?.kind ?? (scope.global ? 'global' : 'block'),
+      loopVars: pending?.loopVars ?? [],
+    };
+    this.frames.push(frame);
     const runs: Run[] = [];
     let last: CompiledBlock = { run: () => null, base: 'void', qual: CONST };
-    for (const stmt of statements) {
-      last = this.statement(stmt, scope);
-      runs.push(last.run);
+    try {
+      for (const stmt of statements) {
+        const compiled = this.statementIn(frame, stmt, scope, filter);
+        if (!compiled) continue;
+        last = compiled;
+        runs.push(last.run);
+      }
+      // A tuple at a block's end, compiled inside the block (a request in it sees its statements).
+      if (tail) this.track(frame, tail.stmt, tail.compile);
+    } finally {
+      this.frames.pop();
     }
     const count = runs.length;
     // Only inside a loop can a break or continue stop a block part way.
     const run: Run =
-      count === 1
-        ? (runs[0] as Run)
-        : this.loops > 0
-          ? (rt) => {
-              let value: Value = null;
-              for (let i = 0; i < count; i++) {
-                value = (runs[i] as Run)(rt);
-                if (rt.signal !== 0) return value;
+      count === 0
+        ? () => null
+        : count === 1
+          ? (runs[0] as Run)
+          : this.loops > 0
+            ? (rt) => {
+                let value: Value = null;
+                for (let i = 0; i < count; i++) {
+                  value = (runs[i] as Run)(rt);
+                  if (rt.signal !== 0) return value;
+                }
+                return value;
               }
-              return value;
-            }
-          : (rt) => {
-              let value: Value = null;
-              for (let i = 0; i < count; i++) value = (runs[i] as Run)(rt);
-              return value;
-            };
+            : (rt) => {
+                let value: Value = null;
+                for (let i = 0; i < count; i++) value = (runs[i] as Run)(rt);
+                return value;
+              };
     return {
       run,
       base: last.base,
@@ -818,8 +925,194 @@ export class Compiler {
     };
   }
 
-  private block(block: Block, parent: Scope, kind: 'local' | 'function' = 'local'): CompiledBlock {
-    return this.statements(block.statements, new Scope(parent, kind));
+  /**
+   * One statement of a list, noting what it reads and writes. In a context program's lists only
+   * the statements the request needs compile, and the one on the way to it (requests.ts).
+   */
+  private statementIn(
+    frame: Frame,
+    stmt: Stmt,
+    scope: Scope,
+    filter: boolean,
+  ): CompiledBlock | null {
+    const plan = this.plan;
+    if (filter && plan) {
+      if (plan.next.has(stmt))
+        return this.track(frame, stmt, () => this.pathStatement(stmt, scope));
+      if (!plan.keep.has(stmt) && !isDeclaration(stmt)) return null;
+      const onPath = this.onPath;
+      this.onPath = false;
+      try {
+        return this.track(frame, stmt, () => this.statement(stmt, scope));
+      } finally {
+        this.onPath = onPath;
+      }
+    }
+    return this.track(frame, stmt, () => this.statement(stmt, scope));
+  }
+
+  private track<T>(frame: Frame, stmt: Stmt, compile: () => T): T {
+    const info: StmtInfo = { stmt, reads: new Set(), writes: new Set() };
+    frame.current = info;
+    try {
+      return compile();
+    } finally {
+      frame.current = null;
+      frame.infos.push(info);
+    }
+  }
+
+  // ---- requests: the code a request copies (requests.ts) ----
+
+  /** Notes a variable read: the statements being compiled read it, and any collector notes it. */
+  private noteRead(v: Var): void {
+    for (const frame of this.frames) frame.current?.reads.add(v);
+    for (const collector of this.collectors) collector.add(v);
+  }
+
+  /** Notes a variable written (declared or assigned) by the statements being compiled. */
+  private noteWrite(v: Var): void {
+    for (const frame of this.frames) frame.current?.writes.add(v);
+  }
+
+  /** Compiles something, noting every variable it reads into `into`. */
+  collectReads<T>(into: Set<Var>, compile: () => T): T {
+    this.collectors.push(into);
+    try {
+      return compile();
+    } finally {
+      this.collectors.pop();
+    }
+  }
+
+  /** Whether this compile is a context program and this is the request it captures. */
+  capturing(call: Extract<Expr, { kind: 'call' }>): boolean {
+    return this.plan !== null && this.onPath && call === this.plan.target;
+  }
+
+  /** The next input's index: in a request's copy of the code, the script's own for that input. */
+  inputIndex(span: Span): number {
+    return this.plan?.inputs.get(spanKey(span)) ?? this.inputs.length;
+  }
+
+  /**
+   * A request call's site: the code before it that its expression (reading `reads`) depends on,
+   * found back through the statement lists being compiled, and the way down to it (Pine docs,
+   * Other timeframes and data: "the function call duplicates all preceding code that determines
+   * the assigned value or reference"; it "cannot copy any subsequent code").
+   *
+   * A statement is needed when it writes a variable needed, or reads one that holds a collection
+   * or an object (it may change it); what it reads is then needed too. Leaving a function's body,
+   * what its call's arguments read is needed (they're its parameters' values). An if's or a
+   * loop's own condition isn't: the copy computes the expression on every bar of its context.
+   */
+  requestSite(
+    call: Extract<Expr, { kind: 'call' }>,
+    reads: ReadonlySet<Var>,
+    result: { base: Base; items?: Base[] },
+  ): RequestSite {
+    const keep = new Set<Stmt>();
+    const next = new Map<object, object>();
+    const needed = new Set(reads);
+    const isObject = (v: Var) => isReferenceType(v.base) || this.types.has(v.base);
+    const needs = (info: StmtInfo): boolean => {
+      for (const v of info.writes) if (needed.has(v)) return true;
+      for (const v of info.reads) if (needed.has(v) && isObject(v)) return true;
+      return false;
+    };
+    const calls: Expr[] = [];
+    let child: object = call;
+    for (let f = this.frames.length - 1; f >= 0; f--) {
+      const frame = this.frames[f] as Frame;
+      for (let i = frame.infos.length - 1; i >= 0; i--) {
+        const info = frame.infos[i] as StmtInfo;
+        if (!needs(info)) continue;
+        keep.add(info.stmt);
+        for (const v of info.reads) needed.add(v);
+      }
+      if (frame.kind === 'loop' && frame.loopVars.some((v) => needed.has(v))) {
+        this.fail(
+          `The expression of '${call.callee}' can't depend on the loop's own variables: only the symbol and the timeframe can`,
+          call.span,
+        );
+      }
+      const current = frame.current?.stmt;
+      if (!current) break;
+      next.set(current, child);
+      if (frame.owner) {
+        next.set(frame.owner, current);
+        child = frame.owner;
+        if (frame.owner.kind === 'call') calls.unshift(frame.owner);
+      }
+      // Leaving a function's body: its call's arguments give its parameters their values.
+      if (frame.kind === 'function') {
+        const caller = this.frames[f - 1]?.current;
+        if (caller) for (const v of caller.reads) needed.add(v);
+      }
+    }
+    const inputs = new Map(this.inputs.map((input) => [spanKey(input.span), input.index]));
+    const plan: ContextPlan = { target: call, keep, next, inputs };
+    const id = [...calls, call].map((node) => spanKey(node.span)).join('>');
+    const site: RequestSite = {
+      id,
+      plan,
+      shared: keep.size === 0 && reads.size === 0 ? this.requestText(call) : null,
+      base: result.base,
+      items: result.items,
+      span: call.span,
+    };
+    this.requests.push(site);
+    return site;
+  }
+
+  /** A request call's own code (its expression's), so identical ones share a context. */
+  private requestText(call: Extract<Expr, { kind: 'call' }>): string {
+    const expression = call.args.find((arg) => arg.name === 'expression') ?? call.args[2];
+    return `${call.callee}:${expression ? this.text(expression.value.span) : ''}`;
+  }
+
+  /** In a context program, the statement on the way to its request: only the next step down. */
+  private pathStatement(stmt: Stmt, scope: Scope): CompiledBlock {
+    const node = (this.plan as ContextPlan).next.get(stmt) as Expr;
+    const compiled = this.pathNode(node, scope);
+    return { run: compiled.ev, base: 'void', qual: SERIES };
+  }
+
+  /**
+   * A step on the way to the request: the request itself (captured), the call of a function it's
+   * in (its body compiled the same way), or an if's, switch's or loop's block it's in, compiled
+   * whatever the condition, once a bar.
+   */
+  private pathNode(node: Expr, scope: Scope): Compiled {
+    const plan = this.plan as ContextPlan;
+    if (node.kind === 'call') {
+      const onPath = this.onPath;
+      this.onPath = true;
+      try {
+        return this.expr(node, scope);
+      } finally {
+        this.onPath = onPath;
+      }
+    }
+    const inner = plan.next.get(node);
+    const block = blocksOf(node).find((b) => b.statements.includes(inner as Stmt));
+    if (!block) return this.fail("A request's code couldn't be copied", node.span);
+    this.pendingFrame = {
+      owner: node,
+      kind: node.kind === 'if' || node.kind === 'switch' ? 'block' : 'loop',
+      loopVars: [],
+    };
+    const body = this.statements(block.statements, new Scope(scope, 'local'), true);
+    return { base: 'void', qual: SERIES, ev: body.run, span: node.span };
+  }
+
+  private block(
+    block: Block,
+    parent: Scope,
+    kind: 'local' | 'function' = 'local',
+    filter = false,
+  ): CompiledBlock {
+    return this.statements(block.statements, new Scope(parent, kind), filter);
   }
 
   private static readonly NOTHING: CompiledBlock = { run: () => null, base: 'void', qual: CONST };
@@ -891,6 +1184,7 @@ export class Compiler {
     };
     if (name !== '_') scope.vars.set(name, v);
     this.raise(key, v.qual);
+    this.noteWrite(v);
     return v;
   }
 
@@ -1040,6 +1334,8 @@ export class Compiler {
     const v = scope.lookup(name);
     if (!v) this.fail(`Undeclared identifier "${name}"`, target.span);
     if (v.isConst) this.fail(`"${name}" is const: it can't be reassigned`, target.span);
+    this.noteWrite(v);
+    if (stmt.op !== ':=') this.noteRead(v);
     const value = this.expr(stmt.value, scope);
     if (v.simpleOnly && value.qual > SIMPLE) {
       this.fail(
@@ -1243,12 +1539,18 @@ export class Compiler {
   }
 
   /** A block's value as an expression: tuples written `[a, b]` at its end are allowed. */
-  private blockValue(block: Block, scope: Scope): CompiledBlock {
+  private blockValue(block: Block, scope: Scope, filter = false): CompiledBlock {
     const last = block.statements.at(-1);
-    if (last?.kind === 'expr' && last.expr.kind === 'list') {
+    if (!filter && last?.kind === 'expr' && last.expr.kind === 'list') {
       const inner = new Scope(scope, 'local');
-      const head = this.statements(block.statements.slice(0, -1), inner);
-      const items = last.expr.items.map((item) => this.expr(item, inner));
+      const list = last.expr;
+      let items: Compiled[] = [];
+      const head = this.statements(block.statements.slice(0, -1), inner, false, {
+        stmt: last,
+        compile: () => {
+          items = list.items.map((item) => this.expr(item, inner));
+        },
+      });
       const evs = items.map((item) => item.ev);
       const qual = maxQual(...items.map((item) => item.qual));
       return {
@@ -1262,10 +1564,11 @@ export class Compiler {
         qual,
       };
     }
-    return this.block(block, scope);
+    return this.block(block, scope, 'local', filter);
   }
 
   private variable(v: Var, span: Span): Compiled {
+    this.noteRead(v);
     const slot = v.slot;
     const base = v.base;
     const na = naOf(base);
@@ -1688,6 +1991,7 @@ export class Compiler {
     if (expr.target.kind === 'name' && !expr.target.name.includes('.')) {
       const v = scope.lookup(expr.target.name);
       if (v) {
+        this.noteRead(v);
         const slot = v.slot;
         const base = v.base;
         const na = naOf(base);
@@ -1749,7 +2053,14 @@ export class Compiler {
   private ifStructure(expr: Extract<Expr, { kind: 'if' }>, scope: Scope): Compiled {
     const used = this.unusedValue !== expr;
     const conds = expr.branches.map((branch) => this.condition(this.expr(branch.cond, scope)));
-    const bodies = expr.branches.map((branch) => this.blockValue(branch.body, scope));
+    const opens = () => {
+      this.pendingFrame = { owner: expr, kind: 'block', loopVars: [] };
+    };
+    const bodies = expr.branches.map((branch) => {
+      opens();
+      return this.blockValue(branch.body, scope);
+    });
+    if (expr.otherwise) opens();
     const otherwise = expr.otherwise ? this.blockValue(expr.otherwise, scope) : null;
     const all = otherwise ? [...bodies, otherwise] : bodies;
     const { base, items } = this.unifyBlocks(all, expr.span);
@@ -1850,7 +2161,10 @@ export class Compiler {
       if (subject) return this.binary('==', subject, match, c.match.span);
       return this.condition(match);
     });
-    const bodies = expr.cases.map((c) => this.blockValue(c.body, scope));
+    const bodies = expr.cases.map((c) => {
+      this.pendingFrame = { owner: expr, kind: 'block', loopVars: [] };
+      return this.blockValue(c.body, scope);
+    });
     const { base, items } = this.unifyBlocks(bodies, expr.span);
     if (used && matches.every((match) => match !== null)) {
       this.needWhole(base, 'A switch', 'a default', expr.span);
@@ -1904,6 +2218,7 @@ export class Compiler {
     );
     this.loops++;
     this.rt.loopDepth = this.loops;
+    this.pendingFrame = { owner: expr, kind: 'loop', loopVars: [counter] };
     const body = this.statements(expr.body.statements, inner);
     this.loops--;
     this.rt.loopDepth = this.loops;
@@ -2009,6 +2324,7 @@ export class Compiler {
     ).slot;
     this.loops++;
     this.rt.loopDepth = this.loops;
+    this.pendingFrame = { owner: expr, kind: 'loop', loopVars: [...inner.vars.values()] };
     const body = this.statements(expr.body.statements, inner);
     this.loops--;
     this.rt.loopDepth = this.loops;
@@ -2075,6 +2391,7 @@ export class Compiler {
     const cond = this.condition(this.expr(expr.cond, scope)).ev;
     this.loops++;
     this.rt.loopDepth = this.loops;
+    this.pendingFrame = { owner: expr, kind: 'loop', loopVars: [] };
     const body = this.block(expr.body, scope);
     this.loops--;
     this.rt.loopDepth = this.loops;
@@ -2452,11 +2769,17 @@ export class Compiler {
     // A function's body is its own: a loop around the call doesn't let it break.
     const loops = this.loops;
     this.loops = 0;
+    // In a context program, the call on the way to its request compiles only what it needs.
+    const filter = this.plan !== null && this.onPath && this.plan.next.has(expr);
+    const onPath = this.onPath;
+    this.onPath = filter;
     let body: CompiledBlock;
     try {
-      body = this.blockValueOfFunction(stmt.body, fnScope);
+      this.pendingFrame = { owner: expr, kind: 'function', loopVars: [] };
+      body = this.blockValueOfFunction(stmt.body, fnScope, filter);
     } finally {
       this.loops = loops;
+      this.onPath = onPath;
       this.calling.pop();
       this.module = outer;
     }
@@ -2486,11 +2809,13 @@ export class Compiler {
     };
   }
 
-  private blockValueOfFunction(block: Block, scope: Scope): CompiledBlock {
+  private blockValueOfFunction(block: Block, scope: Scope, filter = false): CompiledBlock {
     // The function's scope itself holds its parameters; its statements share it.
     const last = block.statements.at(-1);
-    if (last?.kind === 'expr' && last.expr.kind === 'list') return this.blockValue(block, scope);
-    return this.statements(block.statements, scope);
+    if (!filter && last?.kind === 'expr' && last.expr.kind === 'list') {
+      return this.blockValue(block, scope);
+    }
+    return this.statements(block.statements, scope, filter);
   }
 }
 

@@ -122,7 +122,8 @@ export function timeName(_c: Compiler, name: string, span: Span): Compiled | nul
         span,
       );
     case 'timeframe.main_period':
-      return simple('string', (rt) => rt.symbol.timeframe, span);
+      // The chart's own, even inside a request (the v6 reference).
+      return simple('string', (rt) => (rt.main ?? rt.symbol).timeframe, span);
     case 'syminfo.timezone':
       return simple('string', (rt) => rt.symbol.timezone, span);
     case 'syminfo.session':

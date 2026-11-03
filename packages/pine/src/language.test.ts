@@ -309,8 +309,8 @@ plot(close)`),
     expect(error('label.new(bar_index, high, "x")\nplot(close)')).toMatch(
       /isn't supported in tradingNerd yet: drawings/,
     );
-    expect(error('x = request.security("BTC", "D", close)\nplot(x)')).toMatch(
-      /other symbols and timeframes/,
+    expect(error('x = request.financial("NASDAQ:AAPL", "TOTAL_REVENUE", "FQ")\nplot(x)')).toMatch(
+      /financial data comes in a later update/,
     );
     expect(compileError('//@version=6\nstrategy("x")\nplot(close)').message).toMatch(
       /Strategy Tester/,

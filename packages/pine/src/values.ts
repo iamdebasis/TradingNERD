@@ -74,7 +74,10 @@ export class PineObject {
   }
 }
 
-/** A member of an enum (Pine docs, Enums): the same object wherever the member is named. */
+/**
+ * A member of an enum (Pine docs, Enums): the same object wherever the member is named, in every
+ * compile of the script too (a request's context program is one: its members are the script's).
+ */
 export class PineEnum {
   readonly type: string;
   readonly name: string;
@@ -86,6 +89,19 @@ export class PineEnum {
     this.title = title;
     this.ordinal = ordinal;
   }
+}
+
+const enumMembers = new Map<string, PineEnum>();
+
+/** The one member object of an enum member. */
+export function enumMember(type: string, name: string, title: string, ordinal: number): PineEnum {
+  const key = `${type}\u0000${name}\u0000${title}\u0000${ordinal}`;
+  let member = enumMembers.get(key);
+  if (!member) {
+    member = new PineEnum(type, name, title, ordinal);
+    enumMembers.set(key, member);
+  }
+  return member;
 }
 
 export { packColor };

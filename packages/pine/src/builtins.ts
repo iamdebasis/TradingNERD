@@ -15,6 +15,7 @@ import { collectionCalls } from './collections.ts';
 import type { Compiler, EnumDef, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import { markCalls, markConstant } from './marks.ts';
+import { requestCalls } from './requestCalls.ts';
 import { DEFAULT_SYMBOL, type Runtime } from './runtime.ts';
 import { stringCalls } from './strings.ts';
 import {
@@ -152,8 +153,16 @@ const LATER: readonly [RegExp, string][] = [
     "isn't supported in tradingNerd yet: drawings (labels, lines, boxes, tables) come in a later update",
   ],
   [
-    /^request\./,
-    "isn't supported in tradingNerd yet: data from other symbols and timeframes comes in a later update",
+    /^request\.(financial|earnings|dividends|splits|economic)$/,
+    "isn't supported in tradingNerd yet: companies' financial data comes in a later update",
+  ],
+  [
+    /^request\.(seed|quandl|footprint)$/,
+    "isn't supported in tradingNerd yet: this data comes from TradingView's own feeds",
+  ],
+  [
+    /^request\.(security_lower_tf|currency_rate)$/,
+    "isn't supported in tradingNerd yet: it comes in the next update",
   ],
   [
     /^strategy(\.|$)/,
@@ -278,6 +287,15 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
     case 'scale':
       if (member === 'right' || member === 'left' || member === 'none') {
         return constant('scale_style', member, span);
+      }
+      break;
+    case 'barmerge':
+      // request.security()'s merge settings (the v6 reference, barmerge.*).
+      if (member === 'gaps_on' || member === 'gaps_off') {
+        return constant('barmerge_gaps', member, span);
+      }
+      if (member === 'lookahead_on' || member === 'lookahead_off') {
+        return constant('barmerge_lookahead', member, span);
       }
       break;
     case 'shape':
@@ -419,7 +437,8 @@ function syminfo(member: string, span: Span): Compiled | null {
       // Futures have a root of their own; spot pairs and stocks are their ticker.
       return simple('string', (rt) => rt.symbol.ticker, span);
     case 'main_tickerid':
-      return simple('string', (rt) => rt.symbol.tickerid, span);
+      // The chart's own, even inside a request (the v6 reference).
+      return simple('string', (rt) => (rt.main ?? rt.symbol).tickerid, span);
     case 'volumetype':
       // Provisional (docs/SPEC.md §11): our pairs' volume is in the base asset, stocks' in shares.
       return simple('string', (rt) => (rt.symbol.hasVolume ? 'base' : 'n/a'), span);
@@ -749,6 +768,7 @@ const CALLS: Record<string, Handler> = {
   ...timeCalls(),
   ...stringCalls(),
   ...markCalls(),
+  ...requestCalls(),
 };
 
 /** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
@@ -1082,7 +1102,7 @@ function inputCall(c: Compiler, call: Call, scope: Scope, kind: InputKind | null
       defval = args.constant('defval', null);
     }
   }
-  const index = c.inputs.length;
+  const index = c.inputIndex(call.span);
   const optionsArg = names.includes('options') ? args.raw('options') : undefined;
   let options: Value[] | undefined;
   if (optionsArg) {
@@ -1196,7 +1216,7 @@ function enumInput(
     const value = args.constant(name, null, 'string');
     return typeof value === 'string' ? value : undefined;
   };
-  const index = c.inputs.length;
+  const index = c.inputIndex(call.span);
   const activeArg = args.get('active');
   const activeFold = activeArg?.fold;
   c.inputs.push({

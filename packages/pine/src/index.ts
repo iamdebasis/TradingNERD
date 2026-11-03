@@ -26,6 +26,15 @@ export {
   type Span,
 } from './diagnostics.ts';
 export { KEYWORDS, versionIn } from './lexer.ts';
+export {
+  alignBar,
+  type ContextData,
+  canonicalTimeframe,
+  MAX_REQUESTS,
+  type RequestFeed,
+  type RequestKey,
+  requestKeyText,
+} from './requests.ts';
 export { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
 export {
   type CompileResult,
