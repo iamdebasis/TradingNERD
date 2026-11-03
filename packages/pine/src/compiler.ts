@@ -207,6 +207,11 @@ export interface IndicatorDecl {
   precision: number | null;
   /** Declared with library(): its exports are what other scripts import. */
   library: boolean;
+  /**
+   * Its requests are dynamic (Pine docs, Dynamic requests): the default in v6, which
+   * `dynamic_requests = false` turns off; v5 turns them on with `dynamic_requests = true`.
+   */
+  dynamicRequests: boolean;
   span: Span;
 }
 
@@ -353,6 +358,8 @@ interface StmtInfo {
   stmt: Stmt;
   reads: Set<Var>;
   writes: Set<Var>;
+  /** What it reassigns (`:=`, `+=`), as opposed to declares. */
+  assigns: Set<Var>;
 }
 
 /**
@@ -367,6 +374,11 @@ interface Frame {
   kind: 'global' | 'block' | 'loop' | 'function';
   /** A loop's own variables: its counter, its items. */
   loopVars: Var[];
+  /** A function's: its parameters, and whether it's a library's exported one. */
+  params?: Var[];
+  exported?: boolean;
+  /** A loop's: the requests inside it, and what their expressions need (checked at its end). */
+  requests?: { call: Extract<Expr, { kind: 'call' }>; needed: ReadonlySet<Var> }[];
 }
 
 /** Statements a context program always has: the declaration call and global definitions. */
@@ -566,7 +578,8 @@ export class Compiler {
   /** Extra sets that note every variable read (a request's expression). */
   private readonly collectors: Set<Var>[] = [];
   /** What opens the next statement list: set just before it's compiled. */
-  private pendingFrame: { owner: Expr; kind: Frame['kind']; loopVars: Var[] } | null = null;
+  private pendingFrame: Pick<Frame, 'owner' | 'kind' | 'loopVars' | 'params' | 'exported'> | null =
+    null;
 
   constructor(
     script: Script,
@@ -879,6 +892,8 @@ export class Compiler {
       owner: pending?.owner ?? null,
       kind: pending?.kind ?? (scope.global ? 'global' : 'block'),
       loopVars: pending?.loopVars ?? [],
+      params: pending?.params,
+      exported: pending?.exported,
     };
     this.frames.push(frame);
     const runs: Run[] = [];
@@ -892,6 +907,7 @@ export class Compiler {
       }
       // A tuple at a block's end, compiled inside the block (a request in it sees its statements).
       if (tail) this.track(frame, tail.stmt, tail.compile);
+      if (frame.requests) this.checkLoopRequests(frame);
     } finally {
       this.frames.pop();
     }
@@ -952,7 +968,7 @@ export class Compiler {
   }
 
   private track<T>(frame: Frame, stmt: Stmt, compile: () => T): T {
-    const info: StmtInfo = { stmt, reads: new Set(), writes: new Set() };
+    const info: StmtInfo = { stmt, reads: new Set(), writes: new Set(), assigns: new Set() };
     frame.current = info;
     try {
       return compile();
@@ -970,9 +986,37 @@ export class Compiler {
     for (const collector of this.collectors) collector.add(v);
   }
 
-  /** Notes a variable written (declared or assigned) by the statements being compiled. */
-  private noteWrite(v: Var): void {
-    for (const frame of this.frames) frame.current?.writes.add(v);
+  /** Notes a variable written (declared, or reassigned) by the statements being compiled. */
+  private noteWrite(v: Var, reassigned = false): void {
+    for (const frame of this.frames) {
+      frame.current?.writes.add(v);
+      if (reassigned) frame.current?.assigns.add(v);
+    }
+  }
+
+  /** Whether request calls compiled now are dynamic: the declaration's, or a library's version. */
+  dynamicRequests(): boolean {
+    if (this.module.key !== '') return this.module.version >= 6;
+    return this.indicator?.dynamicRequests ?? this.version >= 6;
+  }
+
+  /**
+   * At a loop's end, its requests: "a request.*() call's evaluated expression cannot depend on"
+   * a variable that changes in the loop (Pine docs, Dynamic requests: In local scopes).
+   */
+  private checkLoopRequests(frame: Frame): void {
+    const changed = new Set<Var>();
+    for (const info of frame.infos) for (const v of info.assigns) changed.add(v);
+    for (const { call, needed } of frame.requests ?? []) {
+      for (const v of needed) {
+        if (changed.has(v)) {
+          this.fail(
+            `The expression of '${call.callee}' can't depend on a variable that changes in the loop: only the symbol and the timeframe can`,
+            call.span,
+          );
+        }
+      }
+    }
   }
 
   /** Compiles something, noting every variable it reads into `into`. */
@@ -1022,6 +1066,7 @@ export class Compiler {
     };
     const calls: Expr[] = [];
     let child: object = call;
+    if (!this.dynamicRequests()) this.staticRequestScope(call);
     for (let f = this.frames.length - 1; f >= 0; f--) {
       const frame = this.frames[f] as Frame;
       for (let i = frame.infos.length - 1; i >= 0; i--) {
@@ -1030,9 +1075,21 @@ export class Compiler {
         keep.add(info.stmt);
         for (const v of info.reads) needed.add(v);
       }
-      if (frame.kind === 'loop' && frame.loopVars.some((v) => needed.has(v))) {
+      if (frame.kind === 'loop') {
+        if (frame.loopVars.some((v) => needed.has(v))) {
+          this.fail(
+            `The expression of '${call.callee}' can't depend on the loop's own variables: only the symbol and the timeframe can`,
+            call.span,
+          );
+        }
+        frame.requests ??= [];
+        frame.requests.push({ call, needed: new Set(needed) });
+      }
+      // "provided that the evaluated expressions do not depend on any exported function
+      // parameters" (Pine docs, Dynamic requests: In libraries).
+      if (frame.kind === 'function' && frame.exported && frame.params?.some((v) => needed.has(v))) {
         this.fail(
-          `The expression of '${call.callee}' can't depend on the loop's own variables: only the symbol and the timeframe can`,
+          `The expression of '${call.callee}' in an exported function can't depend on the function's parameters`,
           call.span,
         );
       }
@@ -1063,6 +1120,33 @@ export class Compiler {
     };
     this.requests.push(site);
     return site;
+  }
+
+  /**
+   * Requests that aren't dynamic run once a bar, so not in an if, a switch or a loop, nor in a
+   * library's exported function; a non-exported function's are taken out to the global scope
+   * (Pine docs, Dynamic requests: In local scopes).
+   */
+  private staticRequestScope(call: Extract<Expr, { kind: 'call' }>): void {
+    for (let f = this.frames.length - 1; f >= 0; f--) {
+      const frame = this.frames[f] as Frame;
+      if (frame.kind === 'global') return;
+      if (frame.kind === 'function') {
+        if (!frame.exported) return;
+        this.fail(
+          `Cannot call '${call.callee}' in an exported function unless the library's requests are dynamic (Pine v6)`,
+          call.span,
+        );
+      }
+      const how =
+        this.version >= 5
+          ? 'turn on dynamic requests with dynamic_requests = true, or call it in the global scope'
+          : 'call it in the global scope';
+      this.fail(
+        `Cannot call '${call.callee}' in a local block (an if, a switch or a loop): ${how}`,
+        call.span,
+      );
+    }
   }
 
   /** A request call's own code (its expression's), so identical ones share a context. */
@@ -1334,7 +1418,7 @@ export class Compiler {
     const v = scope.lookup(name);
     if (!v) this.fail(`Undeclared identifier "${name}"`, target.span);
     if (v.isConst) this.fail(`"${name}" is const: it can't be reassigned`, target.span);
-    this.noteWrite(v);
+    this.noteWrite(v, true);
     if (stmt.op !== ':=') this.noteRead(v);
     const value = this.expr(stmt.value, scope);
     if (v.simpleOnly && value.qual > SIMPLE) {
@@ -2775,7 +2859,13 @@ export class Compiler {
     this.onPath = filter;
     let body: CompiledBlock;
     try {
-      this.pendingFrame = { owner: expr, kind: 'function', loopVars: [] };
+      this.pendingFrame = {
+        owner: expr,
+        kind: 'function',
+        loopVars: [],
+        params: [...fnScope.vars.values()],
+        exported: stmt.exported && fn.module.key !== '',
+      };
       body = this.blockValueOfFunction(stmt.body, fnScope, filter);
     } finally {
       this.loops = loops;

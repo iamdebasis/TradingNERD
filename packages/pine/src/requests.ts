@@ -513,6 +513,8 @@ export class ContextStore {
   readonly missing = new Map<string, RequestKey>();
   /** Every context asked for, by its text. */
   readonly used = new Map<string, RequestKey>();
+  /** Each request's contexts asked for on the chart's history: realtime bars may read only these. */
+  readonly history = new Set<string>();
   private readonly runs = new Map<string, ContextRun>();
   /** Each unique request: Pine's limit counts them. */
   private readonly unique = new Set<string>();
@@ -604,6 +606,16 @@ export class RequestBroker {
   ): Value {
     const key = this.key(symbol, timeframe, rt);
     if (!key) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
+    // "scripts must request all required datasets while executing on historical bars": a
+    // realtime bar can't ask for a new one (Pine docs, Dynamic requests).
+    const asked = `${site.shared ?? site.id}|${requestKeyText(key)}`;
+    if (rt.index < rt.realtimeFrom) this.store.history.add(asked);
+    else if (rt.realtimeFrom > 0 && !this.store.history.has(asked)) {
+      throw new PineRuntimeError(
+        `A request on a realtime bar can only use data requested on the chart's history: ${key.symbol} on ${key.timeframe} wasn't`,
+        site.span,
+      );
+    }
     const run = this.store.run(site, key, options);
     if (run === 'missing') return requestNa(site.base, site.items);
     if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);

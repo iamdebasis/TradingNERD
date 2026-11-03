@@ -880,9 +880,20 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     format: format as string,
     precision: typeof precision === 'number' && !Number.isNaN(precision) ? precision : null,
     library: false,
+    dynamicRequests: dynamicRequests(c, args),
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };
+}
+
+/**
+ * Whether a script's requests are dynamic (Pine docs, Dynamic requests): v6's are unless
+ * `dynamic_requests = false`; v5's only with `dynamic_requests = true`; older ones never.
+ */
+function dynamicRequests(c: Compiler, args: Args): boolean {
+  const given = args.constant('dynamic_requests', null, 'bool');
+  if (c.version <= 4) return false;
+  return given === null ? c.version >= 6 : given === true;
 }
 
 /** library(): a library's declaration; on the chart it draws what its own code plots. */
@@ -897,6 +908,7 @@ function libraryCall(c: Compiler, call: Call, scope: Scope): Compiled {
     format: 'inherit',
     precision: null,
     library: true,
+    dynamicRequests: dynamicRequests(c, args),
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };

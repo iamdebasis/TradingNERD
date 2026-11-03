@@ -61,6 +61,26 @@ function tupleOf(c: Compiler, list: Extract<Expr, { kind: 'list' }>, scope: Scop
   };
 }
 
+/**
+ * A merge setting: a barmerge constant, or in v4 and older a bool as well (`security(id, "D",
+ * open, true, lookahead = true)`, as their scripts and the v3 migration guide write it).
+ */
+function merging(
+  c: Compiler,
+  args: Args,
+  name: 'gaps' | 'lookahead',
+  base: Base,
+  on: string,
+  fallback: string,
+): (env: FoldEnv) => Value {
+  const given = args.get(name);
+  if (given && given.base === 'bool' && c.version <= 4) {
+    const fold = args.foldedAs(name, 'bool', false);
+    return (env) => (fold(env) === true ? on : on.replace('_on', '_off'));
+  }
+  return args.foldedAs(name, base, fallback, SIMPLE);
+}
+
 const securityCall: Handler = (c, call, scope) => {
   const args = new Args(c, call, scope, SECURITY_PARAMS, 3);
   // In a request's context program, the call being copied gives its expression's value on each
@@ -90,15 +110,20 @@ const securityCall: Handler = (c, call, scope) => {
       );
     }
   }
-  const symbol = (args.string('symbol') as Compiled).ev;
-  const timeframe = (args.string('timeframe') as Compiled).ev;
-  const gaps = args.foldedAs('gaps', 'barmerge_gaps', 'gaps_off', SIMPLE);
+  // Without dynamic requests, the context can't change from bar to bar (Pine docs, "series"
+  // arguments): the symbol and the timeframe must be known by the first bar.
+  const most = c.dynamicRequests() ? SERIES : SIMPLE;
+  const symbol = (args.string('symbol', most) as Compiled).ev;
+  const timeframe = (args.string('timeframe', most) as Compiled).ev;
+  const gaps = merging(c, args, 'gaps', 'barmerge_gaps', 'gaps_on', 'gaps_off');
   // lookahead_off is the default from v3 on; v1 and v2 looked ahead (the v6 reference).
-  const lookahead = args.foldedAs(
+  const lookahead = merging(
+    c,
+    args,
     'lookahead',
     'barmerge_lookahead',
+    'lookahead_on',
     c.version <= 2 ? 'lookahead_on' : 'lookahead_off',
-    SIMPLE,
   );
   const ignore = args.foldedAs('ignore_invalid_symbol', 'bool', false);
   const currency = args.string('currency')?.ev ?? null;

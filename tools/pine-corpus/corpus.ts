@@ -17,7 +17,20 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compileScript, convertToV6, ScriptRun } from '../../packages/pine/src/index.ts';
+import {
+  type Bar,
+  parseResolution,
+  resampleBars,
+  resolutionDurationMs,
+} from '../../packages/core/src/index.ts';
+import {
+  type ContextData,
+  compileScript,
+  convertToV6,
+  DEFAULT_SYMBOL,
+  type RequestFeed,
+  ScriptRun,
+} from '../../packages/pine/src/index.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CACHE = join(HERE, '.cache');
@@ -96,9 +109,13 @@ const DECLARATION = /^\s*(indicator|study|strategy|library)\s*\(/m;
  */
 const ERROR_INTRO =
   /(compil\w+ error|cause[sd]? an? error|raise[sd]? an? error|will (not|n't) compile|does(n't| not) compile|won't compile|not allowed|is invalid|error:|throws? an? error|runtime error|fails? to compile|generates? (the|an?|this) error|raises? (this|the) error|gives? an? [^.]{0,40}\berror\b|no viable alternative|mismatched input|could not be translated)/;
-/** Words that name an error without giving one: "does not raise an error", "the risk of errors". */
+/**
+ * Words that name an error without giving one: "does not raise an error" (its emphasis too: "it
+ * *does not* raise an error"), "the risk of errors", and what another version would do ("In Pine
+ * v5, this script would cause a compilation error unless…").
+ */
 const NOT_AN_ERROR =
-  /\b(does not|doesn't|do not|don't|will not|won't|without|never|no longer|avoid\w*|prevent\w*|risk of|reduc\w*)\s+(\w+\s+){0,3}?(an?\s+)?(compilation |runtime )?errors?\b/g;
+  /\b(does not|doesn't|do not|don't|will not|won't|without|never|no longer|avoid\w*|prevent\w*|risk of|reduc\w*)\**\s+(\w+\s+){0,3}?(an?\s+)?(compilation |runtime )?errors?\b|\bin pine v\d\b[^.]*/g;
 
 /**
  * The paragraph that introduces a code block: the last one before it, past any image. A fix
@@ -324,6 +341,80 @@ const BARS = Array.from({ length: 600 }, (_, i) => {
   };
 });
 
+/**
+ * Other symbols' and timeframes' bars for the scripts' requests (P4), made from BARS: a symbol's
+ * prices scaled by a factor from its name, so two symbols differ; longer bars resampled from the
+ * days; shorter ones split from the last days' (a smooth path through each day's open, high, low
+ * and close), at most 20,000 of them. Every symbol exists; its history starts at its listing.
+ */
+const contexts = new Map<string, ContextData | null>();
+const CORPUS_FEED: RequestFeed = {
+  data(key) {
+    const text = `${key.symbol}@${key.timeframe}`;
+    if (contexts.has(text)) return contexts.get(text) ?? null;
+    const resolution = parseResolution(key.timeframe);
+    let data: ContextData | null = null;
+    if (resolution && resolution.unit !== 'tick') {
+      let hash = 0;
+      for (const ch of key.symbol) hash = (hash * 31 + ch.charCodeAt(0)) % 1000;
+      const k = key.symbol === '' ? 1 : 0.5 + hash / 666;
+      const days = BARS.map((b) => ({
+        ...b,
+        open: b.open * k,
+        high: b.high * k,
+        low: b.low * k,
+        close: b.close * k,
+      }));
+      const span = resolutionDurationMs(resolution);
+      const bars =
+        span !== null && span < 86_400_000 ? split(days, span) : resampleBars(days, resolution);
+      const ticker = key.symbol.includes(':') ? (key.symbol.split(':')[1] as string) : key.symbol;
+      data = {
+        symbol: { ...DEFAULT_SYMBOL, ticker, tickerid: key.symbol, timeframe: key.timeframe },
+        bars,
+        live: true,
+        fromListing: true,
+        version: 1,
+        history: 1,
+      };
+    }
+    contexts.set(text, data);
+    return data ?? 'invalid';
+  },
+};
+
+/** Shorter bars from the last days: each day's split into equal parts along a smooth path. */
+function split(days: readonly Bar[], span: number): Bar[] {
+  const per = Math.max(1, Math.round(86_400_000 / span));
+  const take = Math.max(1, Math.min(days.length, Math.ceil(20_000 / per)));
+  const out: Bar[] = [];
+  for (const day of days.slice(-take)) {
+    for (let j = 0; j < per; j++) {
+      const at = (j: number) => {
+        const t = j / per;
+        // Open, then the high, the low, and the close at the day's end.
+        const path = [day.open, day.high, day.low, day.close];
+        const x = t * 3;
+        const i = Math.min(2, Math.floor(x));
+        const a = path[i] as number;
+        const b = path[i + 1] as number;
+        return a + (b - a) * (x - i);
+      };
+      const open = at(j);
+      const close = at(j + 1);
+      out.push({
+        time: day.time + (j * span) / 1000,
+        open,
+        high: Math.max(open, close),
+        low: Math.min(open, close),
+        close,
+        volume: day.volume / per,
+      });
+    }
+  }
+  return out.slice(-20_000);
+}
+
 function runOne(
   text: string,
   libraries: ReadonlyMap<string, string> = new Map(),
@@ -334,9 +425,17 @@ function runOne(
     });
     if (!result.ok)
       return { ok: false, stage: 'compile', message: result.errors[0]?.message ?? '?' };
-    const run = new ScriptRun(result.program, result.program.defaults());
+    const run = new ScriptRun(
+      result.program,
+      result.program.defaults(),
+      DEFAULT_SYMBOL,
+      CORPUS_FEED,
+    );
     run.setBars(BARS, true);
     if (run.error) return { ok: false, stage: 'runtime', message: run.error.message };
+    if (run.waiting) {
+      return { ok: false, stage: 'data', message: `waiting for ${run.missing.length} contexts` };
+    }
     return { ok: true, stage: 'ok', message: '' };
   } catch (error) {
     return {
@@ -368,17 +467,30 @@ function report(scripts: Script[]): void {
     ...runOne(script.text, libraries),
   }));
   const kinds = new Map<string, number>();
+  const p4kinds = new Map<string, number>();
   for (const corpus of ['manual', 'community'] as const) {
     const mine = results.filter(
       (r) => r.script.corpus === corpus && !r.script.deliberate && !r.script.notRunnable,
     );
     const p2 = mine.filter((r) => r.needs.length === 0);
+    const p4 = mine.filter((r) => r.needs.length === 1 && r.needs[0] === 'request');
     const ok = mine.filter((r) => r.ok).length;
     const p2ok = p2.filter((r) => r.ok).length;
+    const p4ok = p4.filter((r) => r.ok).length;
+    const share = (n: number, of: number) => `${((100 * n) / Math.max(1, of)).toFixed(1)}%`;
     console.log(
-      `${corpus}: ${ok} of ${mine.length} run (${((100 * ok) / Math.max(1, mine.length)).toFixed(1)}%); ` +
-        `of the ${p2.length} that need only P2's features, ${p2ok} (${((100 * p2ok) / Math.max(1, p2.length)).toFixed(1)}%)`,
+      `${corpus}: ${ok} of ${mine.length} run (${share(ok, mine.length)}); ` +
+        `of the ${p2.length} that need only P2's features, ${p2ok} (${share(p2ok, p2.length)}); ` +
+        `of the ${p4.length} that need P4's requests too, ${p4ok} (${share(p4ok, p4.length)})`,
     );
+    for (const r of p4) {
+      if (r.ok) continue;
+      const kind = `P4 ${r.stage}: ${r.message
+        .replace(/"[^"]*"/g, '"…"')
+        .replace(/'[^']*'/g, "'…'")
+        .replace(/\d+/g, 'N')}`.slice(0, 110);
+      p4kinds.set(kind, (p4kinds.get(kind) ?? 0) + 1);
+    }
     for (const r of p2) {
       if (r.ok) continue;
       const kind = `${r.stage}: ${r.message
@@ -406,6 +518,10 @@ function report(scripts: Script[]): void {
   for (const [why, ids] of notRunnable) console.log(`Not counted, ${why}: ${ids.join(', ')}`);
   console.log('\nWhat stops the scripts that need only P2:');
   for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 25)) {
+    console.log(`${String(n).padStart(5)}  ${kind}`);
+  }
+  console.log("\nWhat stops the scripts that need P4's requests:");
+  for (const [kind, n] of [...p4kinds].sort((a, b) => b[1] - a[1]).slice(0, 30)) {
     console.log(`${String(n).padStart(5)}  ${kind}`);
   }
   const commits = Object.fromEntries(

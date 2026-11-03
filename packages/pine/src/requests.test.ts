@@ -429,3 +429,191 @@ plot(request.security(syminfo.tickerid, "D", close))`);
     expect(plotOf(r, 0)[71]).toBe(180);
   });
 });
+
+describe('Dynamic requests (Pine docs, Dynamic requests): v6 by default', () => {
+  it('takes a symbol that changes from bar to bar, one call fetching from each', () => {
+    const r = run(
+      v6(`symbolSeries = bar_index < 36 ? "BINANCE:BTCUSDT" : "COINBASE:ETHUSD"
+plot(request.security(symbolSeries, timeframe.period, close))`),
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[35]).toBe(135);
+    // ETH's 12:00 on day 2 is its 36th bar of the hours (two missing before).
+    expect(plotOf(r, 0)[36]).toBe(1000 + 2 * 36);
+  });
+
+  it('runs in loops over symbols, the expression the same on every iteration', () => {
+    const r = run(
+      v6(`var array<string> symbols = array.from("BINANCE:BTCUSDT", "COINBASE:ETHUSD")
+array<float> requestedData = array.new<float>()
+for symbol in symbols
+    array.push(requestedData, request.security(symbol, timeframe.period, close))
+plot(array.sum(requestedData))`),
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[5]).toBe(105 + 1010);
+  });
+
+  it("refuses an expression that depends on the loop's variables (the manual's second example)", () => {
+    const result = compileScript(
+      v6(`var array<string> symbols = array.from("BINANCE:BTCUSDT", "COINBASE:ETHUSD")
+float sum = 0.0
+for [i, symbol] in symbols
+    sum += request.security(symbol, timeframe.period, close * i)
+plot(sum)`),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0]?.message).toMatch(/loop's own variables/);
+    const changing = compileScript(
+      v6(`float k = 1.0
+float sum = 0.0
+for i = 0 to 1
+    sum += request.security(syminfo.tickerid, "D", close * k)
+    k := k + 1
+plot(sum)`),
+    );
+    expect(changing.ok).toBe(false);
+    if (!changing.ok) expect(changing.errors[0]?.message).toMatch(/changes in the loop/);
+  });
+
+  it('runs in an if block, the copy computing on every bar of its context', () => {
+    const r = run(
+      v6(`float v = na
+if bar_index > 30
+    v := request.security(syminfo.tickerid, "D", ta.sma(close, 2))
+plot(v)`),
+    );
+    expect(plotOf(r, 0)[20]).toBeNaN();
+    // The days' average is the context's, whatever the chart bar the if ran on.
+    expect(plotOf(r, 0)[47]).toBe(135);
+  });
+
+  it('evaluates a request inside another in its context: the inner one inherits it', () => {
+    const r = run(
+      v6(`string info1 = request.security("", "", syminfo.tickerid + "_" + timeframe.period)
+string info2 = request.security("COINBASE:ETHUSD", "60", info1)
+plot(info1 == "BINANCE:BTCUSDT_60" ? 1 : 0)
+plot(info2 == "COINBASE:ETHUSD_60" ? 1 : 0)`),
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[5]).toBe(1);
+    expect(plotOf(r, 1)[5]).toBe(1);
+  });
+
+  it("stops on a realtime bar asking for data the history didn't (the manual's 4H example)", () => {
+    const feed = feedOf({
+      'BINANCE:BTCUSDT@60': context(CHART, HOURS, '60'),
+      'BINANCE:BTCUSDT@240': context(CHART, aggregate(HOURS, 4 * HOUR), '240'),
+    });
+    const r = run(
+      v6(`string tf = barstate.isrealtime ? "240" : timeframe.period
+plot(request.security(syminfo.tickerid, tf, close))`),
+      feed,
+    );
+    expect(r.error?.message).toMatch(
+      /realtime bar can only use data requested on the chart's history/,
+    );
+    expect(r.error?.bar).toBe(71);
+  });
+
+  it('lets a library export a function that requests, the expression not on its parameters', () => {
+    const LIB = `//@version=6
+library("CustomRequest")
+export htfPrices(string tickerID, string timeframe) =>
+    request.security(tickerID, timeframe, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)`;
+    const SCRIPT = `//@version=6
+indicator("Uses it")
+import someone/CustomRequest/1 as req
+[o, h, l, c] = req.htfPrices(syminfo.tickerid, "D")
+plot(c)`;
+    const result = compileScript(SCRIPT, {
+      resolveLibrary: (p, n, v) => (`${p}/${n}/${v}` === 'someone/CustomRequest/1' ? LIB : null),
+    });
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults(), CHART, FEED);
+    r.setBars(HOURS, true);
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[24]).toBe(123);
+    const PARAM = `//@version=6
+library("Bad")
+export f(float x) =>
+    request.security(syminfo.tickerid, "D", x)`;
+    const bad = compileScript(
+      `//@version=6\nindicator("x")\nimport someone/Bad/1 as b\nplot(b.f(close))`,
+      { resolveLibrary: (p, n, v) => (`${p}/${n}/${v}` === 'someone/Bad/1' ? PARAM : null) },
+    );
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors[0]?.message).toMatch(/exported function can't depend/);
+  });
+});
+
+describe('Requests that aren’t dynamic: v5 and older, or dynamic_requests = false', () => {
+  const v5 = (lines: string) => `//@version=5\nindicator("Requests")\n${lines}`;
+
+  it('refuses a symbol or timeframe that changes from bar to bar (v5: a warning)', () => {
+    const changing = `sym = bar_index < 10 ? "BINANCE:BTCUSDT" : "COINBASE:ETHUSD"
+plot(request.security(sym, "D", close))`;
+    const off = compileScript(
+      `//@version=6\nindicator("Off", dynamic_requests = false)\n${changing}`,
+    );
+    expect(off.ok).toBe(false);
+    if (!off.ok) expect(off.errors[0]?.message).toMatch(/'series string'.*'simple string'/);
+    // v5 and older let series values through with a warning, as elsewhere (compiler.ts).
+    const old = compileScript(v5(changing));
+    expect(old.ok).toBe(true);
+    expect(old.warnings[0]?.message).toMatch(/'series string'.*'simple string'/);
+    // An input's symbol is fine: it's known by the first bar.
+    expect(
+      compileScript(
+        v5('sym = input.symbol("COINBASE:ETHUSD")\nplot(request.security(sym, "D", close))'),
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('refuses a request in an if or a loop, but takes one in a function', () => {
+    const local = compileScript(
+      v5(`float v = na
+if bar_index > 3
+    v := request.security(syminfo.tickerid, "D", close)
+plot(v)`),
+    );
+    expect(local.ok).toBe(false);
+    if (!local.ok) expect(local.errors[0]?.message).toMatch(/local block/);
+    const off = compileScript(`//@version=6
+indicator("Off", dynamic_requests = false)
+float v = na
+if bar_index > 3
+    v := request.security(syminfo.tickerid, "D", close)
+plot(v)`);
+    expect(off.ok).toBe(false);
+    const fn = run(
+      v5(`f() => request.security(syminfo.tickerid, "D", close)
+plot(f())`),
+    );
+    expect(fn.error).toBeNull();
+    expect(plotOf(fn, 0)[23]).toBe(123);
+    // v5 turns them on with dynamic_requests = true.
+    expect(
+      compileScript(`//@version=5
+indicator("On", dynamic_requests = true)
+float v = na
+if bar_index > 3
+    v := request.security(syminfo.tickerid, "D", close)
+plot(v)`).ok,
+    ).toBe(true);
+  });
+});
+
+describe('Old versions’ request.security() (security() before v5)', () => {
+  it('takes bools for gaps and lookahead in v4 and older', () => {
+    const r = run(`//@version=4
+study("Old")
+plot(security(syminfo.tickerid, "D", close, true))
+plot(security(syminfo.tickerid, "D", close, false, lookahead = true))`);
+    expect(r.error).toBeNull();
+    const gapped = plotOf(r, 0);
+    expect(gapped[22]).toBeNaN();
+    expect(gapped[23]).toBe(123);
+    expect(plotOf(r, 1)[0]).toBe(123);
+  });
+});
