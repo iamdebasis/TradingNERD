@@ -34,9 +34,10 @@ TradingView sets the bar for charting: smooth trackpad gestures, a dense but cal
 | **History** | Deep scroll-back with resampling to any interval, seconds and ticks, and only whole bars. Market caps go back to 2013 through a resumable, rate-limit-aware download and a CC0 academic dataset |
 | **Watchlists** | Several lists, sections, flags, multi-select, drag and drop, and TradingView's own `.txt` import and export |
 | **Indicators** | TradingView's Indicators button and dialog with favorites; Volume and RSI computed as Pine computes them, live and through history, with their legend rows, settings (inputs, styles, and the Style tab's output and input values) and panes, RSI's gradient fills included. A value is drawn only where the loaded bars settle it, never one that differs from TradingView's for want of older bars |
-| **Pine Script** | A Pine Editor in a side panel, as on TradingView, with Pine Script® v6 run in the browser by our own engine. A built-in's code is editable at once as your copy, with Reset to original. Add to chart and Update on chart; errors underlined and listed in the console; My scripts saved with every version. RSI's Pine code gives the built-in's values exactly, bar for bar |
+| **Pine Script** | A Pine Editor in a side panel, as on TradingView, with Pine Script® v1 to v6 run in the browser by our own engine: the whole language, libraries, Pine Logs, the plotshape family, and requests to other symbols and timeframes (`request.security()` and its family, `timeframe =`), their data loaded like the chart's own. A built-in's code is editable at once as your copy, with Reset to original; My scripts saved with every version, Version history and Convert code to v6. RSI's Pine code gives the built-in's values exactly, bar for bar |
+| **Open interest** | TradingView's `_OI` symbols (`BINANCE:BTCUSDT.P_OI`, and the older `BTCUSDTPERP_OI`) for every perpetual on Binance, Bybit and OKX, for charts and scripts: Binance's history back to 2020 from its own archive, the rest from the exchanges' free APIs, kept on disk and live every 15 seconds |
 | **Performance** | 60 fps panning and zooming through 20,000 bars; under 2 ms a frame with 50 rows ticking; symbol and interval switches under 150 ms, all enforced by tests |
-| **Quality** | About 1,330 unit and integration tests and 225 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
+| **Quality** | About 1,600 unit and integration tests and 237 end-to-end tests, including pixel comparisons against TradingView reference screenshots |
 | **Security** | A loopback-only gateway with Host and Origin checks, owner-only key storage, keys masked to the browser, and no outside requests from the browser |
 
 ## Architecture
@@ -297,20 +298,21 @@ pnpm test:live      # opt-in checks against the real exchanges
 
 | Suite | Tests |
 |---|---|
-| `packages/core` | 345 |
+| `packages/core` | 350 |
 | `packages/indicators` | 78 |
-| `packages/pine` | 128 |
-| `packages/chart` | 76 |
-| `apps/web` (unit) | 171 |
-| `apps/gateway` | 531, plus 66 live tests |
-| End to end (Playwright) | 225 |
+| `packages/pine` | 312 |
+| `packages/chart` | 91 |
+| `apps/web` (unit) | 202 |
+| `apps/gateway` | 570, plus 77 live tests |
+| End to end (Playwright) | 237 |
 
 The end-to-end suite runs against a fake gateway and fakes every write. It includes pixel comparisons against TradingView's own screenshots and performance budgets.
 
 ## Roadmap
 
 - **Each coin's older days (M9f, under way):** every CRYPTOCAP symbol back to 2013, switched on once the accuracy test passes.
-- **More of the Pine Editor:** version history with differences, Rename, Make a copy and Delete, Pine Logs, and more of the language (`plotshape`, `barcolor`, arrays, `request.security`) (P2); then drawings, libraries, strategies and alerts (P3).
+- **More of Pine Script:** drawings (labels, lines, boxes, tables) (P3), then strategies and the Strategy Tester (P5); TradingView's own data (`request.financial` and the like) and Renko and the other chart types later.
+- **Open interest:** listed in Symbol Search, added up across exchanges, and older years from a further source, on the user's word.
 - **More indicators:** moving averages, Bollinger Bands and VWAP (I2); MACD, Stochastic, ATR and TradingView's pane controls (I3); templates and saved defaults (I4).
 - Kraken's full history from its downloadable files.
 - Gold and silver for spreads such as BTCUSD/XAUUSD.

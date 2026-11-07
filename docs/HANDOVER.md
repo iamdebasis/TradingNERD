@@ -2,7 +2,7 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 2 November 2026, by the AI Lead Architect and Lead Delivery Engineer (Claude).
+**Last updated:** 7 November 2026, by the AI Lead Architect and Lead Delivery Engineer (Claude).
 
 ## 1. Where things stand
 
@@ -13,11 +13,52 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
-| Built, waiting to be pushed | **P2, real Pine scripts and the editor as TradingView's** (31 October to 2 November), on `claude/keen-allen-7wubfe` from `main` at `4295233`, committed step by step on your YES: step 1 (versions and types, `212fb59`), step 3 (the built-ins on TradingView's own values, `0c80d88`), step 4 (the plotshape family, `074a0a7`), step 5 (libraries, protocol v12, `264218c`), step 6 (the script menu, Version history, help while typing, `f296709`) and step 7 (Pine Logs, Convert code to v6, Move script to bottom, the corpus's last fixes). The corpus: 478 of 481 manual examples and 199 of 199 community scripts that need only P2 run (99.6%), and all 37 of the manual's error examples stop as on TradingView; 671 of 689 plots equal TradingView's (SPEC §4.17). Pushing and the pull request wait for their own YES. **Still to do on the Mac:** `pnpm verify` (the cloud can't run the browser tests against the Mac's baselines), the hand checks on 10 scripts against TradingView, and your Ichimoku with `JollyWizard/lib_hlm/1` pasted. What's provisional is SPEC §11, items 89 to 103 |
+| Pushed, its pull request waiting | **P2, real Pine scripts and the editor as TradingView's** (31 October to 2 November), on `claude/keen-allen-7wubfe` from `main` at `4295233`, committed step by step on your YES: step 1 (versions and types, `212fb59`), step 3 (the built-ins on TradingView's own values, `0c80d88`), step 4 (the plotshape family, `074a0a7`), step 5 (libraries, protocol v12, `264218c`), step 6 (the script menu, Version history, help while typing, `f296709`) and step 7 (Pine Logs, Convert code to v6, Move script to bottom, the corpus's last fixes, `e90c080`), pushed to `claude/keen-allen-7wubfe`. The corpus: 478 of 481 manual examples and 199 of 199 community scripts that need only P2 run (99.6%), and all 37 of the manual's error examples stop as on TradingView; 671 of 689 plots equal TradingView's (SPEC §4.17). Its pull request waits for its own YES. **Still to do on the Mac:** `pnpm verify` (the cloud can't run the browser tests against the Mac's baselines), the hand checks on 10 scripts against TradingView, and your Ichimoku with `JollyWizard/lib_hlm/1` pasted. What's provisional is SPEC §11, items 89 to 103 |
+| Built, waiting to be pushed | **P4, other symbols and timeframes** (3 to 7 November), on the same branch after P2, committed step by step on your YES: step 1 (`request.security()`, `44abccf`), step 2 (dynamic requests, `8765ac4`), step 3 (lower timeframes, `timeframe =`, ticker ids, currencies, `fa1e80c`), step 4 (requested data from the gateway, the legend's ring, RSI's Timeframe, Symbol Search for `input.symbol`, `1628f6e`), step 6 (open interest symbols, `e59a120`) and step 7 (the docs). Step 5, measuring the open interest providers, has no code. §2a below. **Still to do on the Mac:** `pnpm verify`, `pnpm test:live` (Binance's futures APIs and Bybit refuse the cloud), and TradingView screenshots to settle open interest's units (SPEC §11, item 113). Provisional: SPEC §11, items 104 to 117 |
 | Taken out | A3 (hiding unchecked coins), on the user's rule against hiding data |
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
 The milestone table is SPEC §8.
+
+## 2a. Built: P4, other symbols and timeframes (3 to 7 November)
+
+The user said YES to "build P4 as planned: steps 1–7 on `claude/keen-allen-7wubfe`, each step committed after its checks pass, with pushing and the pull request left for their own YES". The design is SPEC §3 (the rows of 3 and 7 November), §4.19, §4.20, §5.20, §5.21 and §6.18.
+
+**What it does:**
+- **Scripts ask for other symbols and timeframes** as on TradingView: `request.security()` and `request.security_lower_tf()`, `request.currency_rate()`, `indicator(timeframe =)`, ticker ids (`ticker.new` and the rest, Heikin Ashi), dynamic requests and their rules, the 40-request limit.
+- **Their data comes from the gateway** like the chart's own, history and live. A script waiting for it draws nothing, with a ring turning in its legend row; a symbol that doesn't exist says so in its row.
+- **`input.symbol`** is picked with Symbol Search; **the built-in RSI** has TradingView's Calculation section (Timeframe, Wait for timeframe closes).
+- **Open interest symbols:** `BINANCE:BTCUSDT.P_OI` (and the older `BINANCE:BTCUSDTPERP_OI` your script uses), every perpetual's on Binance, Bybit and OKX, in the exchange's own unit, from 5 minutes up. History comes from the exchanges' own free APIs and Binance's archive, kept in `data/oi/`; live values every 15 s.
+
+**Measured** (SPEC §4.19, §4.20):
+
+| What | Result |
+|---|---|
+| The corpus, scripts that need requests | Manual 80 of 103, community 11 of 11. Of the 23 that don't run, 22 need what comes later (financial data, Renko and the like, TradingView's feeds) and one a chart below an hour |
+| The corpus, scripts that need only P2 | Still 478 of 481 and 199 of 199; the manual's 34 error examples all stop |
+| TradingView's own lower-timeframe values (a public dataset, run locally) | 4 of 4 bars equal |
+| Your OI script on 500 hourly bars of real Binance open interest | Runs; its "Open Interest" plot equals the bars' closes on all 500 |
+| Binance's archive for BTCUSDT | From 1 September 2020, every 5 minutes; all 2,258 days in about 2.5 minutes, 6.5 MB kept |
+| Open interest history against TradingView's (from February 2020) | Binance's BTCUSDT from September 2020, most other coins from December 2021; OKX's days from January 2024; Bybit not measured (it refuses the cloud) |
+| A data fault found | Binance's archive has eight readings of 0 on 15 October (13:40 to 14:40 UTC) between about 93,000 BTC: left out as failed readings |
+
+**Checks in the cloud (7 November):**
+- Typecheck and lint clean.
+- Unit tests all pass: core 350, indicators 78, pine 312, chart 91, web 202, gateway 570 (plus 77 live tests, opt-in).
+- The whole browser suite: 219 pass; 18 fail, all the known cloud-only ones (the Mac's pixel baselines, font widths, the 1 px flick), also failing on `main` there.
+- Live tests from the cloud: OKX's and the archive's pass; Binance's futures APIs (HTTP 451, "a restricted location") and Bybit (HTTP 403, its country block) refuse the cloud. Nothing was done to get around them.
+- A gateway of our own on port 5191 with a scratch data folder, stopped after: it resolved the three symbols, served 40 daily bars of BTCUSDT open interest in 6.4 s on first load, OKX's hourly bars and Binance's weekly ones.
+- For this, the cloud environment's network now allows `fapi.binance.com`, `dapi.binance.com`, `data.binance.vision`, `api.bybit.com` and `www.okx.com` (you approved it on 7 November). In the cloud, Node's `fetch` needs `NODE_USE_ENV_PROXY=1` for the live tests.
+
+**Left for the Mac:**
+1. After pulling, restart `pnpm dev` (no protocol change: P4 stays on v12). Then `pnpm verify`.
+2. `pnpm test:live`: Binance's futures APIs and Bybit, which the cloud can't reach.
+3. The first time a script asks for `BINANCE:BTCUSDTPERP_OI` on a daily chart, it waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
+4. A read-only check against the running app: your OI script on BTCUSDT 1h, its values against TradingView's at a few hours.
+
+**Decisions for you:**
+- **Open interest units** (SPEC §11, item 113): each is in its exchange's own unit; TradingView's are known only for `BINANCE:BTCUSDT.P_OI` (BTC). Screenshots of `BINANCE:BTCUSD.P_OI`, `BYBIT:BTCUSD.P_OI` and `OKX:BTCUSDT.P_OI` on TradingView, with a value at a date, would settle the rest.
+- **Older open interest** (item 115): TradingView's goes back to February 2020; the free sources start later. Coinalyze's daily history needs a free key from you; a paid source (Tardis.dev, CoinGlass) would cost money. Or keep what the exchanges give.
 
 ## 2. Under way: M9f, each coin's older days
 
@@ -119,13 +160,14 @@ The user said YES on 27 October to "build P1 of the Pine Editor as above (instal
 - **Start:** `pnpm dev`, then open http://127.0.0.1:5173.
 - **Keys,** each in its dialog: CoinGecko (coin logos and CRYPTOCAP), Alpaca (US stocks), Live Coin Watch (older market caps).
 - **Before every delivery:** `pnpm verify`, then a read-only check against the running app (AGENTS.md).
-- **Test counts on 31 October** (with P1, not yet committed):
-  - core 345, indicators 78, pine 128, chart 76, web 171;
-  - gateway 531 (plus 66 that need the live internet);
-  - browser 225 (8 for the Pine Editor, 23 for indicators, 13 visual, 5 performance);
+- **Test counts on 7 November** (with P4):
+  - core 350, indicators 78, pine 312, chart 91, web 202;
+  - gateway 570 (plus 77 that need the live internet);
+  - browser 237 (13 visual, 5 performance among them);
   - lint and typecheck clean.
 - **Known flaky test:** Bitstamp's "polls the live candle every 30 s" sometimes fails under load and passes on a rerun.
 - **Cloud sessions** (Claude Code on the web): put `/opt/node26/bin` first on PATH (the default `node` there is 22). Typecheck, lint and the unit tests run there; the browser tests don't yet, a known gap (AGENTS.md, "Commands"). The real check against the running app happens on the Mac.
+  - Live tests there need `NODE_USE_ENV_PROXY=1` (Node's `fetch` doesn't use the session's proxy otherwise), and the hosts allowed in the environment's network settings.
   - The browser tests can be run there by hand without writing anything into the repository: point Playwright at the preinstalled browser through a scratch folder of links (`PLAYWRIGHT_BROWSERS_PATH`, with `chromium-1248` and `chromium_headless_shell-1248` linked to `/opt/pw-browsers/…-1243`), skip the visual tests and pass `--update-snapshots=none`. Five tests fail there for platform reasons only (font metrics, pixels, a flick's 1 px): `chart.spec.ts` Sell and Buy's spread, `gestures.spec.ts` the flick, `reference.spec.ts` the legend's place, `symbol-search.spec.ts` and `watchlist.spec.ts` pixel checks. Its performance budgets are the Mac's: the cloud's machine misses some even on `main`, so compare there only against `main` on the same machine.
   - The browser window in the tests is 1,682 px wide: TradingView's 1,634 px reference layout plus the 48 px right toolbar (`playwright.config.ts`).
 
@@ -158,13 +200,14 @@ The full list is SPEC §11; these are the ones that matter most.
 - **GitHub's merge commits:** merging on GitHub made `9324baa` (pull request #1) and `6c403cb` (#2), with GitHub as committer and +0530, the time zone the 26 October rewrite took out. Both are public on `main`, so the identity check (AGENTS.md, "Git") now prints a second line that no push of ours adds. How merges should go is the user's call, from the options given on 26 October: fast-forward `main` from the Mac with a bypass of the ruleset for the user alone, accept GitHub's commits in the docs, or try merging from a browser set to UTC (GitHub doesn't document which time zone it stamps).
 - **Free limits that can change:** CoinGecko's 10,000 calls a month, Live Coin Watch's 10,000 requests a day. CoinDesk reportedly ended its free plan in 2026.
 - **Indicators (I1):** every look not measured from a screenshot is provisional (SPEC §11, items 62–63 and 70); TradingView's tick volume for TOTAL isn't ours (item 68); RSI's Timeframe input and the sentence-case title wait on the user (items 71 and 73). The Source code button came with P1 (item 72).
-- **Pine Editor (P1):** built, not committed (§2b). Its look is provisional until the screenshots in SPEC §11, item 74; the built-in RSI's smoothed MA waits on the user (item 76). P2 (version history, Rename, Make a copy, Delete, Pine Logs, more of the language, Volume's code) and P3 (drawings, libraries, strategies, alerts) are planned in SPEC §8, each for its own YES.
+- **Open interest (P4):** its units and history depth wait on your word (§2a, SPEC §11, items 113 and 115); it isn't listed in Symbol Search yet (item 111).
+- **Pine Editor (P1):** merged (§2b). Its look is provisional until the screenshots in SPEC §11, item 74; the built-in RSI's smoothed MA waits on the user (item 76). P2 (version history, Rename, Make a copy, Delete, Pine Logs, more of the language, Volume's code) and P3 (drawings, libraries, strategies, alerts) are planned in SPEC §8, each for its own YES.
 
 ## 6. Next steps, in order
 
-For P2: a YES to push `claude/keen-allen-7wubfe` and open its pull request into `main`; the user merges it. On the Mac, after pulling: restart `pnpm dev` (protocol v12: the gateway and the web app move together), then `pnpm verify`, P1's hand checks, a TradingView screenshot of plotshape at each size to calibrate the marks (SPEC §11, item 89), and your Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17). Screenshots that would settle step 7's provisional looks: the Pine Logs pane in the dark theme, the editor moved to the bottom, and what follows "Convert code to v6…" (SPEC §11, items 101 to 103).
+For P2 and P4: a YES to push P4's commits to `claude/keen-allen-7wubfe` (P2's are already there) and open one pull request into `main`; the user merges it. On the Mac, after pulling: restart `pnpm dev` (protocol v12), then `pnpm verify`, `pnpm test:live`, P1's and P2's hand checks, your Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17), and your OI script against TradingView. Screenshots that would settle the provisional looks: plotshape at each size (SPEC §11, item 89), the Pine Logs pane, the editor at the bottom, Convert code to v6 (items 101 to 103), a script loading another symbol and an `input.symbol` field (item 107), and the open interest symbols (item 113).
 
-After P2, the plan's next milestones (SPEC §8): P3 drawings (labels, lines, boxes, tables), P4 other symbols and timeframes (`request.*`, `indicator(timeframe = …)`), P5 strategies; and the open items P2 left (SPEC §11, item 100: the chart script's More menu, v5's series `offset`, `array.slice()` sharing its elements).
+After P4, the plan's next milestones (SPEC §8): P3 drawings (labels, lines, boxes, tables), P5 strategies; and the open items P2 and P4 left (SPEC §11, items 100 and 111).
 
 For M9f:
 

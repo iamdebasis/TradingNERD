@@ -22,6 +22,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
  │ CRYPTOCAP: market caps from CoinGecko's coins × exchange prices; │
  │ older years from Live Coin Watch and ETH Zurich's dataset        │
  │ Formulas (spreads) · symbol catalog and search · logos           │
+│ Open interest (_OI): Binance's archive and APIs, Bybit, OKX      │
  │ My scripts: the Pine Editor's saved scripts and their versions   │
  │ Storage: JSON files in data/ (gitignored, owner-only)            │
  └──────────────────────────┬───────────────────────────────────────┘
@@ -33,10 +34,10 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 | Package | What it holds |
 |---|---|
 | `packages/core` | Shared by both sides: the protocol (`protocol.ts`, `market.ts`), resolutions and intervals, the resampler (`resample.ts`), the market clock and status (`clock.ts`, `schedule.ts`, `marketStatus.ts`, `timezone.ts`), formulas (`formula.ts`), watchlists and their TradingView `.txt` files, flags, logos, stocks and older-caps status types, My scripts' types and checks (`scripts.ts`, P1), the Pine libraries' paths and checks (`libraries.ts`, P2) |
-| `packages/pine` | **P1:** Pine Script® v6 from text to values (SPEC §6.17). `lexer.ts`, `parser.ts`, `ast.ts` read the code; `compiler.ts`, `types.ts`, `builtins.ts` check its types and qualifiers and turn it into closures over a `Runtime` (`runtime.ts`: each variable's history, the live bar rolled back and committed, outputs in typed arrays, the 500 ms loop limit); `ta.ts` holds each `ta.*` call's state; `script.ts` has `compileScript`, `ScriptProgram` (inputs, `describe`) and `ScriptRun` (the script over the chart's bars, ticks, new bars and corrections); `warmup.ts` is the warm-up rule for scripts. **P2:** every version through `dialect.ts`; collections and objects (`collections.ts`); `catalog.ts` for the editor's help; `convert.ts` and `edits.ts` for Convert code to v6. No DOM |
+| `packages/pine` | **P1:** Pine Script® v6 from text to values (SPEC §6.17). `lexer.ts`, `parser.ts`, `ast.ts` read the code; `compiler.ts`, `types.ts`, `builtins.ts` check its types and qualifiers and turn it into closures over a `Runtime` (`runtime.ts`: each variable's history, the live bar rolled back and committed, outputs in typed arrays, the 500 ms loop limit); `ta.ts` holds each `ta.*` call's state; `script.ts` has `compileScript`, `ScriptProgram` (inputs, `describe`) and `ScriptRun` (the script over the chart's bars, ticks, new bars and corrections); `warmup.ts` is the warm-up rule for scripts. **P2:** every version through `dialect.ts`; collections and objects (`collections.ts`); `catalog.ts` for the editor's help; `convert.ts` and `edits.ts` for Convert code to v6. No DOM **P4:** requests to other symbols and timeframes (`requests.ts`: contexts, merging; `requestCalls.ts`, `tickers.ts`, `execution.ts`; the compiler's slices), SPEC §6.18 |
 | `packages/indicators` | TradingView's built-in indicators as Pine computes them (I1: Volume and RSI): the `ta.*` kernels (`kernels.ts`), the definitions (`volume.ts`, `rsi.ts`: inputs, plots, levels, fills, defaults), `IndicatorRun` (`run.ts`: closed bars committed, the live bar tentative, a correction redone), the warm-up rule (`warmup.ts`), settings and the registry; RSI's own Pine code for the Pine Editor (`rsi.pine.ts`). No DOM |
-| `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels, fills, backgrounds, value labels, a script's marks), `indicators/` (`IndicatorLayer.ts`: the indicators' series, panes, levels and labels; `script.ts`: a Pine script read as an indicator and run), `tuning.ts` for the feel's constants |
-| `apps/web` | The screen: `layout/` (`AppShell.tsx`, the right toolbar `RightToolbar.tsx`, the panels' widths), `chart/` (pane, legend, interval prompt, chart settings), `toolbar/` (intervals), `indicators/` (the store, the Indicators button and dialog, legend rows, the settings dialog, `definitions.ts`), `pine/` (the Pine Editor: the panel, Monaco and Pine's colors, the open script, Save script; Pine Logs, `PineLogs.tsx`), `watchlist/` (lists, sections, flags, row menus, drag), `search/` (symbol search and typed formulas), `logos/`, `stocks/` (the Alpaca key dialog), `olderCaps/` (the Live Coin Watch dialog), `gestures/` (the tuning popup), `theme/` (tokens), `data/` (the gateway connection and REST client) |
+| `packages/chart` | The chart engine around Lightweight Charts: `ChartController.ts`, zoom and price zoom, the gesture layer (`interaction/`: wheel, keyboard, vertical drag, viewport), plugins (crosshair, last price, extended-hours price, session shading, axis labels, fills, backgrounds, value labels, a script's marks), `indicators/` (`IndicatorLayer.ts`: the indicators' series, panes, levels and labels; `script.ts`: a Pine script read as an indicator and run), `tuning.ts` for the feel's constants **P4:** a built-in on another timeframe (`indicators/timeframed.ts`), the request feed through `IndicatorLayer` and `ChartController` |
+| `apps/web` | The screen: `layout/` (`AppShell.tsx`, the right toolbar `RightToolbar.tsx`, the panels' widths), `chart/` (pane, legend, interval prompt, chart settings), `toolbar/` (intervals), `indicators/` (the store, the Indicators button and dialog, legend rows, the settings dialog, `definitions.ts`), `pine/` (the Pine Editor: the panel, Monaco and Pine's colors, the open script, Save script; Pine Logs, `PineLogs.tsx`), `watchlist/` (lists, sections, flags, row menus, drag), `search/` (symbol search and typed formulas), `logos/`, `stocks/` (the Alpaca key dialog), `olderCaps/` (the Live Coin Watch dialog), `gestures/` (the tuning popup), `theme/` (tokens), `data/` (the gateway connection and REST client) **P4:** `chart/requestLoader.ts`, the data scripts' requests ask for, from the gateway |
 | `apps/gateway` | The local server (below) |
 
 ## The gateway
@@ -50,6 +51,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 | `catalog/` | Every exchange's pairs, US listings and CRYPTOCAP symbols, ranked for search (`SymbolCatalog.ts`) |
 | `stocks/` | US stocks from Alpaca: REST, stream, minute polling, the market calendar, Nasdaq's listings |
 | `cryptocap/` | CRYPTOCAP's symbols: see below |
+| `openinterest/` | **P4:** TradingView's `_OI` symbols as an exchange of their own, one adapter per exchange (`OpenInterestExchange.ts`): names and units (`symbols.ts`), Binance's archive and APIs, Bybit and OKX (`sources.ts`, `zip.ts`), the points kept by month in `data/oi/` (`series.ts`), bars from points and live polls (`bars.ts`). `MarketService` sends a ticker ending `_OI` there |
 | `formula/` | `FormulaExchange.ts`: a typed formula (TOTAL2/XRPUSD) as its own exchange, built from its symbols' bars; serves up to a day, and the market service builds longer bars from its days (A6) |
 | `logos/` | CoinGecko's coin and exchange logos, cached in `data/logos/`; CoinGecko's client and its monthly call count |
 | `storage/` | Watchlists, flags, My scripts (`ScriptsStore.ts`, P1), the Pine libraries (`LibrariesStore.ts`, P2), secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
@@ -83,6 +85,11 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   6. The plotshape family (P2): marks (plotshape, plotchar, plotarrow) are drawn by `plugins/MarksPrimitive.ts` over a clear series that carries the prices they stand at; plotcandle and plotbar by Lightweight Charts' candles and bars, their high, low and close kept in hidden parts (`partOf`); barcolor() colors the chart's own candles' bodies (`ChartController.recolorBars`).
   7. The warm-up rule for scripts: beside the script's own run, three check runs (one bar later; bar 0 one percent higher; bars 0 and 1 a thousand times apart) show where a value still depends on bars not loaded (`warmup.ts`, SPEC §6.17).
   8. Save script sends the code to the gateway (`POST /api/scripts`, then `PUT` for each new version), which keeps it in `data/scripts.json`. My scripts are listed in the Indicators dialog and the editor's menu.
+- **Requests** (P4): a script that asks for another symbol or timeframe gets it the way the chart gets its own:
+  1. The engine lists the contexts a run needs and those it lacks (`ScriptRun.requested`, `missing`); `IndicatorLayer.requests()` gathers them for every script, and a built-in on another timeframe's.
+  2. `ChartPane` hands them to `apps/web/src/chart/requestLoader.ts` on each update: it loads each from `GET /api/bars` (pages back to 300 bars before the chart's first) and follows it on the WebSocket, and drops what no script asks for.
+  3. Each context's bars reach the engine through the loader (a `RequestFeed`); when one comes in, the scripts run afresh, and on its live updates only their live bar.
+  4. Open interest symbols (`BINANCE:BTCUSDT.P_OI`) are just symbols to all this: the gateway's `openinterest/` adapters make their bars.
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 
 ## CRYPTOCAP (`apps/gateway/src/cryptocap/`)
@@ -110,6 +117,7 @@ SPEC §6.8 lists every file. The ones to protect:
 - `scripts.json`: My scripts and every saved version of each (P1).
 - `cryptocap/anchors.json`: the kept days, which can't be downloaded again.
 - `cryptocap/older-coins/`: M9f's downloads, a few days of free requests.
+- `oi/`: open interest (P4). Binance's archive can be downloaded again; the points recorded beyond Bybit's and OKX's own windows can't.
 
 ## Configuration (environment)
 
@@ -120,12 +128,13 @@ SPEC §6.8 lists every file. The ones to protect:
 | `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | Alpaca key pair instead of the saved one |
 | `LIVECOINWATCH_API_KEY` | Live Coin Watch key instead of the saved one |
 | `CRYPTOCAP_OLDER_COINS=1` | M9f's older days in the charts (off by default) |
-| `<EXCHANGE>_REST_URL`, `<EXCHANGE>_STREAM_URL`, `OKX_BUSINESS_STREAM_URL`, `ALPACA_*_URL`, `US_LISTINGS_URL`, `LIVECOINWATCH_URL` | Endpoints instead of the real ones (the browser tests point them nowhere) |
+| `<EXCHANGE>_REST_URL`, `<EXCHANGE>_STREAM_URL`, `OKX_BUSINESS_STREAM_URL`, `BINANCE_FUTURES_URL`, `BINANCE_COINM_URL`, `BINANCE_ARCHIVE_URL`, `ALPACA_*_URL`, `US_LISTINGS_URL`, `LIVECOINWATCH_URL` | Endpoints instead of the real ones (the browser tests point them nowhere) |
 
 ## Invariants and gotchas
 
 - **Only whole bars (A1).** A week or month that our data covers only in part is left out, unless the exchange's history starts at the pair's listing (`historyFromListing`).
-- **Resampled bars need volume.** Days without volume would be skipped when building weeks, so CRYPTOCAP's and the older days count as traded (volume 1).
+- **Resampled bars need volume.** Days without volume would be skipped when building weeks, so CRYPTOCAP's, the older days and open interest's bars count as traded (volume 1); the symbols say they have no real volume (an index), so charts and scripts read none.
+- **A request's data is the chart's own path:** scripts never name a host; the gateway answers for every symbol, open interest included. A history request for open interest waits until its range has downloaded (the first BTCUSDT daily chart, about 2.5 minutes).
 - **Exchanges differ:**
   - Kraken gives the last 720 bars only.
   - OKX stops at its own cut-offs.
