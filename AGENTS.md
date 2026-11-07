@@ -28,7 +28,8 @@ tradingNerd is a local clone of TradingView's chart page, for one user on their 
   - free public exchange APIs: Binance, Bybit, OKX, Coinbase, Kraken and Bitstamp;
   - US stocks from Alpaca (the user's free key);
   - coin logos and market caps from CoinGecko (the user's free key);
-  - older market caps from Live Coin Watch (the user's free key) and ETH Zurich's dataset.
+  - older market caps from Live Coin Watch (the user's free key) and ETH Zurich's dataset;
+  - open interest from the exchanges' own futures APIs (Binance, Bybit, OKX) and Binance's archive (data.binance.vision), no key.
 - **Nothing is hosted.** A local gateway (Node) serves a local web app (React). Both listen on 127.0.0.1 only.
 
 ## Core values (binding)
@@ -164,6 +165,7 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
   - the visual baselines are the Mac's (`*-darwin.png`), and Playwright would write Linux ones into the repository;
   - the browser installed there belongs to another Playwright version than ours.
 - Report e2e as not run. The browser tests and the real check against the running app happen on the Mac.
+- `pnpm test:live` there needs `NODE_USE_ENV_PROXY=1` (Node's `fetch` doesn't use the session's proxy otherwise) and its hosts allowed in the environment's network settings. Binance's futures APIs (HTTP 451) and Bybit (HTTP 403) refuse the cloud's location (measured 7 November 2026): their live tests are the Mac's.
 
 ## Code conventions
 
@@ -187,6 +189,7 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 
 ## Where the work stands
 
-See [docs/HANDOVER.md](docs/HANDOVER.md). As of 26 October 2026:
-- **Committed:** M0–M9e, A1, A2, A6, and M9f's checkpoint, switched off in the charts. `main` is at `38e1ae9`, pushed and public.
+See [docs/HANDOVER.md](docs/HANDOVER.md). As of 7 November 2026:
+- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators) and P1 (the Pine Editor), and M9f's checkpoint, switched off in the charts. `main` is at `4295233`, public.
+- **In pull request #4, waiting for the user's merge:** P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), from `claude/keen-allen-7wubfe`.
 - **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.
