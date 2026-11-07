@@ -5,8 +5,9 @@ import styles from '../toolbar/AddIntervalDialog.module.css';
 import { CloseIcon } from '../toolbar/icons';
 
 /**
- * "Save script" for a script that isn't one of My scripts yet: its name there, apart from its
- * indicator() title (TradingView's Pine docs; a third-party guide, TradingCode). Provisional
+ * A script's name in My scripts, apart from its indicator() title: "Save script" for one that
+ * isn't saved yet (TradingView's Pine docs; a third-party guide, TradingCode), and the script
+ * menu's "Make a copy…" and "Rename…" (Help Center, "How to work with Pine Editor"). Provisional
  * look, in the app's dialog idiom (docs/SPEC.md §11).
  */
 export function SaveScriptDialog({
@@ -14,11 +15,15 @@ export function SaveScriptDialog({
   busy,
   onSave,
   onClose,
+  title = 'Save script',
+  action = 'Save',
 }: {
   initialName: string;
   busy: boolean;
   onSave(name: string): void;
   onClose(): void;
+  title?: string;
+  action?: string;
 }) {
   const id = useId();
   const [name, setName] = useState(initialName);
@@ -52,7 +57,7 @@ export function SaveScriptDialog({
       >
         <div className={styles.titleRow}>
           <h2 id={`${id}-title`} className={styles.title}>
-            Save script
+            {title}
           </h2>
           <button type="button" className={styles.close} aria-label="Close" onClick={onClose}>
             <CloseIcon />
@@ -79,7 +84,7 @@ export function SaveScriptDialog({
             Cancel
           </button>
           <button type="submit" className={styles.submit} disabled={!valid || busy}>
-            Save
+            {action}
           </button>
         </div>
       </form>

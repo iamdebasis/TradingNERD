@@ -24,9 +24,24 @@
   border-radius: var(--size-panel-radius);
 }
 
+/* The chart, and the Pine Editor below it when it's moved to the bottom. */
+.column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .chart {
   position: relative;
   flex: 1 1 0;
+}
+
+/* The Pine Editor below the chart, at its own height. */
+.bottom {
+  flex: none;
+  height: var(--bottom-height);
 }
 
 /* The right-hand panel: the watchlist or the Pine Editor, at its own width. */

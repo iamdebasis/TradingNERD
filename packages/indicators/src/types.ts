@@ -56,10 +56,26 @@ export type InputSpec =
   | (InputBase & { kind: 'int'; default: number; min: number; max: number })
   | (InputBase & { kind: 'float'; default: number; min: number; max: number; step: number })
   | (InputBase & { kind: 'source'; default: SourceName })
-  | (InputBase & { kind: 'select'; default: string; options: readonly string[] })
+  | (InputBase & {
+      kind: 'select';
+      default: string;
+      options: readonly string[];
+      /** What the menu shows for each option, when it isn't the value: "1 hour" for "60". */
+      labels?: readonly string[];
+    })
   | (InputBase & { kind: 'bool'; default: boolean })
-  /** A script's free text (input.string without options). */
-  | (InputBase & { kind: 'string'; default: string })
+  /** A script's free text (input.string without options; input.text_area's on several lines). */
+  | (InputBase & { kind: 'string'; default: string; multiline?: boolean })
+  /** A script's input.session: "0930-1600", its days kept (":23456"). */
+  | (InputBase & { kind: 'session'; default: string })
+  /** A script's input.time: a UNIX time in ms, picked as a date and a time in UTC. */
+  | (InputBase & { kind: 'time'; default: number })
+  /**
+   * A script's input.symbol: a ticker id ("BINANCE:BTCUSDT"), picked with Symbol Search as the
+   * chart's symbol is (the Pine docs: "mirrors the chart's Symbol Search widget"); "" is the
+   * chart's own.
+   */
+  | (InputBase & { kind: 'symbol'; default: string })
   /** A script's color (input.color): Pine's packed color, red to transparency (packages/pine). */
   | (InputBase & { kind: 'color'; default: number })
   /** A script's input.int or input.float with options: a menu of numbers. */
@@ -92,12 +108,21 @@ export interface PlotSpec {
   id: string;
   /** Its name in the Style tab and the legend. */
   title: string;
-  kind: 'line' | 'columns';
+  /**
+   * How it draws: a line or columns; a script's marks (plotshape, plotchar, plotarrow); or its
+   * candles or bars (plotcandle, plotbar).
+   */
+  kind: 'line' | 'columns' | 'marks' | 'candles';
   style: StyleValue;
   /** Whether it exists for these inputs (Bollinger Bands only with that smoothing type). */
   shownWhen?: (inputs: Inputs) => boolean;
   /** A script's plot: how Pine's plot() arguments draw it (docs/SPEC.md §6.17). */
   look?: PlotLook;
+  /**
+   * A candle's high, low or close: the id of the candles it belongs to. It's drawn and styled
+   * with them, and the legend writes it after their open, in their color.
+   */
+  partOf?: string;
 }
 
 /** Pine's plot.style_* (the v6 reference). */
@@ -139,6 +164,35 @@ export interface PlotLook {
   display: number;
   /** Shown in the Style tab. */
   editable: boolean;
+  /** A mark's look (plotshape, plotchar, plotarrow). */
+  mark?: MarkLook;
+  /** A candle's or bar's other values (plotcandle, plotbar). */
+  candle?: CandleLook;
+}
+
+/** Where and how a script's marks draw (Pine docs, Text and shapes). */
+export interface MarkLook {
+  kind: 'shape' | 'char' | 'arrow';
+  /** plotshape's shape: "xcross", "arrowup" …; null otherwise. */
+  shape: string | null;
+  /** plotchar's character; null otherwise. */
+  char: string | null;
+  location: 'abovebar' | 'belowbar' | 'top' | 'bottom' | 'absolute';
+  size: 'auto' | 'tiny' | 'small' | 'normal' | 'large' | 'huge';
+  text: string;
+  /** The text's CSS color; null for none. */
+  textColor: string | null;
+  /** The run's plot holding the text's color on each bar when it changes (the mark's own, or a part). */
+  textPart: number | null;
+  /** plotarrow's shortest and longest arrows, px. */
+  minheight: number;
+  maxheight: number;
+}
+
+/** A script's candles or bars: the run's plots holding each bar's high, low and close. */
+export interface CandleLook {
+  kind: 'candle' | 'bar';
+  parts: readonly [high: number, low: number, close: number];
 }
 
 /** A horizontal line at a fixed value, Pine's `hline`. */
@@ -188,6 +242,8 @@ export interface FillSpec {
  */
 export interface BackgroundSpec {
   id: string;
+  /** barcolor(): it colors the chart's bars, not the pane behind them. */
+  bars?: boolean;
   title: string;
   /** Shown or not, by the Style tab (its color is the script's). */
   style: StyleValue;

@@ -13,16 +13,26 @@ export interface Span {
 export interface PineDiagnostic extends Span {
   severity: 'error' | 'warning';
   message: string;
+  /** An import that couldn't be used: its library isn't added, or its code has an error. */
+  library?: LibraryProblem;
+}
+
+/** Why an import couldn't be used, by its path ("user/name/version"). */
+export interface LibraryProblem {
+  path: string;
+  problem: 'missing' | 'error';
 }
 
 /** A compile error that stops compiling at once. */
 export class PineCompileError extends Error {
   readonly span: Span;
+  readonly library: LibraryProblem | undefined;
 
-  constructor(message: string, span: Span) {
+  constructor(message: string, span: Span, library?: LibraryProblem) {
     super(message);
     this.name = 'PineCompileError';
     this.span = span;
+    this.library = library;
   }
 }
 

@@ -141,9 +141,7 @@
   display: flex;
   flex-direction: column;
   min-width: 240px;
-  max-height: 60vh;
   padding: 6px 0;
-  overflow-y: auto;
   border-radius: 6px;
   background: var(--color-popup);
   box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
@@ -168,6 +166,43 @@
 
 .menuItem:hover {
   background: var(--color-gutter);
+}
+
+.menuItem:disabled {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.menuItem:disabled:hover {
+  background: transparent;
+}
+
+/* Create new's own menu, beside its row (TradingView's "Create new ›"). */
+.submenuWrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.submenu {
+  position: absolute;
+  z-index: 31;
+  top: -6px;
+  left: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+}
+
+.menuSeparator {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--color-separator);
 }
 
 .shortcut {
@@ -270,6 +305,38 @@
   background: var(--color-gutter);
 }
 
+/* A console line with its action beside it (a missing library's "Add library…"). */
+.consoleRow {
+  display: flex;
+  align-items: baseline;
+}
+
+.consoleRow .consoleLine {
+  flex: 1;
+  min-width: 0;
+}
+
+.consoleAction {
+  flex: none;
+  margin-right: 8px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.consoleAction:hover {
+  background: var(--color-gutter);
+}
+
+.consoleAction:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
 .status {
   display: flex;
   flex: none;
@@ -311,4 +378,11 @@
   font-size: 11px;
   line-height: 16px;
   text-align: center;
+}
+
+/* The More menu opens to the left of its button, at the panel's edge. */
+.menuRight {
+  right: 0;
+  left: auto;
+  min-width: 180px;
 }

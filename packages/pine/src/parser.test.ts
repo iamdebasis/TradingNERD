@@ -4,7 +4,8 @@ import { PineCompileError } from './diagnostics.ts';
 import { lex } from './lexer.ts';
 import { parse } from './parser.ts';
 
-const statements = (source: string) => parse(source).statements;
+/** v6 code, as the tests write it without its //@version line. */
+const statements = (source: string) => parse(source, 6).statements;
 
 /** The first statement's expression. */
 function exprOf(source: string): Expr {
@@ -47,7 +48,7 @@ function show(expr: Expr): string {
 
 function errorOf(source: string): PineCompileError {
   try {
-    parse(source);
+    parse(source, 6);
   } catch (error) {
     if (error instanceof PineCompileError) return error;
     throw error;
@@ -96,6 +97,44 @@ describe('the lexer', () => {
     expect(() => lex('s = "open')).toThrow(/no closing quote/);
     expect(() => lex('x = 1 $ 2')).toThrow(/Unexpected character "\$"/);
   });
+
+  it('reads a multiline string over its lines, its line breaks and indentation its text (v6)', () => {
+    // The April 2026 release notes' examples: an indented one in a block, and two concatenated.
+    const source = [
+      '//@version=6',
+      'if barstate.isfirst',
+      '    s = """---',
+      'No indentation.',
+      '    Indented by four spaces. ',
+      '    """',
+      '    t = """String 1',
+      '""" + \'\'\'String 2',
+      "''' // a comment",
+      'u = "after"',
+    ].join('\n');
+    const { lines } = lex(source);
+    const strings = lines.flatMap((line) => line.tokens.filter((t) => t.kind === 'string'));
+    expect(strings.map((t) => t.value)).toEqual([
+      '---\nNo indentation.\n    Indented by four spaces. \n    ',
+      'String 1\n',
+      'String 2\n',
+      'after',
+    ]);
+    expect(lines.map((line) => [line.line, line.indent])).toEqual([
+      [2, 0],
+      [3, 4],
+      [7, 4],
+      [10, 0],
+    ]);
+    // Each string's span runs from its opening delimiter to its closing one, for the editor.
+    expect(strings[1]).toMatchObject({ line: 7, column: 9, endLine: 8, endColumn: 4 });
+    expect(strings[2]).toMatchObject({ line: 8, column: 7, endLine: 9, endColumn: 4 });
+  });
+
+  it('refuses a multiline string before v6, and one left open', () => {
+    expect(() => lex('//@version=5\ns = """a"""')).toThrow(/need \/\/@version=6/);
+    expect(() => lex('s = """a\nb', 6)).toThrow(/no closing """/);
+  });
 });
 
 describe('the parser', () => {
@@ -123,7 +162,7 @@ describe('the parser', () => {
     expect(a).toMatchObject({ kind: 'decl', mode: 'var', type: 'float', name: 'x' });
     expect(b).toMatchObject({ kind: 'decl', qualifier: 'const', type: 'string', name: 'T' });
     expect(c).toMatchObject({ kind: 'tupleDecl', names: ['m', 's', 'h'] });
-    expect(d).toMatchObject({ kind: 'assign', op: ':=', name: 'x' });
+    expect(d).toMatchObject({ kind: 'assign', op: ':=', target: { kind: 'name', name: 'x' } });
     expect(e).toMatchObject({ kind: 'decl', name: 'y' });
     expect(statements('y = 2, z = 3')).toHaveLength(2);
   });
@@ -196,8 +235,8 @@ describe('the parser', () => {
     expect(nested.message).toBe('Functions can only be declared in the global scope');
     expect(nested.span.line).toBe(2);
     expect(errorOf('close[1][2]').message).toMatch(/only be used once/);
-    expect(errorOf('type Point\n    float x').message).toMatch(/User-defined types come later/);
-    expect(errorOf('for x in arr\n    y = x').message).toMatch(/for…in loops come later/);
-    expect(errorOf('array<float> a = na').message).toMatch(/Arrays, matrices and maps come later/);
+    expect(errorOf('type Point').message).toMatch(/A type needs at least one field/);
+    expect(errorOf('enum Dir').message).toMatch(/An enum needs at least one member/);
+    expect(errorOf('import foo').message).toMatch(/import <user>\/<library>\/<version>/);
   });
 });

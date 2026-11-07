@@ -94,3 +94,82 @@ export function NoticeIcon() {
     </svg>
   );
 }
+
+/** More (⋯): the editor's More menu, and the Pine Logs pane's filter levels (Figure 358). */
+export function MoreIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+      <circle cx="4" cy="9" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="9" r="1.4" fill="currentColor" />
+      <circle cx="14" cy="9" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Pine Logs' pause: a circle with two bars (Pine docs, Debugging, Figure 347). */
+export function PauseIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" {...line} aria-hidden>
+      <circle cx="9" cy="9" r="6.5" />
+      <path d="M7.5 6.5v5M10.5 6.5v5" />
+    </svg>
+  );
+}
+
+/** Pine Logs' resume, shown while paused. */
+export function ResumeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" {...line} aria-hidden>
+      <circle cx="9" cy="9" r="6.5" />
+      <path d="M7.5 6.3v5.4L11.8 9z" />
+    </svg>
+  );
+}
+
+/** Search: a magnifier. */
+export function SearchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" {...line} aria-hidden>
+      <circle cx="7.5" cy="7.5" r="4.5" />
+      <path d="m11 11 4 4" />
+    </svg>
+  );
+}
+
+/** Start date: a clock (Figure 356). */
+export function ClockIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" {...line} aria-hidden>
+      <circle cx="9" cy="9" r="6.5" />
+      <path d="M9 5.5V9l2.5 1.5" />
+    </svg>
+  );
+}
+
+/** The search's options (Match case, Whole Word, Regex): sliders (Figure 354). */
+export function OptionsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" {...line} aria-hidden>
+      <path d="M5.5 3v12M5.5 15 3.5 13M5.5 15l2-2M12.5 15V3M12.5 3l-2 2M12.5 3l2 2" />
+    </svg>
+  );
+}
+
+/** An entry's Source code: braces (Figure 349). */
+export function CodeBracesIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" {...line} aria-hidden>
+      <path d="M6 3c-1.5 0-2 .6-2 1.8v1.6c0 .9-.6 1.6-1.5 1.6.9 0 1.5.7 1.5 1.6v1.6C4 12.4 4.5 13 6 13M10 3c1.5 0 2 .6 2 1.8v1.6c0 .9.6 1.6 1.5 1.6-.9 0-1.5.7-1.5 1.6v1.6c0 1.2-.5 1.8-2 1.8" />
+    </svg>
+  );
+}
+
+/** An entry's Scroll to bar: a target (Figure 351). */
+export function TargetIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" {...line} aria-hidden>
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+    </svg>
+  );
+}

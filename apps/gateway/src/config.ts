@@ -21,6 +21,16 @@ export interface GatewayConfig {
    * OKX_BUSINESS_STREAM_URL for OKX's candle stream.
    */
   binance: Endpoints;
+  /**
+   * Binance's open interest (docs/SPEC.md §6.18): BINANCE_FUTURES_URL (USDⓈ-M), BINANCE_COINM_URL
+   * (COIN-M) and BINANCE_ARCHIVE_URL (data.binance.vision) instead of its hosts. Bybit's and
+   * OKX's come from their REST URLs above.
+   */
+  binanceFutures: {
+    futuresUrl: string | undefined;
+    coinmUrl: string | undefined;
+    archiveUrl: string | undefined;
+  };
   bybit: Endpoints;
   okx: Endpoints & { businessStreamUrl: string | undefined };
   coinbase: Endpoints;
@@ -67,6 +77,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     allowedOrigins: [`http://127.0.0.1:${WEB_DEV_PORT}`, `http://localhost:${WEB_DEV_PORT}`],
     logLevel,
     binance: endpoints(env, 'BINANCE'),
+    binanceFutures: {
+      futuresUrl: env.BINANCE_FUTURES_URL || undefined,
+      coinmUrl: env.BINANCE_COINM_URL || undefined,
+      archiveUrl: env.BINANCE_ARCHIVE_URL || undefined,
+    },
     bybit: endpoints(env, 'BYBIT'),
     okx: { ...endpoints(env, 'OKX'), businessStreamUrl: env.OKX_BUSINESS_STREAM_URL || undefined },
     coinbase: endpoints(env, 'COINBASE'),

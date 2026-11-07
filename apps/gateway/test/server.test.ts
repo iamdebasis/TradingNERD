@@ -44,6 +44,7 @@ const config: GatewayConfig = {
   allowedOrigins: [UI_ORIGIN],
   logLevel: 'silent',
   binance: { restUrl: undefined, streamUrl: undefined },
+  binanceFutures: { futuresUrl: undefined, coinmUrl: undefined, archiveUrl: undefined },
   bybit: { restUrl: undefined, streamUrl: undefined },
   okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
   coinbase: { restUrl: undefined, streamUrl: undefined },

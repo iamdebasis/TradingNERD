@@ -3,12 +3,22 @@ import {
   type BarClock,
   formatResolution,
   isIntraday,
+  type MarketSchedule,
   type PriceFormat,
   type Resolution,
+  type SessionHours,
   timeZone,
   UTC_CLOCK,
+  UTC_ZONE,
 } from '@tradingnerd/core';
 import type { BarChange } from '@tradingnerd/indicators';
+import {
+  DEFAULT_SYMBOL,
+  hexColor,
+  type RequestFeed,
+  type RequestKey,
+  type ScriptSymbol,
+} from '@tradingnerd/pine';
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -30,6 +40,8 @@ import {
   type IndicatorDebugState,
   IndicatorLayer,
   type IndicatorValues,
+  type ScriptLibraries,
+  type ScriptLogs,
 } from './indicators/IndicatorLayer';
 import { type ChartIndicator, paneAt } from './indicators/model';
 import { installKeyboard } from './interaction/keyboard';
@@ -80,8 +92,14 @@ export interface ChartInstrument {
   /** How prices are written: market caps in thousands to trillions ("price" when absent). */
   format?: PriceFormat;
   resolution: Resolution;
-  /** The exchange's time zone, which the time axis shows (UTC when absent). */
+  /** The time zone the time axis shows (UTC when absent): the exchange's, or the user's choice. */
   timezone?: string;
+  /** The exchange's own time zone, which a Pine script's calendar values follow (UTC when absent). */
+  exchangeTimezone?: string;
+  /** The market's trading calendar, for a Pine script's sessions; absent around the clock. */
+  schedule?: MarketSchedule;
+  /** The hours an intraday chart shows ("regular" when absent). */
+  hours?: SessionHours;
   /** Where its bars begin and end, for the countdown (UTC bars when absent). */
   clock?: BarClock;
   /** How far behind real time its data runs, ms. */
@@ -90,6 +108,33 @@ export interface ChartInstrument {
   base?: string;
   /** Whether its bars carry real traded volume: CRYPTOCAP's and formulas' don't (§6.16). */
   hasVolume?: boolean;
+}
+
+/** The chart's background as a Pine color (chart.bg_color); the default for other CSS. */
+const scriptColor = (css: string): number =>
+  /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(css) ? hexColor(css) : DEFAULT_SYMBOL.background;
+
+/**
+ * What a Pine script knows of an instrument (syminfo.* and timeframe.*; docs/SPEC.md §6.17): the
+ * chart's, and each symbol a script's requests ask for (§6.18), the same way.
+ */
+export function instrumentSymbol(instrument: ChartInstrument, background: string): ScriptSymbol {
+  return {
+    ticker: instrument.ticker ?? '',
+    tickerid: instrument.tickerid ?? '',
+    description: instrument.description ?? '',
+    type: instrument.symbolType ?? 'crypto',
+    basecurrency: instrument.base ?? '',
+    currency: instrument.currency ?? '',
+    mintick: instrument.tickSize,
+    timeframe: formatResolution(instrument.resolution),
+    hasVolume: instrument.hasVolume ?? true,
+    timezone: instrument.exchangeTimezone ?? UTC_ZONE,
+    session: instrument.hours ?? 'regular',
+    clock: instrument.clock ?? UTC_CLOCK,
+    schedule: instrument.schedule ?? null,
+    background: scriptColor(background),
+  };
 }
 
 /** The pre/post-market price line: the price, its "Pre"/"Post" tag and color. */
@@ -141,16 +186,24 @@ export interface ChartDebugState {
   priceAxisWidth: number;
   /** The indicators drawn, in the legend's order. */
   indicators: IndicatorDebugState[];
+  /** The chart's bars a script's barcolor() colors: each one's index and body color. */
+  barColors: { index: number; color: string }[];
   /** Every pane, the price pane first: its height in CSS px, stretch factor and auto-scale. */
   panes: { height: number; stretch: number; autoScale: boolean }[];
 }
 
-const toCandle = (bar: Bar, time: number): CandlestickData<Time> => ({
+/**
+ * A bar as the candles draw it. `body`: a script's barcolor() color, which takes only the body's
+ * place: the wick and the border keep the chart's up and down colors (the Pine manual's figure of
+ * Bar coloring).
+ */
+const toCandle = (bar: Bar, time: number, body?: string | null): CandlestickData<Time> => ({
   time: time as UTCTimestamp,
   open: bar.open,
   high: bar.high,
   low: bar.low,
   close: bar.close,
+  ...(body ? { color: body } : {}),
 });
 
 const UTC_ZONES = new Set(['Etc/UTC', 'UTC']);
@@ -190,6 +243,8 @@ export class ChartController {
   private readonly viewport: TimeViewport;
   private readonly indicators: IndicatorLayer;
   private bars: Bar[] = [];
+  /** Some bar's body has a script's barcolor() color. */
+  private recolored = false;
   /** The first bar is the pair's listing, where TradingView's history starts too. */
   private fromListing = false;
   /** The indicator panes' heights last applied or told, to tell only a change. */
@@ -386,20 +441,7 @@ export class ChartController {
     });
     this.indicators.setSymbol(
       { base: instrument.base ?? '', hasVolume: instrument.hasVolume ?? true },
-      {
-        symbol: {
-          ticker: instrument.ticker ?? '',
-          tickerid: instrument.tickerid ?? '',
-          description: instrument.description ?? '',
-          type: instrument.symbolType ?? 'crypto',
-          basecurrency: instrument.base ?? '',
-          currency: instrument.currency ?? '',
-          mintick: tickSize,
-          timeframe: formatResolution(resolution),
-          hasVolume: instrument.hasVolume ?? true,
-        },
-        priceDecimals: precision,
-      },
+      { symbol: instrumentSymbol(instrument, this.theme.background), priceDecimals: precision },
     );
     this.chart.applyOptions({
       localization: {
@@ -455,6 +497,21 @@ export class ChartController {
    */
   setIndicators(indicators: readonly ChartIndicator[]): void {
     this.indicators.set(indicators);
+    this.afterIndicators();
+  }
+
+  /**
+   * The Pine libraries scripts import (docs/SPEC.md §5.17): the scripts that import compile again
+   * with them when they change.
+   */
+  setLibraries(libraries: ScriptLibraries): void {
+    this.indicators.setLibraries(libraries);
+    this.afterIndicators();
+  }
+
+  /** After the indicators changed: bar colors, pane heights, history and the panes' layout. */
+  private afterIndicators(): void {
+    this.recolorBars();
     this.paneHeights = this.indicators.paneHeights();
     // A new indicator may wait on older bars than the chart has.
     this.checkHistory(this.chart.timeScale().getVisibleLogicalRange());
@@ -489,6 +546,39 @@ export class ChartController {
     return this.indicators.errors();
   }
 
+  /** Each logging script's Pine Logs, in the legend's order (IndicatorLayer.logs). */
+  scriptLogs(): ScriptLogs[] {
+    return this.indicators.logs();
+  }
+
+  /**
+   * Where scripts' requests get their data from (docs/SPEC.md §6.18): the app's loader. The
+   * scripts run again with it.
+   */
+  setRequestFeed(feed: RequestFeed | undefined): void {
+    this.indicators.setFeed(feed);
+    this.recolorBars();
+  }
+
+  /** The contexts the scripts on the chart ask for: all they use, and those not loaded yet. */
+  scriptRequests(): { used: RequestKey[]; missing: RequestKey[] } {
+    return this.indicators.requests();
+  }
+
+  /** The scripts waiting for their requests' data, by id (their legend rows say so). */
+  waitingIndicators(): Set<string> {
+    return this.indicators.waiting();
+  }
+
+  /**
+   * A requested context's data changed: the scripts that request run again, afresh after a page
+   * of its history arrived, or their live bar after a live update.
+   */
+  requestsChanged(kind: 'history' | 'live'): void {
+    this.indicators.refreshRequests(kind);
+    this.recolorBars();
+  }
+
   /**
    * Applies a live update to the current bar or opens a new one. A `historical` update corrects
    * an earlier bar (the exchange's final word on it); other stale updates are ignored.
@@ -516,6 +606,8 @@ export class ChartController {
       change = 'correction';
     }
     this.indicators.update(this.bars, this.displayTimes, change, index);
+    // The update drew the bar in the chart's own colors: its barcolor() color goes back on.
+    this.recolorBars(index);
     this.refreshLastPrice();
   }
 
@@ -570,6 +662,20 @@ export class ChartController {
     );
   }
 
+  /**
+   * Brings bar `index` to the middle of the view, the zoom kept: a Pine Logs entry's Scroll to
+   * bar (Pine docs, Debugging). Its time label, as the crosshair writes it, for the tooltip the
+   * pane shows over it; null for a bar the chart doesn't have.
+   */
+  scrollToBar(index: number): string | null {
+    const bar = this.bars[index];
+    const range = this.viewport.range();
+    if (!bar || !range) return null;
+    const half = (range.to - range.from) / 2;
+    this.viewport.set({ from: index - half, to: index + half });
+    return this.timeLabel(bar.time);
+  }
+
   /** Scrolls by whole bars; negative goes back in time. */
   scrollBars(bars: number): void {
     const range = this.viewport.range();
@@ -609,6 +715,11 @@ export class ChartController {
       sessionBands: this.sessionShade.drawnBands(),
       priceAxisWidth: this.chart.priceScale('right').width(),
       indicators: this.indicators.debug(),
+      // As the candles hold them, not as the scripts would give them.
+      barColors: this.series.data().flatMap((point, index) => {
+        const color = 'color' in point ? point.color : undefined;
+        return color ? [{ index, color }] : [];
+      }),
       panes: this.chart.panes().map((pane, index) => {
         const series = index === 0 ? this.series : this.indicators.scaleSeries(index);
         return {
@@ -775,7 +886,40 @@ export class ChartController {
     }
     this.displayTimes = times;
     this.series.setData(candles);
+    this.recolored = false;
     this.indicators.setBars(this.bars, this.displayTimes, this.fromListing);
+    this.recolorBars();
+  }
+
+  /**
+   * Scripts' barcolor() colors on the chart's candles (Pine docs, Bar coloring): every bar when
+   * a run started over, else the bars a live update changed (`updated`, which the update drew
+   * plain, among them). Without barcolor() nothing is set.
+   */
+  private recolorBars(updated?: number): void {
+    const taken = this.indicators.takeBarColorChanges();
+    const changed =
+      taken === 'all' || updated === undefined || taken.includes(updated)
+        ? taken
+        : [...taken, updated];
+    const colored = this.indicators.hasBarColors();
+    if (!colored && !this.recolored) return;
+    const last = this.bars.length - 1;
+    if (changed === 'all') {
+      this.series.setData(
+        this.bars.map((bar, i) =>
+          toCandle(bar, this.displayTimes[i] ?? bar.time, this.indicators.barColorAt(i)),
+        ),
+      );
+      this.recolored = colored;
+      return;
+    }
+    for (const i of changed) {
+      const bar = this.bars[i];
+      const time = this.displayTimes[i];
+      if (!bar || time === undefined) continue;
+      this.series.update(toCandle(bar, time, this.indicators.barColorAt(i)), i < last);
+    }
   }
 
   /**

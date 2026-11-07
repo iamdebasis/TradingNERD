@@ -18,6 +18,7 @@ import {
   FIRST_TICK_BAR,
   LAST_DAY,
   makeBars,
+  makeIntervalBars,
   makeStockBars,
   openChart,
   paneOrigin,
@@ -734,4 +735,60 @@ test('a reconnect refills the recent bars, and the indicators are computed again
   await expect(row(page, 'volume-1').locator('[data-plot="volume"]')).toHaveText('1.5M');
   const [rsi] = await indicatorsOf(page);
   expect(rsi?.plots[0]?.points).toBe(bars.length - (rsi?.plots[0]?.start ?? 0));
+});
+
+test("RSI's Timeframe: computed on weeks, each week's value once it closes, or every day's when not waiting", async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await addIndicator(page, 'Relative Strength Index');
+  const legend = row(page, 'rsi-1');
+  const points = async () => (await indicatorsOf(page))[0]?.plots[0]?.points ?? 0;
+  await expect.poll(points).toBeGreaterThan(0);
+  const daily = (await chartState(page)).barCount;
+  const settings = await openSettings(page, 'rsi-1', 'RSI 14 close', 'Inputs');
+  // TradingView's Calculation section (Help Center, "Leveraging multi-timeframe analysis").
+  await expect(settings.getByText('Calculation', { exact: true })).toBeVisible();
+  const timeframe = settings.getByRole('button', { name: 'Timeframe' });
+  await expect(timeframe).toContainText('Chart');
+  const wait = settings.getByRole('checkbox', { name: 'Wait for timeframe closes' });
+  await expect(wait).toBeChecked();
+  await timeframe.click();
+  await page
+    .getByRole('listbox', { name: 'Timeframe' })
+    .getByRole('option', { name: '1 week', exact: true })
+    .click();
+  await expect(legend).toContainText('RSI 14 close 1W');
+  // The weeks come from the gateway as a chart's bars do.
+  await expect
+    .poll(() =>
+      market.barRequests.some(
+        (query) => query.get('symbol') === 'BINANCE:XRPUSDT' && query.get('resolution') === '1W',
+      ),
+    )
+    .toBe(true);
+  // Waiting for the weeks' closes: a value once a week, Ø between (Help Center, "I changed the
+  // 'timeframe' setting and now my indicator displays 'Ø'").
+  await expect.poll(points).toBeGreaterThan(0);
+  expect(await points()).toBeLessThan(daily / 5);
+  // Unticked, every day shows the latest week's value, and today the forming week's.
+  await wait.uncheck();
+  await expect.poll(points).toBeGreaterThan(daily / 2);
+  // The fake gateway's weeks, as it serves them.
+  const [weekly] = rsiOver(makeIntervalBars('1W')) as [number[]];
+  await leaveChart(page);
+  await expect(legend.locator('[data-plot="rsi"]')).toHaveText(
+    (weekly.at(-1) as number).toFixed(2),
+  );
+  // Back on the chart's own timeframe, it's RSI on the days again.
+  await timeframe.click();
+  await page
+    .getByRole('listbox', { name: 'Timeframe' })
+    .getByRole('option', { name: 'Chart', exact: true })
+    .click();
+  await expect(legend).toContainText('RSI 14 close');
+  await expect(legend).not.toContainText('1W');
+  await expect(legend.locator('[data-plot="rsi"]')).toHaveText(await latestRsi(page));
+  await settings.getByRole('button', { name: 'Ok' }).click();
 });

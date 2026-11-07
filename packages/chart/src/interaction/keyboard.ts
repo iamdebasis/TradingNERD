@@ -46,5 +46,12 @@ export function installKeyboard(actions: KeyboardActions, target: Window = windo
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+  if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+    return true;
+  }
+  // A code editor typing through the browser's EditContext (Monaco, the Pine Editor, in Chrome).
+  return (
+    (target as HTMLElement & { editContext?: unknown }).editContext != null ||
+    target.closest('.monaco-editor') !== null
+  );
 }

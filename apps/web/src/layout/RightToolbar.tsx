@@ -13,7 +13,8 @@ export function RightToolbar({
   open,
   onToggle,
 }: {
-  open: RightPanel | null;
+  /** The panels open now: the watchlist and the editor both, when the editor is at the bottom. */
+  open: readonly RightPanel[];
   onToggle(panel: RightPanel): void;
 }) {
   return (
@@ -23,7 +24,7 @@ export function RightToolbar({
         className={styles.button}
         aria-label="Watchlist"
         title="Watchlist"
-        aria-pressed={open === 'watchlist'}
+        aria-pressed={open.includes('watchlist')}
         onClick={() => onToggle('watchlist')}
       >
         <ListIcon />
@@ -33,7 +34,7 @@ export function RightToolbar({
         className={styles.button}
         aria-label="Pine Editor"
         title="Pine Editor"
-        aria-pressed={open === 'pine'}
+        aria-pressed={open.includes('pine')}
         onClick={() => onToggle('pine')}
       >
         <PineIcon />

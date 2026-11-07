@@ -9,6 +9,7 @@ tradingNerd runs on one person's Mac, for that person only.
 | Goes to | What it carries | Why |
 |---|---|---|
 | Binance, Bybit, OKX, Coinbase, Kraken, Bitstamp | The symbols and intervals asked for; no key, no account | Prices and candles |
+| Binance's futures APIs (`fapi.binance.com`, `dapi.binance.com`) and its archive (`data.binance.vision`); Bybit (`api.bybit.com`) and OKX (`www.okx.com`), as for prices | The perpetuals asked for, and the days or times wanted; no key, no account | Open interest (P4): the `_OI` symbols scripts and charts ask for |
 | CoinGecko (`api.coingecko.com`, `pro-api.coingecko.com`, and the images at `coin-images.coingecko.com` and `assets.coingecko.com`) | The user's CoinGecko key (a request header), coin ids | Logos, CRYPTOCAP's coins |
 | Alpaca (`data.alpaca.markets`, `api.alpaca.markets`, `paper-api.alpaca.markets`, `stream.data.alpaca.markets`) | The user's Alpaca key ID and secret (request headers, the stream's sign-in), stock symbols | US stocks |
 | Nasdaq Trader (`www.nasdaqtrader.com`) | Nothing: a download of the public symbol directory | Stock search |
@@ -16,7 +17,7 @@ tradingNerd runs on one person's Mac, for that person only.
 
 That is the whole list. Each provider also sees the Mac's IP address and which symbols are looked at; live data can't be fetched without that.
 
-**Never leaves:** the watchlists, flags, chart settings, the downloaded history, the keys (except each to its own provider), the user's Pine scripts (My scripts and their versions in `data/scripts.json`, and the open script's unsaved code, kept in the browser), and anything in `data/`. ETH Zurich's dataset is put in place by hand; the app never contacts Zenodo.
+**Never leaves:** the watchlists, flags, chart settings, the downloaded history, the keys (except each to its own provider), the user's Pine scripts (My scripts and their versions in `data/scripts.json`, and the open script's unsaved code, kept in the browser), the Pine libraries the user pasted (`data/libraries.json`: their code is copied by hand from TradingView's pages; the app never fetches it), the open interest kept in `data/oi/`, and anything in `data/`. ETH Zurich's dataset is put in place by hand; the app never contacts Zenodo.
 
 ## How the app keeps it so
 
@@ -33,6 +34,8 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **The browser loads nothing from outside.** No web fonts, CDNs, analytics or trackers. Logos are fetched by the gateway, only from CoinGecko's two image hosts, and served from `data/logos/`. Outside links open only when clicked, without a referrer (`rel="noopener noreferrer"`).
   - **The Pine Editor** (P1) is Monaco, installed as a package (`monaco-editor`, Microsoft's, MIT) and bundled with the app: its code, worker, styles and icon font come from the web app's own server, never from Monaco's CDN.
   - **Pine scripts run in the browser,** in our own engine (`packages/pine`): a script can read only the chart's bars and the symbol's details, and has no way to reach the network, files or the page. A runaway loop stops at 500 ms per bar.
+  - **A script's requests** (P4) reach only the gateway's own bars API, as the chart does: a script names a symbol and an interval, and the gateway fetches them from the providers above. A script can't name a host.
+  - **Downloads are untrusted:** Binance's archive files are read through a zip reader of our own, one file each, capped at 8 MB unpacked; anything malformed is an error, never run.
 - **No telemetry** in the code or its dependencies.
 - **Git:**
   - `data/`, `.env` files and test output are ignored (`.gitignore`), and `data/` has never been committed.
@@ -51,7 +54,7 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **Commit only as the project's identity, in UTC** (AGENTS.md, "Git"), and check before any push. Never put a personal email, name, home folder or time zone into a commit or a file.
 - **Screenshots** added to the repository have account names, avatars and anything identifying covered first. Keep the pixels the tests measure, and prove nothing else changed.
 - **Never get around a block** (bot checks, rate limits, refused requests). Back off, or ask the user.
-- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts: a check never saves, renames or deletes one (the browser tests fake `/api/scripts`).
+- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts and `data/libraries.json` the libraries they pasted: a check never saves, renames or deletes one (the browser tests fake `/api/scripts` and `/api/libraries`).
 
 ## Checks to run before a hand-over
 

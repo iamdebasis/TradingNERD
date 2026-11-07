@@ -1,10 +1,12 @@
 /**
  * The built-in RSI as Pine Script® v6, for the Pine Editor (docs/SPEC.md §5.16): our own code,
  * written to compute exactly what rsi.ts computes, with the same inputs, plots, levels and fills,
- * not TradingView's text. A test runs it against rsi.ts bar for bar (packages/pine).
+ * not TradingView's text. A test runs it against rsi.ts bar for bar (packages/pine). Its
+ * declaration's `timeframe = ""` and `timeframe_gaps = true` are the built-in's (your screenshot of
+ * 27 October, docs/SPEC.md §4): they give it the Calculation section's two inputs.
  */
 export const RSI_PINE = `//@version=6
-indicator("Relative Strength Index", shorttitle = "RSI", format = format.price, precision = 2)
+indicator("Relative Strength Index", shorttitle = "RSI", format = format.price, precision = 2, timeframe = "", timeframe_gaps = true)
 
 // Settings, in the order the Inputs tab lists them
 length = input.int(14, "RSI Length", minval = 1, maxval = 2000, group = "RSI Settings")

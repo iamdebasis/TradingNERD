@@ -3,9 +3,21 @@ import { packColor } from './lexer.ts';
 /**
  * How values live while a script runs: numbers (int and float) as JavaScript numbers with na as
  * NaN; bools as booleans (Pine's bool is never na); strings as strings, na as null; colors packed
- * into one number (red, green, blue and Pine's transparency in half percents), na as NaN.
+ * into one number (red, green, blue and Pine's transparency in half percents), na as NaN;
+ * collections, objects and enum members as the classes below, na as null; tuples as plain lists.
  */
-export type Value = number | boolean | string | null | readonly Value[] | OutputRef;
+export type Value =
+  | number
+  | boolean
+  | string
+  | null
+  | readonly Value[]
+  | OutputRef
+  | PineArray
+  | PineMap
+  | PineMatrix
+  | PineObject
+  | PineEnum;
 
 /** What plot() and hline() give back: a handle fill() takes. */
 export interface OutputRef {
@@ -15,6 +27,82 @@ export interface OutputRef {
 
 export const isOutputRef = (value: unknown): value is OutputRef =>
   typeof value === 'object' && value !== null && 'output' in value;
+
+/** An array (Pine docs, Arrays): its element type and its elements. */
+export class PineArray {
+  readonly elem: string;
+  items: Value[];
+  constructor(elem: string, items: Value[]) {
+    this.elem = elem;
+    this.items = items;
+  }
+}
+
+/** A map (Pine docs, Maps): keys in the order they were first put. */
+export class PineMap {
+  readonly key: string;
+  readonly value: string;
+  readonly entries: Map<Value, Value>;
+  constructor(key: string, value: string, entries: Map<Value, Value> = new Map()) {
+    this.key = key;
+    this.value = value;
+    this.entries = entries;
+  }
+}
+
+/** A matrix (Pine docs, Matrices): its elements row by row. */
+export class PineMatrix {
+  readonly elem: string;
+  rows: number;
+  cols: number;
+  data: Value[];
+  constructor(elem: string, rows: number, cols: number, data: Value[]) {
+    this.elem = elem;
+    this.rows = rows;
+    this.cols = cols;
+    this.data = data;
+  }
+}
+
+/** An object of a user-defined type (Pine docs, Objects): its fields in declaration order. */
+export class PineObject {
+  readonly type: string;
+  readonly fields: Value[];
+  constructor(type: string, fields: Value[]) {
+    this.type = type;
+    this.fields = fields;
+  }
+}
+
+/**
+ * A member of an enum (Pine docs, Enums): the same object wherever the member is named, in every
+ * compile of the script too (a request's context program is one: its members are the script's).
+ */
+export class PineEnum {
+  readonly type: string;
+  readonly name: string;
+  readonly title: string;
+  readonly ordinal: number;
+  constructor(type: string, name: string, title: string, ordinal: number) {
+    this.type = type;
+    this.name = name;
+    this.title = title;
+    this.ordinal = ordinal;
+  }
+}
+
+const enumMembers = new Map<string, PineEnum>();
+
+/** The one member object of an enum member. */
+export function enumMember(type: string, name: string, title: string, ordinal: number): PineEnum {
+  const key = `${type}\u0000${name}\u0000${title}\u0000${ordinal}`;
+  let member = enumMembers.get(key);
+  if (!member) {
+    member = new PineEnum(type, name, title, ordinal);
+    enumMembers.set(key, member);
+  }
+  return member;
+}
 
 export { packColor };
 

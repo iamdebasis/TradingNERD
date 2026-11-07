@@ -241,13 +241,25 @@ describe('ta.* over windows', () => {
     );
   });
 
-  it('ta.rising and ta.falling compare with each of the last length values', () => {
+  it('ta.rising and ta.falling need a move on each of the last length bars', () => {
+    // TradingView's rule (its values on 192 bars of PineTS's BTCUSDT data, 2026-11-01): 13 on
+    // bar 4 is above 11 and 12 but rose only once in a row, so ta.rising(close, 2) is false.
     expect(series('plot(ta.rising(close, 2) ? 1 : 0)', TEN)).toEqual([
-      0, 0, 1, 0, 1, 1, 0, 1, 1, 0,
+      0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
     ]);
     expect(series('plot(ta.falling(close, 1) ? 1 : 0)', TEN)).toEqual([
       0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
     ]);
+  });
+
+  it('ta.rising carries its run over a pair with an na, neither adding to it nor ending it', () => {
+    // 10 11 12 [na] 13 14: the pairs touching the na don't count; 13 > 12 isn't compared.
+    expect(
+      series(
+        'g = bar_index == 3 ? na : close\nplot(ta.rising(g, 2) ? 1 : 0)',
+        closes([10, 11, 12, 99, 13, 14]),
+      ),
+    ).toEqual([0, 0, 1, 1, 1, 1]);
   });
 
   it('ta.pivothigh and ta.pivotlow report a pivot right bars after it', () => {

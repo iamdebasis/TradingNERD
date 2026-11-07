@@ -18,3 +18,10 @@
   color: var(--color-text-secondary);
   font-size: 13px;
 }
+
+/* A v5 script's //@version=5, in Monaco's own warning yellow (#CCA700): TradingView marks it in
+   yellow to offer Convert code to v6; its exact shade hasn't been measured (docs/SPEC.md §11). */
+.versionToConvert {
+  border-radius: 2px;
+  background: rgb(204 167 0 / 25%);
+}

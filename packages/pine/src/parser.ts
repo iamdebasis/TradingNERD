@@ -1,13 +1,15 @@
-import {
-  type AssignOp,
-  type Block,
-  type Expr,
-  type Param,
-  type QualifierWord,
-  type Script,
-  type Stmt,
-  TYPE_NAMES,
-  type TypeName,
+import type {
+  Arg,
+  AssignOp,
+  Block,
+  EnumMember,
+  Expr,
+  Field,
+  Param,
+  QualifierWord,
+  Script,
+  Stmt,
+  TypeRef,
 } from './ast.ts';
 import { PineCompileError, type Span, spanOf } from './diagnostics.ts';
 import { type LogicalLine, lex, type Token } from './lexer.ts';
@@ -15,17 +17,8 @@ import { type LogicalLine, lex, type Token } from './lexer.ts';
 const ASSIGN_OPS: ReadonlySet<string> = new Set([':=', '+=', '-=', '*=', '/=', '%=']);
 const QUALIFIERS: ReadonlySet<string> = new Set(['const', 'simple', 'series']);
 const STRUCTURES: ReadonlySet<string> = new Set(['if', 'switch', 'for', 'while']);
-const isTypeName = (text: string): text is TypeName =>
-  (TYPE_NAMES as readonly string[]).includes(text);
-
-/** Pine features this engine doesn't have yet, with the milestone that brings them. */
-const NOT_YET: Readonly<Record<string, string>> = {
-  import: 'Libraries (import) come later (P3)',
-  export: 'Libraries (export) come later (P3)',
-  method: 'Methods come later (P2)',
-  type: 'User-defined types come later (P2)',
-  enum: 'Enums come later (P2)',
-};
+/** Collection types that take type arguments, with how many. */
+const GENERICS: Readonly<Record<string, number>> = { array: 1, matrix: 1, map: 2 };
 
 /** The tokens of one logical line, read left to right. */
 class Tokens {
@@ -63,7 +56,7 @@ class Tokens {
     return this.index;
   }
 
-  /** The token is this operator or keyword. */
+  /** The token `offset` ahead is this operator or keyword. */
   is(text: string, offset = 0): boolean {
     const token = this.peek(offset);
     return (
@@ -71,6 +64,11 @@ class Tokens {
       (token.kind === 'op' || token.kind === 'keyword') &&
       token.text === text
     );
+  }
+
+  /** The token `offset` ahead is a plain name. */
+  isIdent(offset = 0): boolean {
+    return this.peek(offset)?.kind === 'ident';
   }
 
   accept(text: string): Token | null {
@@ -123,30 +121,94 @@ class Tokens {
     return -1;
   }
 
-  /** `name(…) =>`: a function's declaration starts here. */
-  startsFunction(): boolean {
-    if (this.peek()?.kind !== 'ident' || !this.is('(', 1)) return false;
-    const close = this.closing(1);
+  /**
+   * How many tokens a type takes from `offset` on (`float`, `chart.point`, `array<float>`,
+   * `map<string, lib.T>`, `float[]`), or 0 when there's no type there.
+   */
+  typeLength(offset: number): number {
+    let i = offset;
+    if (!this.isIdent(i)) return 0;
+    i++;
+    while (this.is('.', i) && this.isIdent(i + 1)) i += 2;
+    if (this.is('<', i)) {
+      i++;
+      for (;;) {
+        const inner = this.typeLength(i);
+        if (inner === 0) return 0;
+        i += inner;
+        if (this.is(',', i)) {
+          i++;
+          continue;
+        }
+        break;
+      }
+      if (!this.is('>', i)) return 0;
+      i++;
+    }
+    while (this.is('[', i) && this.is(']', i + 1)) i += 2;
+    return i - offset;
+  }
+
+  /** `name(…) =>` from `offset`: a function's declaration starts there. */
+  startsFunctionAt(offset: number): boolean {
+    if (!this.isIdent(offset) || !this.is('(', offset + 1)) return false;
+    const close = this.closing(offset + 1);
     return close > 0 && this.is('=>', close + 1);
+  }
+
+  /** The index (from here) of the first assignment operator outside brackets, or -1. */
+  assignmentAt(): number {
+    let depth = 0;
+    for (let i = this.index; i < this.tokens.length; i++) {
+      const token = this.tokens[i] as Token;
+      if (token.kind !== 'op') continue;
+      if (token.text === '(' || token.text === '[') depth++;
+      else if (token.text === ')' || token.text === ']') depth--;
+      else if (depth === 0 && ASSIGN_OPS.has(token.text)) return i - this.index;
+      else if (depth === 0 && (token.text === '=' || token.text === '?')) return -1;
+    }
+    return -1;
   }
 }
 
-/** Splits a line's tokens at its commas outside brackets: several statements on one line. */
+/** Names a `<` after opens type arguments rather than comparing: `map<…>`, `array.new<…>`. */
+const GENERIC_OPENERS: ReadonlySet<string> = new Set(['array', 'map', 'matrix', 'new']);
+
+/**
+ * Splits a line's tokens at its commas outside brackets: several statements on one line. The
+ * commas of type arguments (`map.new<string, float>()`) don't split.
+ */
 function splitStatements(tokens: readonly Token[]): Token[][] {
   const parts: Token[][] = [[]];
   let depth = 0;
-  for (const token of tokens) {
+  let generic = 0;
+  tokens.forEach((token, i) => {
     if (token.kind === 'op') {
-      if (token.text === '(' || token.text === '[') depth++;
+      const before = tokens[i - 1];
+      if (token.text === '<' && before?.kind === 'ident' && GENERIC_OPENERS.has(before.text)) {
+        generic++;
+      } else if (token.text === '>' && generic > 0) generic--;
+      else if (token.text === '(' || token.text === '[') depth++;
       else if (token.text === ')' || token.text === ']') depth--;
-      else if (token.text === ',' && depth === 0) {
+      else if (token.text === ',' && depth === 0 && generic === 0) {
         parts.push([]);
-        continue;
+        return;
       }
     }
     (parts.at(-1) as Token[]).push(token);
-  }
+  });
   return parts.filter((part) => part.length > 0);
+}
+
+/** A word that may follow a dot, keywords included (`input.enum`, `syminfo.type`). */
+const isWord = (token: Token | undefined) =>
+  token !== undefined && (token.kind === 'ident' || token.kind === 'keyword');
+
+/** A type's canonical text: `float[]` → "array<float>", spaces after commas. */
+export function typeText(base: string, args: readonly string[], arrayDepth: number): TypeRef {
+  let type = args.length > 0 ? `${base}<${args.join(', ')}>` : base;
+  for (let i = 0; i < arrayDepth; i++) type = `array<${type}>`;
+  return type;
 }
 
 class Parser {
@@ -170,7 +232,7 @@ class Parser {
       const first = line.tokens[0] as Token;
       if (line.indent > indent) {
         throw new PineCompileError(
-          'Unexpected indentation: only the lines of a block (after if, for, while, switch or a function) are indented',
+          'Unexpected indentation: only the lines of a block (after if, for, while, switch, a function, a type or an enum) are indented',
           first,
         );
       }
@@ -194,17 +256,178 @@ class Parser {
 
   private lineStatements(line: LogicalLine, global: boolean): Stmt[] {
     const first = line.tokens[0] as Token;
-    if (first.kind === 'keyword' && NOT_YET[first.text]) {
-      throw new PineCompileError(NOT_YET[first.text] as string, first);
+    const whole = new Tokens(line.tokens, line);
+    if (first.kind === 'keyword') {
+      switch (first.text) {
+        case 'import':
+          return [this.importStatement(whole, global)];
+        case 'type':
+          return [this.typeDeclaration(whole, line, global, false)];
+        case 'enum':
+          return [this.enumDeclaration(whole, line, global, false)];
+        case 'method':
+          return [this.func(whole, line, global, false)];
+        case 'export':
+          return [this.exported(whole, line, global)];
+        default:
+          break;
+      }
     }
     // A structure or a function owns the lines under it: nothing else shares its line.
-    const whole = new Tokens(line.tokens, line);
-    if ((first.kind === 'keyword' && STRUCTURES.has(first.text)) || whole.startsFunction()) {
+    if ((first.kind === 'keyword' && STRUCTURES.has(first.text)) || whole.startsFunctionAt(0)) {
       return [this.statement(whole, line, global)];
     }
     return splitStatements(line.tokens).map((tokens) =>
       this.statement(new Tokens(tokens, line), line, global),
     );
+  }
+
+  private exported(tokens: Tokens, line: LogicalLine, global: boolean): Stmt {
+    const exportToken = tokens.next();
+    if (!global)
+      throw new PineCompileError('Only global declarations can be exported', exportToken);
+    if (tokens.is('type')) return this.typeDeclaration(tokens, line, global, true);
+    if (tokens.is('enum')) return this.enumDeclaration(tokens, line, global, true);
+    if (tokens.is('method') || tokens.startsFunctionAt(0)) {
+      return this.func(tokens, line, global, true);
+    }
+    throw new PineCompileError(
+      'Only functions, methods, types and enums can be exported',
+      tokens.peek() ?? exportToken,
+    );
+  }
+
+  private importStatement(tokens: Tokens, global: boolean): Stmt {
+    const keyword = tokens.next();
+    if (!global) throw new PineCompileError('import can only be used in the global scope', keyword);
+    // user/name/version: the user's name may hold characters a name can't, so it's read whole.
+    const parts: Token[] = [];
+    while (!tokens.atEnd() && !(tokens.isIdent() && tokens.peek()?.text === 'as')) {
+      parts.push(tokens.next());
+    }
+    const path = parts.map((token) => token.text).join('');
+    const match = /^([^/]+)\/([^/]+)\/(\d+)$/.exec(path);
+    const start = parts[0] ?? keyword;
+    const end = parts.at(-1) ?? keyword;
+    if (!match) {
+      throw new PineCompileError(
+        'An import is written import <user>/<library>/<version>, e.g. import TradingView/ta/7',
+        spanOf(start, end),
+      );
+    }
+    let alias = match[2] as string;
+    let aliasEnd: Span = end;
+    if (!tokens.atEnd()) {
+      tokens.next(); // as
+      const name = tokens.next();
+      if (name.kind !== 'ident')
+        throw new PineCompileError(`"${name.text}" can't be an alias`, name);
+      alias = name.text;
+      aliasEnd = name;
+      tokens.expectEnd();
+    }
+    return {
+      kind: 'import',
+      publisher: match[1] as string,
+      library: match[2] as string,
+      version: Number(match[3]),
+      alias,
+      span: spanOf(keyword, aliasEnd),
+    };
+  }
+
+  private typeDeclaration(
+    tokens: Tokens,
+    line: LogicalLine,
+    global: boolean,
+    exported: boolean,
+  ): Stmt {
+    const keyword = tokens.next();
+    if (!global)
+      throw new PineCompileError('Types can only be declared in the global scope', keyword);
+    const name = tokens.next();
+    if (name.kind !== 'ident')
+      throw new PineCompileError(`"${name.text}" can't be a type's name`, name);
+    tokens.expectEnd();
+    const fields: Field[] = [];
+    const indent = line.indent + 4;
+    while (this.index < this.lines.length) {
+      const next = this.lines[this.index] as LogicalLine;
+      if (next.indent < indent) break;
+      if (next.indent > indent) {
+        throw new PineCompileError('Unexpected indentation in the type', next.tokens[0] as Token);
+      }
+      this.index++;
+      const t = new Tokens(next.tokens, next);
+      const start = t.peek() as Token;
+      const varip = t.accept('varip') !== null;
+      const length = t.typeLength(0);
+      if (length === 0) {
+        throw new PineCompileError('A field is written <type> <name> [= <default>]', start);
+      }
+      const type = this.type(t);
+      const fieldName = t.next();
+      if (fieldName.kind !== 'ident') {
+        throw new PineCompileError(`"${fieldName.text}" can't be a field's name`, fieldName);
+      }
+      const fallback = t.accept('=') ? this.expression(t) : null;
+      t.expectEnd();
+      fields.push({
+        name: fieldName.text,
+        type,
+        default: fallback,
+        varip,
+        span: spanOf(start, fallback?.span ?? fieldName),
+      });
+    }
+    if (fields.length === 0) throw new PineCompileError('A type needs at least one field', name);
+    return {
+      kind: 'typeDecl',
+      name: name.text,
+      nameSpan: name,
+      fields,
+      exported,
+      span: spanOf(keyword, (fields.at(-1) as Field).span),
+    };
+  }
+
+  private enumDeclaration(
+    tokens: Tokens,
+    line: LogicalLine,
+    global: boolean,
+    exported: boolean,
+  ): Stmt {
+    const keyword = tokens.next();
+    if (!global)
+      throw new PineCompileError('Enums can only be declared in the global scope', keyword);
+    const name = tokens.next();
+    if (name.kind !== 'ident')
+      throw new PineCompileError(`"${name.text}" can't be an enum's name`, name);
+    tokens.expectEnd();
+    const members: EnumMember[] = [];
+    const indent = line.indent + 4;
+    while (this.index < this.lines.length) {
+      const next = this.lines[this.index] as LogicalLine;
+      if (next.indent < indent) break;
+      this.index++;
+      const t = new Tokens(next.tokens, next);
+      const member = t.next();
+      if (member.kind !== 'ident') {
+        throw new PineCompileError(`"${member.text}" can't be an enum member`, member);
+      }
+      const title = t.accept('=') ? this.expression(t) : null;
+      t.expectEnd();
+      members.push({ name: member.text, title, span: spanOf(member, title?.span ?? member) });
+    }
+    if (members.length === 0) throw new PineCompileError('An enum needs at least one member', name);
+    return {
+      kind: 'enumDecl',
+      name: name.text,
+      nameSpan: name,
+      members,
+      exported,
+      span: spanOf(keyword, (members.at(-1) as EnumMember).span),
+    };
   }
 
   private statement(tokens: Tokens, line: LogicalLine, global: boolean): Stmt {
@@ -219,29 +442,38 @@ class Parser {
         tokens.expectEnd();
         return { kind: first.text, span: first };
       }
+      if (first.text === 'method') {
+        throw new PineCompileError('Methods can only be declared in the global scope', first);
+      }
     }
-    if (tokens.startsFunction()) {
+    if (tokens.startsFunctionAt(0)) {
       if (!global) {
         throw new PineCompileError('Functions can only be declared in the global scope', first);
       }
-      return this.func(tokens, line);
+      return this.func(tokens, line, global, false);
     }
     if (first.kind === 'op' && first.text === '[') {
       const close = tokens.closing(0);
       if (close > 0 && tokens.is('=', close + 1)) return this.tupleDecl(tokens, line);
     }
     if (this.isDeclaration(tokens)) return this.declaration(tokens, line);
-    if (first.kind === 'ident' && ASSIGN_OPS.has(tokens.peek(1)?.text ?? '')) {
-      const name = tokens.next();
-      const op = tokens.next().text as AssignOp;
+    const assign = tokens.assignmentAt();
+    if (assign > 0) {
+      const target = this.postfix(tokens);
+      const opToken = tokens.next();
+      if (!ASSIGN_OPS.has(opToken.text)) {
+        throw new PineCompileError(`Syntax error at "${opToken.text}"`, opToken);
+      }
+      if (target.kind !== 'name' && target.kind !== 'member') {
+        throw new PineCompileError('Only a variable or a field can be assigned', target.span);
+      }
       const value = this.rhs(tokens, line);
       return {
         kind: 'assign',
-        op,
-        name: name.text,
-        nameSpan: name,
+        op: opToken.text as AssignOp,
+        target,
         value,
-        span: spanOf(name, value.span),
+        span: spanOf(target.span, value.span),
       };
     }
     const expr = this.expression(tokens);
@@ -249,18 +481,15 @@ class Parser {
     return { kind: 'expr', expr, span: expr.span };
   }
 
+  /** `[var|varip] [const|simple|series] [<type>] <name> = …` starts here. */
   private isDeclaration(tokens: Tokens): boolean {
     let i = 0;
     if (tokens.is('var') || tokens.is('varip')) i++;
     if (tokens.peek(i)?.kind === 'keyword' && QUALIFIERS.has(tokens.peek(i)?.text ?? '')) i++;
-    const a = tokens.peek(i);
-    const b = tokens.peek(i + 1);
-    if (a?.kind !== 'ident') return false;
-    if (b?.kind === 'op' && b.text === '=') return true;
-    // array<float> x = …: a declaration, refused below as not yet supported.
-    if (tokens.is('<', i + 1) && tokens.is('>', i + 3) && tokens.peek(i + 4)?.kind === 'ident')
-      return true;
-    return b?.kind === 'ident' && tokens.is('=', i + 2);
+    if (!tokens.isIdent(i)) return false;
+    if (tokens.is('=', i + 1)) return true;
+    const length = tokens.typeLength(i);
+    return length > 0 && tokens.isIdent(i + length) && tokens.is('=', i + length + 1);
   }
 
   private declaration(tokens: Tokens, line: LogicalLine): Stmt {
@@ -271,23 +500,7 @@ class Parser {
     if (qualifierToken?.kind === 'keyword' && QUALIFIERS.has(qualifierToken.text)) {
       qualifier = tokens.next().text as QualifierWord;
     }
-    let type: TypeName | null = null;
-    if (tokens.peek(1)?.kind === 'op' && tokens.peek(1)?.text === '<') {
-      throw new PineCompileError(
-        'Arrays, matrices and maps come later (P2)',
-        tokens.peek() as Token,
-      );
-    }
-    if (tokens.peek(1)?.kind === 'ident') {
-      const typeToken = tokens.next();
-      if (!isTypeName(typeToken.text)) {
-        throw new PineCompileError(
-          `"${typeToken.text}" isn't a type we know: int, float, bool, color or string`,
-          typeToken,
-        );
-      }
-      type = typeToken.text;
-    }
+    const type = tokens.is('=', 1) ? null : this.type(tokens);
     const name = tokens.next();
     if (name.kind !== 'ident') throw new PineCompileError(`"${name.text}" can't be a name`, name);
     tokens.expect('=');
@@ -302,6 +515,38 @@ class Parser {
       value,
       span: spanOf(start, value.span),
     };
+  }
+
+  /** A type, in canonical text (see TypeRef). */
+  private type(tokens: Tokens): TypeRef {
+    const first = tokens.next();
+    if (first.kind !== 'ident') throw new PineCompileError(`"${first.text}" isn't a type`, first);
+    let name = first.text;
+    while (tokens.is('.') && tokens.isIdent(1)) {
+      tokens.next();
+      name += `.${tokens.next().text}`;
+    }
+    const args: TypeRef[] = [];
+    if (tokens.accept('<')) {
+      do {
+        args.push(this.type(tokens));
+      } while (tokens.accept(','));
+      tokens.expect('>', '">" to close the type');
+      const expected = GENERICS[name];
+      if (expected !== undefined && args.length !== expected) {
+        throw new PineCompileError(
+          `"${name}" takes ${expected} type${expected === 1 ? '' : 's'} in <>`,
+          first,
+        );
+      }
+    }
+    let depth = 0;
+    while (tokens.is('[') && tokens.is(']', 1)) {
+      tokens.next();
+      tokens.next();
+      depth++;
+    }
+    return typeText(name, args, depth);
   }
 
   private tupleDecl(tokens: Tokens, line: LogicalLine): Stmt {
@@ -330,8 +575,13 @@ class Parser {
     return value;
   }
 
-  private func(tokens: Tokens, line: LogicalLine): Stmt {
+  private func(tokens: Tokens, line: LogicalLine, global: boolean, exported: boolean): Stmt {
+    const methodToken = tokens.accept('method');
     const name = tokens.next();
+    if (!global) {
+      throw new PineCompileError('Functions can only be declared in the global scope', name);
+    }
+    if (name.kind !== 'ident') throw new PineCompileError(`"${name.text}" can't be a name`, name);
     tokens.expect('(');
     const params: Param[] = [];
     if (!tokens.is(')')) {
@@ -349,13 +599,18 @@ class Parser {
       const statement = this.statement(rest, line, false);
       body = { statements: [statement], span: statement.span };
     }
+    if (methodToken && params.length === 0) {
+      throw new PineCompileError('A method needs a first parameter: the value it works on', name);
+    }
     return {
       kind: 'func',
       name: name.text,
       nameSpan: name,
       params,
       body,
-      span: spanOf(name, body.span),
+      method: methodToken !== null,
+      exported,
+      span: spanOf(methodToken ?? name, body.span),
     };
   }
 
@@ -365,17 +620,9 @@ class Parser {
     if (start.kind === 'keyword' && QUALIFIERS.has(start.text)) {
       qualifier = tokens.next().text as QualifierWord;
     }
-    let type: TypeName | null = null;
-    if (tokens.peek(1)?.kind === 'ident') {
-      const typeToken = tokens.next();
-      if (!isTypeName(typeToken.text)) {
-        throw new PineCompileError(
-          `"${typeToken.text}" isn't a type we know: int, float, bool, color or string`,
-          typeToken,
-        );
-      }
-      type = typeToken.text;
-    }
+    let type: TypeRef | null = null;
+    const length = tokens.typeLength(0);
+    if (length > 0 && tokens.isIdent(length)) type = this.type(tokens);
     const name = tokens.next();
     if (name.kind !== 'ident')
       throw new PineCompileError(`"${name.text}" can't be a parameter`, name);
@@ -462,11 +709,27 @@ class Parser {
   }
 
   private forStructure(tokens: Tokens, line: LogicalLine, keyword: Token): Expr {
+    // for x in collection, for [i, x] in collection
+    if (tokens.is('[')) {
+      tokens.next();
+      const names: string[] = [];
+      const nameSpans: Span[] = [];
+      do {
+        const name = tokens.next();
+        if (name.kind !== 'ident')
+          throw new PineCompileError(`"${name.text}" can't be a name`, name);
+        names.push(name.text);
+        nameSpans.push(name);
+      } while (tokens.accept(','));
+      tokens.expect(']');
+      tokens.expect('in', '"in"');
+      return this.forInRest(tokens, line, keyword, names, nameSpans);
+    }
     const counter = tokens.next();
     if (counter.kind !== 'ident')
       throw new PineCompileError(`"${counter.text}" can't be a counter`, counter);
-    if (tokens.is('in') || tokens.is(',')) {
-      throw new PineCompileError('for…in loops come later, with arrays (P2)', counter);
+    if (tokens.accept('in')) {
+      return this.forInRest(tokens, line, keyword, [counter.text], [counter]);
     }
     tokens.expect('=');
     const from = this.expression(tokens);
@@ -485,6 +748,19 @@ class Parser {
       body,
       span: spanOf(keyword, body.span),
     };
+  }
+
+  private forInRest(
+    tokens: Tokens,
+    line: LogicalLine,
+    keyword: Token,
+    names: string[],
+    nameSpans: Span[],
+  ): Expr {
+    const target = this.expression(tokens);
+    tokens.expectEnd();
+    const body = this.block(line.indent + 4, target.span);
+    return { kind: 'forIn', names, nameSpans, target, body, span: spanOf(keyword, body.span) };
   }
 
   private whileStructure(tokens: Tokens, line: LogicalLine, keyword: Token): Expr {
@@ -555,21 +831,51 @@ class Parser {
     return this.postfix(tokens);
   }
 
+  /** A value with what follows it: `[k]` history, `.field`, `.method(…)`. */
   private postfix(tokens: Tokens): Expr {
     let expr = this.primary(tokens);
-    while (tokens.is('[')) {
-      if (expr.kind === 'history') {
-        throw new PineCompileError(
-          'The [] operator can only be used once on the same value',
-          tokens.peek() as Token,
-        );
+    for (;;) {
+      if (tokens.is('[')) {
+        if (expr.kind === 'history') {
+          throw new PineCompileError(
+            'The [] operator can only be used once on the same value',
+            tokens.peek() as Token,
+          );
+        }
+        tokens.next();
+        const offset = this.expression(tokens);
+        const close = tokens.expect(']');
+        expr = { kind: 'history', target: expr, offset, span: spanOf(expr.span, close) };
+        continue;
       }
-      tokens.next();
-      const offset = this.expression(tokens);
-      const close = tokens.expect(']');
-      expr = { kind: 'history', target: expr, offset, span: spanOf(expr.span, close) };
+      if (tokens.is('.') && isWord(tokens.peek(1))) {
+        tokens.next();
+        const name = tokens.next();
+        const typeArgs = this.typeArgs(tokens);
+        if (tokens.is('(')) {
+          const { args, close } = this.args(tokens);
+          expr = {
+            kind: 'call',
+            callee: name.text,
+            calleeSpan: name,
+            receiver: expr,
+            typeArgs,
+            args,
+            span: spanOf(expr.span, close),
+          };
+          continue;
+        }
+        expr = {
+          kind: 'member',
+          target: expr,
+          name: name.text,
+          nameSpan: name,
+          span: spanOf(expr.span, name),
+        };
+        continue;
+      }
+      return expr;
     }
-    return expr;
   }
 
   private primary(tokens: Tokens): Expr {
@@ -618,37 +924,39 @@ class Parser {
     throw new PineCompileError(`Syntax error at "${token.text}"`, token);
   }
 
-  private nameOrCall(tokens: Tokens, first: Token): Expr {
-    let name = first.text;
-    let end: Span = first;
-    while (tokens.is('.') && tokens.peek(1)?.kind === 'ident') {
-      tokens.next();
-      const part = tokens.next();
-      name += `.${part.text}`;
-      end = part;
+  /** `<float>` or `<string, int>` before a call's `(`, or null when there's none. */
+  private typeArgs(tokens: Tokens): TypeRef[] | null {
+    if (!tokens.is('<')) return null;
+    // A generic call only: the types must close with ">" right before "(".
+    let i = 1;
+    for (;;) {
+      const length = tokens.typeLength(i);
+      if (length === 0) return null;
+      i += length;
+      if (tokens.is(',', i)) {
+        i++;
+        continue;
+      }
+      break;
     }
-    const nameSpan = spanOf(first, end);
-    if (
-      tokens.is('<') &&
-      tokens.peek(1)?.kind === 'ident' &&
-      tokens.is('>', 2) &&
-      tokens.is('(', 3)
-    ) {
-      throw new PineCompileError('Arrays, matrices and maps come later (P2)', nameSpan);
-    }
-    if (!tokens.is('(')) {
-      if (name === 'na') return { kind: 'na', span: nameSpan };
-      if (name === 'true' || name === 'false')
-        return { kind: 'bool', value: name === 'true', span: nameSpan };
-      return { kind: 'name', name, span: nameSpan };
-    }
+    if (!tokens.is('>', i) || !tokens.is('(', i + 1)) return null;
     tokens.next();
-    const args: { name: string | null; value: Expr; span: Span }[] = [];
+    const types: TypeRef[] = [];
+    do {
+      types.push(this.type(tokens));
+    } while (tokens.accept(','));
+    tokens.expect('>');
+    return types;
+  }
+
+  private args(tokens: Tokens): { args: Arg[]; close: Token } {
+    tokens.expect('(');
+    const args: Arg[] = [];
     if (!tokens.is(')')) {
       do {
         const argStart = tokens.peek() as Token;
         let argName: string | null = null;
-        if (argStart.kind === 'ident' && tokens.is('=', 1)) {
+        if (isWord(argStart) && tokens.is('=', 1)) {
           argName = argStart.text;
           tokens.next();
           tokens.next();
@@ -660,13 +968,45 @@ class Parser {
       } while (tokens.accept(','));
     }
     const close = tokens.expect(')', '")" to close the call');
-    return { kind: 'call', callee: name, calleeSpan: nameSpan, args, span: spanOf(first, close) };
+    return { args, close };
+  }
+
+  private nameOrCall(tokens: Tokens, first: Token): Expr {
+    let name = first.text;
+    let end: Span = first;
+    while (tokens.is('.') && isWord(tokens.peek(1))) {
+      tokens.next();
+      const part = tokens.next();
+      name += `.${part.text}`;
+      end = part;
+    }
+    const nameSpan = spanOf(first, end);
+    const typeArgs = this.typeArgs(tokens);
+    if (!tokens.is('(')) {
+      if (name === 'na') return { kind: 'na', span: nameSpan };
+      if (name === 'true' || name === 'false')
+        return { kind: 'bool', value: name === 'true', span: nameSpan };
+      return { kind: 'name', name, span: nameSpan };
+    }
+    const { args, close } = this.args(tokens);
+    return {
+      kind: 'call',
+      callee: name,
+      calleeSpan: nameSpan,
+      receiver: null,
+      typeArgs,
+      args,
+      span: spanOf(first, close),
+    };
   }
 }
 
-/** Reads a script into its syntax tree, or throws its first syntax error. */
-export function parse(source: string): Script {
-  const { lines, version, annotations } = lex(source);
+/**
+ * Reads a script into its syntax tree, or throws its first syntax error. A script without
+ * `//@version` reads as `fallbackVersion` (see lex).
+ */
+export function parse(source: string, fallbackVersion = 1): Script {
+  const { lines, version, annotations } = lex(source, fallbackVersion);
   const statements = new Parser(lines).script();
   return { version, statements, annotations };
 }

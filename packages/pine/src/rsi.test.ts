@@ -30,6 +30,8 @@ const pineInputs = (inputs: Inputs) => [
   inputs.maType,
   inputs.maLength,
   inputs.bbMult,
+  inputs.timeframe,
+  inputs.waitForClose,
 ];
 
 function both(inputs: Inputs, hasVolume: boolean): [IndicatorRun, ScriptRun] {
@@ -156,6 +158,9 @@ describe('RSI’s Pine code describes the built-in', () => {
       false,
       false,
       false,
+      // The Timeframe, written only when it isn't the chart's; waiting for closes never is.
+      true,
+      false,
     ]);
   });
 
@@ -163,7 +168,7 @@ describe('RSI’s Pine code describes the built-in', () => {
     for (const maType of RSI_SMOOTHING) {
       const inputs = { ...settings.inputs, maType };
       const active = PROGRAM.describe(pineInputs(inputs)).inputs.map((input) => input.active);
-      expect(active.slice(3)).toEqual([
+      expect(active.slice(3, 5)).toEqual([
         RSI.inputs[3]?.enabledWhen?.(inputs) ?? true,
         RSI.inputs[4]?.enabledWhen?.(inputs) ?? true,
       ]);

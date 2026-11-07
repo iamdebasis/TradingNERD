@@ -45,8 +45,20 @@ describe('A script read as the chart reads a built-in (scriptDefinition)', () =>
       ['in_2', 'select', 'Type'],
       ['in_3', 'int', 'Length'],
       ['in_4', 'float', 'BB StdDev'],
+      // indicator(timeframe = "", timeframe_gaps = true)'s, in the Calculation section.
+      ['in_5', 'select', 'Timeframe'],
+      ['in_6', 'bool', 'Wait for timeframe closes'],
     ]);
-    expect(inputs).toEqual({ in_0: 14, in_1: 'close', in_2: 'SMA', in_3: 14, in_4: 2 });
+    expect(inputs).toEqual({
+      in_0: 14,
+      in_1: 'close',
+      in_2: 'SMA',
+      in_3: 14,
+      in_4: 2,
+      in_5: '',
+      in_6: true,
+    });
+    expect(definition.inputs[5]?.group).toBe('Calculation');
     expect(definition.inputs[4]?.enabledWhen?.(inputs)).toBe(false);
     expect(definition.inputs[4]?.enabledWhen?.({ ...inputs, in_2: 'SMA + Bollinger Bands' })).toBe(
       true,
@@ -58,6 +70,7 @@ describe('A script read as the chart reads a built-in (scriptDefinition)', () =>
     expect(definition.format).toEqual({ kind: 'decimals', decimals: 2 });
     expect(definition.legendName({ base: 'XRP', hasVolume: true })).toBe('RSI');
     expect(definition.legendInputs(inputs)).toBe('14 close');
+    expect(definition.legendInputs({ ...inputs, in_5: '1W' })).toBe('14 close 1W');
   });
 
   it('lists the built-in’s plots, levels and fills, by kind and place', () => {
@@ -127,6 +140,39 @@ describe('Scripts’ other inputs, placements and formats', () => {
     expect(definition.inputs[3]).toMatchObject({ tooltip: 'Turns it on', inline: 'row' });
   });
 
+  it('gives the newer input kinds TradingView’s controls', () => {
+    const p = script(
+      [
+        'enum Side',
+        '    long = "Long only"',
+        '    short = "Short only"',
+        'tf = input.timeframe("60", "Timeframe")',
+        'ses = input.session("0930-1600", "Session")',
+        't = input.time(timestamp("2024-01-01"), "From")',
+        'note = input.text_area("one\\ntwo", "Notes")',
+        'side = input.enum(Side.short, "Side")',
+        'plot(close)',
+      ].join('\n'),
+    );
+    const definition = scriptDefinition(p, scriptDefaultInputs(p), CONTEXT);
+    const [tf, ses, t, note, side] = definition.inputs;
+    // "Chart" first, then the intervals without ticks, in TradingView's words.
+    expect(tf).toMatchObject({ kind: 'select', default: '60' });
+    expect(tf?.kind === 'select' && tf.options.slice(0, 2)).toEqual(['', '1S']);
+    expect(tf?.kind === 'select' && tf.labels?.[0]).toBe('Chart');
+    expect(tf?.kind === 'select' && tf.labels?.[tf.options.indexOf('60')]).toBe('1 hour');
+    expect(ses).toMatchObject({ kind: 'session', default: '0930-1600' });
+    expect(t).toMatchObject({ kind: 'time', default: Date.UTC(2024, 0, 1) });
+    expect(note).toMatchObject({ kind: 'string', multiline: true });
+    // An enum: its members by title, the settings keeping the name.
+    expect(side).toMatchObject({
+      kind: 'select',
+      default: 'short',
+      options: ['long', 'short'],
+      labels: ['Long only', 'Short only'],
+    });
+  });
+
   it('puts an overlay on the price pane, writing values with the chart’s price decimals', () => {
     const p = script('plot(ta.sma(close, 3))', 'indicator("Average", overlay = true)');
     const definition = scriptDefinition(p, {}, CONTEXT);
@@ -170,6 +216,70 @@ describe('Scripts’ other inputs, placements and formats', () => {
       trackprice: true,
     });
     expect(definition.backgrounds?.map((background) => background.id)).toEqual(['bg_0']);
+  });
+
+  it('draws plotshape, plotchar and plotarrow as marks, with what places and colors them', () => {
+    const p = script(
+      [
+        'plotshape(close > open, style = shape.triangleup, location = location.belowbar, color = color.teal, text = "Buy")',
+        'plotchar(close < open, "Down", "▼", location.top, size = size.tiny)',
+        'plotarrow(close - open)',
+      ].join('\n'),
+      'indicator("Signals", overlay = true)',
+    );
+    const [shape, char, arrow] = scriptDefinition(p, {}, CONTEXT).plots;
+    // An untitled mark is named for its kind (provisional).
+    expect(shape).toMatchObject({
+      kind: 'marks',
+      title: 'Shapes',
+      style: { color: '#089981' },
+      look: {
+        mark: {
+          kind: 'shape',
+          shape: 'triangleup',
+          location: 'belowbar',
+          size: 'auto',
+          text: 'Buy',
+          // The text in the shape's color (the manual's "Lift text" figure).
+          textColor: '#089981',
+        },
+      },
+    });
+    expect(char).toMatchObject({
+      kind: 'marks',
+      title: 'Down',
+      look: { mark: { kind: 'char', char: '▼', location: 'top', size: 'tiny' } },
+    });
+    expect(arrow).toMatchObject({
+      kind: 'marks',
+      title: 'Arrows',
+      look: { colorChanges: true, mark: { kind: 'arrow', minheight: 5, maxheight: 100 } },
+    });
+  });
+
+  it('draws plotcandle as candles whose high, low and close follow them in the legend', () => {
+    const p = script('plotcandle(open, high, low, close, "Mine", color.teal)');
+    const definition = scriptDefinition(p, {}, CONTEXT);
+    const [candles, high, low, close] = definition.plots;
+    expect(candles).toMatchObject({
+      kind: 'candles',
+      title: 'Mine',
+      look: { candle: { kind: 'candle', parts: [1, 2, 3] } },
+    });
+    // Parts: drawn with the candles, never listed in the Style tab by themselves.
+    for (const part of [high, low, close]) {
+      expect(part).toMatchObject({ partOf: 'plot_0', look: { editable: false } });
+      expect(part?.shownWhen?.({})).toBe(true);
+    }
+    // The wick's and the border's colors, unless the script gives them (provisional).
+    expect(high?.style.color).toBe('#737375');
+    expect(low?.style.color).toBe('#000000');
+  });
+
+  it('marks barcolor() as coloring the chart’s bars, named "Bar color" when untitled', () => {
+    const p = script('barcolor(close > open ? color.yellow : na)\nplot(close)');
+    const definition = scriptDefinition(p, {}, CONTEXT);
+    expect(definition.backgrounds).toMatchObject([{ id: 'bg_0', bars: true, title: 'Bar color' }]);
   });
 
   it('runs through ScriptLayerRun with the chart’s listing flag', () => {

@@ -1,4 +1,4 @@
-import type { Bar } from '@tradingnerd/core';
+import { type Bar, menuLabel, parseResolution, STANDARD_INTERVALS } from '@tradingnerd/core';
 import {
   type BackgroundSpec,
   type BarChange,
@@ -15,11 +15,16 @@ import {
   type ValueFormat,
 } from '@tradingnerd/indicators';
 import {
+  colorCss,
   colorHex,
   colorOpacity,
   type InputDef,
   type OutputRef,
+  type RequestFeed,
+  type RequestKey,
   type ScriptDescription,
+  type ScriptMark,
+  type ScriptPlot,
   type ScriptProgram,
   ScriptRun,
   type ScriptSymbol,
@@ -123,7 +128,65 @@ function inputSpec(
       return { ...base, kind: 'color', default: input.defval as number };
     case 'source':
       return { ...base, kind: 'source', default: input.defval as 'close' };
+    case 'timeframe': {
+      // TradingView's menu: "Chart" for the chart's own, then its intervals (no ticks: Pine's
+      // timeframe strings have none), or the script's options.
+      const options = (input.options as string[] | undefined) ?? [
+        '',
+        ...STANDARD_INTERVALS.filter((tf) => !tf.endsWith('T')),
+      ];
+      return {
+        ...base,
+        kind: 'select',
+        default: String(input.defval ?? ''),
+        options,
+        labels: options.map(timeframeLabel),
+      };
+    }
+    case 'session':
+      return input.options
+        ? {
+            ...base,
+            kind: 'select',
+            default: input.defval as string,
+            options: input.options as string[],
+          }
+        : { ...base, kind: 'session', default: String(input.defval ?? '') };
+    case 'time':
+      return { ...base, kind: 'time', default: input.defval as number };
+    case 'price':
+      return {
+        ...base,
+        kind: 'float',
+        default: input.defval as number,
+        min: Number.NEGATIVE_INFINITY,
+        max: Number.POSITIVE_INFINITY,
+        step: 1,
+      };
+    case 'text_area':
+      return { ...base, kind: 'string', default: String(input.defval ?? ''), multiline: true };
+    case 'enum':
+      // Its members by their titles; the settings keep the member's name.
+      return {
+        ...base,
+        kind: 'select',
+        default: input.defval as string,
+        options: input.options as string[],
+        labels: input.optionTitles ?? (input.options as string[]),
+      };
+    case 'symbol':
+      // Picked with Symbol Search (docs/SPEC.md §5.17, §6.18).
+      return { ...base, kind: 'symbol', default: String(input.defval ?? '') };
+    default:
+      return { ...base, kind: 'string', default: String(input.defval ?? '') };
   }
+}
+
+/** A timeframe in the menu's words: "Chart" for the chart's own, else "1 hour" (core). */
+function timeframeLabel(tf: string): string {
+  if (tf === '') return 'Chart';
+  const resolution = parseResolution(tf);
+  return resolution ? menuLabel(resolution) : tf;
 }
 
 /** A fill's edge: the plot's or hline's id in the settings. */
@@ -132,7 +195,7 @@ const edgeId = (ref: OutputRef) => (ref.output === 'plot' ? plotId(ref.index) : 
 /** An input's value as the legend writes it ("14", "close"); null for one it doesn't show. */
 function legendValue(value: Value): string | null {
   if (typeof value === 'number') return Number.isNaN(value) ? null : String(value);
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return value === '' ? null : value;
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return null;
 }
@@ -165,31 +228,20 @@ export function scriptDefinition(
   const enabled = (index: number) => (current: Inputs) =>
     program.describe(scriptInputs(program, current)).inputs[index]?.active ?? true;
   const name = d.shorttitle || d.title;
-  const plots: PlotSpec[] = d.plots.map((plot, i) => ({
-    id: plotId(i),
-    // An untitled plot is "Plot" (provisional, §11).
-    title: plot.title || 'Plot',
-    kind: plot.style === 'histogram' || plot.style === 'columns' ? 'columns' : 'line',
-    style: {
-      visible: true,
-      ...look(plot.colorChanges ? null : plot.color),
-      ...(plot.colorChanges ? { color: '#2962FF', opacity: 1 } : {}),
-      width: plot.linewidth,
-      dash: plot.linestyle,
-    },
-    // display = display.none: not drawn, not listed (as the built-ins' hidden plots).
-    shownWhen: () => plot.display !== 0,
-    look: {
-      style: plot.style,
-      colorChanges: plot.colorChanges,
-      offset: plot.offset,
-      showLast: plot.showLast,
-      trackprice: plot.trackprice,
-      histbase: plot.histbase,
-      display: plot.display,
-      editable: plot.editable,
-    },
-  }));
+  // A candle's high, low and close, by the candles they belong to.
+  const owners = new Map<number, number>();
+  d.plots.forEach((plot, i) => {
+    if (plot.kind === 'candle' || plot.kind === 'bar') {
+      for (const part of plot.parts ?? []) owners.set(part, i);
+    }
+  });
+  const plots: PlotSpec[] = d.plots.map((plot, i) => {
+    const owner = owners.get(i);
+    const candles = owner === undefined ? undefined : d.plots[owner];
+    return candles && owner !== undefined
+      ? candlePart(plot, i, candles, owner)
+      : scriptPlot(plot, i);
+  });
   const levels: LevelSpec[] = d.hlines.map((hline, i) => ({
     id: hlineId(i),
     title: hline.title || 'Line',
@@ -228,7 +280,9 @@ export function scriptDefinition(
   }));
   const backgrounds: BackgroundSpec[] = d.backgrounds.map((background, i) => ({
     id: backgroundId(i),
-    title: background.title || 'Background',
+    ...(background.bars ? { bars: true } : {}),
+    // An untitled barcolor is "Bar color" (provisional, §11).
+    title: background.title || (background.bars ? 'Bar color' : 'Background'),
     style: { visible: pane(background.display), ...look(background.color) },
     offset: background.offset,
     showLast: background.showLast,
@@ -265,6 +319,122 @@ export function scriptDefinition(
   };
 }
 
+/**
+ * A candle's high, low or close: drawn with its candles, never by itself, and written in the
+ * legend after their open (the four values in their color: the Pine manual's figures of
+ * plotcandle, Requesting LTF collections and Custom contexts).
+ */
+function candlePart(plot: ScriptPlot, i: number, candles: ScriptPlot, owner: number): PlotSpec {
+  return {
+    id: plotId(i),
+    title: '',
+    kind: 'line',
+    style: { visible: true, ...look(plot.color) },
+    partOf: plotId(owner),
+    shownWhen: () => candles.display !== 0,
+    look: {
+      style: 'line',
+      colorChanges: false,
+      offset: 0,
+      showLast: candles.showLast,
+      trackprice: false,
+      histbase: 0,
+      display: candles.display,
+      editable: false,
+    },
+  };
+}
+
+/**
+ * One of a script's plot-like outputs as the chart draws it. Every engine plot keeps its place,
+ * so the run's values line up; a mark's hidden text colors are never shown by themselves.
+ */
+function scriptPlot(plot: ScriptPlot, i: number): PlotSpec {
+  const plotLook = {
+    style: plot.style,
+    colorChanges: plot.colorChanges,
+    offset: plot.offset,
+    showLast: plot.showLast,
+    trackprice: plot.trackprice,
+    histbase: plot.histbase,
+    display: plot.display,
+    editable: plot.editable,
+  };
+  const color = {
+    visible: true,
+    ...look(plot.colorChanges ? null : plot.color),
+    ...(plot.colorChanges ? { color: '#2962FF', opacity: 1 } : {}),
+  };
+  switch (plot.kind) {
+    case 'part':
+      return {
+        id: plotId(i),
+        title: '',
+        kind: 'line',
+        style: color,
+        shownWhen: () => false,
+        look: { ...plotLook, display: 0, editable: false },
+      };
+    case 'shape':
+    case 'char':
+    case 'arrow': {
+      const mark = plot.mark as ScriptMark;
+      return {
+        id: plotId(i),
+        // An untitled mark is "Shapes" (provisional, §11).
+        title:
+          plot.title ||
+          (plot.kind === 'char' ? 'Chars' : plot.kind === 'arrow' ? 'Arrows' : 'Shapes'),
+        kind: 'marks',
+        style: color,
+        shownWhen: () => plot.display !== 0,
+        look: {
+          ...plotLook,
+          mark: {
+            kind: plot.kind,
+            shape: mark.shape,
+            char: mark.char,
+            location: mark.location,
+            size: mark.size,
+            text: mark.text,
+            textColor: mark.textColor === null ? null : colorCss(mark.textColor),
+            textPart: mark.textPart,
+            minheight: mark.minheight,
+            maxheight: mark.maxheight,
+          },
+        },
+      };
+    }
+    case 'candle':
+    case 'bar':
+      return {
+        id: plotId(i),
+        title: plot.title || (plot.kind === 'candle' ? 'Candles' : 'Bars'),
+        kind: 'candles',
+        style: color,
+        shownWhen: () => plot.display !== 0,
+        look: {
+          ...plotLook,
+          candle: {
+            kind: plot.kind,
+            parts: plot.parts ?? [i, i, i],
+          },
+        },
+      };
+    default:
+      return {
+        id: plotId(i),
+        // An untitled plot is "Plot" (provisional, §11).
+        title: plot.title || 'Plot',
+        kind: plot.style === 'histogram' || plot.style === 'columns' ? 'columns' : 'line',
+        style: { ...color, width: plot.linewidth, dash: plot.linestyle },
+        // display = display.none: not drawn, not listed (as the built-ins' hidden plots).
+        shownWhen: () => plot.display !== 0,
+        look: plotLook,
+      };
+  }
+}
+
 /** A script's input values for its settings, from the script's defaults. */
 export function scriptDefaultInputs(program: ScriptProgram): Record<string, InputValue> {
   const inputs: Record<string, InputValue> = {};
@@ -288,9 +458,29 @@ export class ScriptLayerRun {
   readonly growing: readonly boolean[] = [];
   private fromListing = false;
 
-  constructor(program: ScriptProgram, inputs: Inputs, context: ScriptContext, symbol: unknown) {
-    this.run = new ScriptRun(program, scriptInputs(program, inputs), context.symbol);
+  constructor(
+    program: ScriptProgram,
+    inputs: Inputs,
+    context: ScriptContext,
+    symbol: unknown,
+    feed?: RequestFeed,
+  ) {
+    this.run = new ScriptRun(program, scriptInputs(program, inputs), context.symbol, feed);
     this.symbol = symbol;
+  }
+
+  /** Whether its requests' data hasn't all loaded yet: it draws nothing meanwhile. */
+  get waiting(): boolean {
+    return this.run.waiting;
+  }
+
+  /** The contexts its requests use, and those not loaded yet (docs/SPEC.md §6.18). */
+  get requested(): readonly RequestKey[] {
+    return this.run.requested;
+  }
+
+  get missing(): readonly RequestKey[] {
+    return this.run.missing;
   }
 
   get length(): number {

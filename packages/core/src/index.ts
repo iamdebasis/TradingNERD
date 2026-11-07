@@ -3,6 +3,7 @@ export * from './config.ts';
 export * from './flags.ts';
 export * from './formula.ts';
 export * from './intervals.ts';
+export * from './libraries.ts';
 export * from './logos.ts';
 export * from './market.ts';
 export * from './marketStatus.ts';

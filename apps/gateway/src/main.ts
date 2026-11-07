@@ -14,10 +14,13 @@ import { LogoService } from './logos/LogoService.ts';
 import { CoinGeckoUsage } from './logos/usage.ts';
 import { MarketService } from './market/MarketService.ts';
 import type { ExchangeAdapter } from './market/types.ts';
+import { OpenInterestExchange } from './openinterest/OpenInterestExchange.ts';
+import { BinanceOiSource, BybitOiSource, OkxOiSource } from './openinterest/sources.ts';
 import { buildServer } from './server.ts';
 import { DIRECTORY_URLS, UsListings } from './stocks/UsListings.ts';
 import { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import { FlagStore } from './storage/FlagStore.ts';
+import { LibrariesStore } from './storage/LibrariesStore.ts';
 import { ScriptsStore } from './storage/ScriptsStore.ts';
 import { SecretStore } from './storage/secrets.ts';
 import { WatchlistsStore } from './storage/WatchlistsStore.ts';
@@ -86,7 +89,35 @@ const cryptocap = new CryptoCapExchange({
   onWarning: warn('cryptocap'),
 });
 
-const market = new MarketService([...exchanges, ...stocks.exchanges(), cryptocap]);
+// Perpetuals' open interest ("BINANCE:BTCUSDT.P_OI"), as TradingView's _OI symbols: from the
+// exchanges' own APIs and Binance's archive, kept in data/oi/ (docs/SPEC.md §6.18).
+const openInterest = [
+  new OpenInterestExchange({
+    exchange: 'BINANCE',
+    name: 'Binance',
+    source: new BinanceOiSource(config.binanceFutures),
+    dataDir: config.dataDir,
+    onWarning: warn('open interest'),
+  }),
+  new OpenInterestExchange({
+    exchange: 'BYBIT',
+    name: 'Bybit',
+    source: new BybitOiSource({ restUrl: config.bybit.restUrl }),
+    dataDir: config.dataDir,
+    onWarning: warn('open interest'),
+  }),
+  new OpenInterestExchange({
+    exchange: 'OKX',
+    name: 'OKX',
+    source: new OkxOiSource({ restUrl: config.okx.restUrl }),
+    dataDir: config.dataDir,
+    onWarning: warn('open interest'),
+  }),
+];
+
+const market = new MarketService([...exchanges, ...stocks.exchanges(), cryptocap], {
+  openInterest,
+});
 
 // Symbol search lists every exchange's pairs (each with an adapter here is live), every
 // US-listed stock and fund, and CRYPTOCAP's symbols.
@@ -102,6 +133,7 @@ const catalog = new SymbolCatalog({
 const watchlist = new WatchlistsStore(config.dataDir, warn('data'));
 const flags = new FlagStore(config.dataDir, warn('data'));
 const scripts = new ScriptsStore(config.dataDir, warn('data'));
+const libraries = new LibrariesStore(config.dataDir, warn('data'));
 
 const logos = new LogoService({
   client: coingecko,
@@ -116,6 +148,7 @@ const app = await buildServer(config, {
   flags,
   logos,
   scripts,
+  libraries,
   stocks,
   olderCaps: { older: cryptocap.older, coins: cryptocap.olderCoins },
 });

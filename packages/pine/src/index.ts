@@ -7,14 +7,44 @@ export {
   type PlotStyle,
   type ScriptFormat,
 } from './builtins.ts';
-export type { InputDef } from './compiler.ts';
-export { type PineDiagnostic, PineRuntimeError, type Span } from './diagnostics.ts';
-export { KEYWORDS } from './lexer.ts';
-export { DEFAULT_SYMBOL, type ScriptSymbol } from './runtime.ts';
+export {
+  type CatalogEntry,
+  type CatalogKind,
+  catalog,
+  catalogEntry,
+  namespaceMembers,
+  referenceUrl,
+  type Signature,
+  signatureOf,
+} from './catalog.ts';
+export type { CompileOptions, InputDef, LibraryResolver } from './compiler.ts';
+export { type ConvertResult, convertToV6 } from './convert.ts';
+export {
+  type LibraryProblem,
+  type PineDiagnostic,
+  PineRuntimeError,
+  type Span,
+} from './diagnostics.ts';
+export { KEYWORDS, versionIn } from './lexer.ts';
+export {
+  alignBar,
+  type ContextData,
+  type CurrencyLeg,
+  canonicalTimeframe,
+  isLower,
+  MAX_REQUESTS,
+  type RequestFeed,
+  type RequestKey,
+  requestKeyText,
+  timesOf,
+} from './requests.ts';
+export { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
 export {
   type CompileResult,
   compileCached,
   compileScript,
+  type MarkLocation,
+  type MarkSize,
   PINE_VERSION,
   type ScriptBackground,
   type ScriptDescription,
@@ -22,9 +52,11 @@ export {
   type ScriptFill,
   type ScriptHline,
   type ScriptInput,
+  type ScriptMark,
   type ScriptPlot,
   ScriptProgram,
   ScriptRun,
+  type Shape,
 } from './script.ts';
 export {
   COLORS,

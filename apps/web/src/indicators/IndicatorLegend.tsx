@@ -4,7 +4,7 @@ import {
   formatIndicatorValue,
   NO_VALUE,
 } from '@tradingnerd/chart';
-import { displayFormat, type SymbolContext, styleOf } from '@tradingnerd/indicators';
+import { displayFormat, type PlotSpec, type SymbolContext, styleOf } from '@tradingnerd/indicators';
 import { useLayoutEffect } from 'react';
 import { BUILTIN_CODE, definitionOf } from './definitions';
 import styles from './IndicatorLegend.module.css';
@@ -17,6 +17,9 @@ import {
   GearIcon,
   TrashIcon,
 } from './icons';
+
+/** No script waiting. */
+const NONE: ReadonlySet<string> = new Set();
 
 /** What a row's buttons do. */
 export interface RowActions {
@@ -70,7 +73,8 @@ export class LegendValues {
       definition.plots.forEach((plot, p) => {
         const span = spans[p];
         if (!span) return;
-        const style = styleOf(indicator.settings, plot);
+        // A candle's high, low and close are written in their candles' color.
+        const style = styleOf(indicator.settings, ownerOf(definition.plots, plot));
         const noVolume = definition.kind === 'volume' && !this.hasVolume;
         const text = noVolume ? 'n/a' : formatIndicatorValue(values[p] ?? Number.NaN, format);
         if (span.textContent !== text) span.textContent = text;
@@ -90,21 +94,29 @@ export class LegendValues {
   }
 }
 
+/** The plot a value belongs to: a candle's high, low or close to its candles, else itself. */
+function ownerOf(plots: readonly PlotSpec[], plot: PlotSpec): PlotSpec {
+  return plot.partOf ? (plots.find((spec) => spec.id === plot.partOf) ?? plot) : plot;
+}
+
 /**
  * The plots a row shows values for: the ones these inputs have and the style shows, unless the
- * Style tab's "Values in status line" is off.
+ * Style tab's "Values in status line" is off. A plotcandle shows its open, high, low and close,
+ * one after another (the Pine manual's figures of it).
  */
 function shownPlots(indicator: ChartIndicator): boolean[] {
   const definition = definitionOf(indicator);
   const { inputs, display } = indicator.settings;
-  return definition.plots.map(
-    (plot) =>
+  return definition.plots.map((plot) => {
+    const owner = ownerOf(definition.plots, plot);
+    return (
       display.statusValues &&
       (plot.shownWhen?.(inputs) ?? true) &&
-      styleOf(indicator.settings, plot).visible &&
+      styleOf(indicator.settings, owner).visible &&
       // A script's plot shows in the status line only with display.status_line.
-      (plot.look === undefined || (plot.look.display & 4) !== 0),
-  );
+      (owner.look === undefined || (owner.look.display & 4) !== 0)
+    );
+  });
 }
 
 /**
@@ -121,6 +133,7 @@ export function IndicatorRow({
   values,
   actions,
   error,
+  loading = false,
 }: {
   indicator: ChartIndicator;
   symbol: SymbolContext;
@@ -128,6 +141,8 @@ export function IndicatorRow({
   actions: RowActions;
   /** What stopped a script, if something did: it draws nothing and says why. */
   error?: string | undefined;
+  /** A script waiting for its requests' data (docs/SPEC.md §6.18): it draws nothing yet. */
+  loading?: boolean;
 }) {
   const definition = definitionOf(indicator);
   const name = definition.legendName(symbol);
@@ -167,6 +182,8 @@ export function IndicatorRow({
         <span className={styles.error} role="img" aria-label={`Error: ${error}`} title={error}>
           <ErrorIcon />
         </span>
+      ) : loading && !indicator.hidden ? (
+        <span className={styles.loading} role="status" aria-label="Loading" title="Loading" />
       ) : indicator.hidden ? (
         <button
           type="button"
@@ -245,6 +262,7 @@ export function PriceLegendRows({
   folded,
   onFold,
   errors,
+  waiting = NONE,
   ...row
 }: {
   indicators: readonly ChartIndicator[];
@@ -254,6 +272,8 @@ export function PriceLegendRows({
   values: LegendValues;
   actions: RowActions;
   errors: ReadonlyMap<string, string>;
+  /** The scripts waiting for their requests' data. */
+  waiting?: ReadonlySet<string>;
 }) {
   if (indicators.length === 0) return null;
   return (
@@ -264,6 +284,7 @@ export function PriceLegendRows({
             key={indicator.id}
             indicator={indicator}
             error={errors.get(indicator.id)}
+            loading={waiting.has(indicator.id)}
             {...row}
           />
         ))}
@@ -292,6 +313,7 @@ export function PaneLegends({
   panes,
   indicators,
   errors,
+  waiting = NONE,
   ...row
 }: {
   panes: readonly PaneBox[];
@@ -300,6 +322,7 @@ export function PaneLegends({
   values: LegendValues;
   actions: RowActions;
   errors: ReadonlyMap<string, string>;
+  waiting?: ReadonlySet<string>;
 }) {
   return (
     <>
@@ -313,7 +336,12 @@ export function PaneLegends({
             style={{ top: pane.top }}
             data-pane-legend={indicator.id}
           >
-            <IndicatorRow indicator={indicator} error={errors.get(indicator.id)} {...row} />
+            <IndicatorRow
+              indicator={indicator}
+              error={errors.get(indicator.id)}
+              loading={waiting.has(indicator.id)}
+              {...row}
+            />
           </div>
         );
       })}

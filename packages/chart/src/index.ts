@@ -7,6 +7,7 @@ export {
   DEFAULT_RIGHT_OFFSET,
   type ExtendedPrice,
   type HoverInfo,
+  instrumentSymbol,
 } from './ChartController';
 export {
   formatCountdown,
@@ -18,7 +19,12 @@ export {
   formatValue,
   formatVolume,
 } from './format';
-export type { IndicatorDebugState, IndicatorValues } from './indicators/IndicatorLayer';
+export type {
+  IndicatorDebugState,
+  IndicatorValues,
+  ScriptLibraries,
+  ScriptLogs,
+} from './indicators/IndicatorLayer';
 export {
   type ChartIndicator,
   formatIndicatorValue,

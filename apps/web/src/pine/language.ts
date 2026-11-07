@@ -1,4 +1,5 @@
 import type * as Monaco from 'monaco-editor';
+import { registerPineHelp } from './help';
 
 /** The Pine Editor's language id in Monaco. */
 export const PINE = 'pine';
@@ -158,6 +159,9 @@ export const pineTokens: Monaco.languages.IMonarchLanguage = {
       [/\/\/@[a-zA-Z_]+.*$/, 'comment.annotation'],
       [/\/\/.*$/, 'comment'],
       [/#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b/, 'constant.color'],
+      // A multiline string (v6, April 2026 release notes) runs on until its closing delimiter.
+      [/"""/, 'string', '@stringTripleDouble'],
+      [/'''/, 'string', '@stringTripleSingle'],
       [/"/, 'string', '@stringDouble'],
       [/'/, 'string', '@stringSingle'],
       [/\d*\.\d+([eE][-+]?\d+)?|\d+\.?\d*([eE][-+]?\d+)?/, 'number'],
@@ -202,6 +206,18 @@ export const pineTokens: Monaco.languages.IMonarchLanguage = {
       [/[^\\']+/, 'string'],
       [/\\./, 'string.escape'],
       [/'/, 'string', '@pop'],
+    ],
+    stringTripleDouble: [
+      [/"""/, 'string', '@pop'],
+      [/[^\\"]+/, 'string'],
+      [/\\./, 'string.escape'],
+      [/"/, 'string'],
+    ],
+    stringTripleSingle: [
+      [/'''/, 'string', '@pop'],
+      [/[^\\']+/, 'string'],
+      [/\\./, 'string.escape'],
+      [/'/, 'string'],
     ],
   },
 };
@@ -281,4 +297,5 @@ export function registerPine(monaco: typeof Monaco): void {
   monaco.languages.setMonarchTokensProvider(PINE, pineTokens);
   monaco.languages.setLanguageConfiguration(PINE, pineConfiguration);
   monaco.editor.defineTheme('tn-pine-dark', PINE_DARK_THEME);
+  registerPineHelp(monaco, PINE);
 }

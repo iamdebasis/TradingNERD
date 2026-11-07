@@ -1,0 +1,162 @@
+/* Provisional styling in the app's dialog idiom (AddIntervalDialog.module.css); TradingView's
+   Version history panel hasn't been measured (docs/SPEC.md §11). */
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 64px));
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  min-height: 0;
+}
+
+.side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
+  width: 260px;
+  min-height: 0;
+}
+
+.versions {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.version {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pick {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pick:hover {
+  background: var(--color-gutter);
+}
+
+.pick[aria-pressed="true"] {
+  background: var(--color-selected, rgb(41 98 255 / 18%));
+}
+
+.number {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.more {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.more:hover,
+.more[aria-expanded="true"] {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.menu {
+  position: absolute;
+  z-index: 2;
+  top: 100%;
+  right: 0;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--color-gutter);
+}
+
+.preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toggle {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.toggleButton {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--color-separator);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toggleButton[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.diff {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--color-separator);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.note {
+  padding: 9px 10px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

@@ -621,6 +621,8 @@ export interface MockMarket {
   readonly savedLcwKeys: string[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
+  /** The symbol and resolution of every bars subscription the page has made, in order. */
+  readonly barSymbols: [string, string][];
   /** Ids of subscriptions the page still holds. */
   activeSubscriptions(): string[];
   /** Query of every /api/bars request, in order. */
@@ -639,6 +641,21 @@ export interface MockMarket {
   scripts: MockScript[];
   /** Every script save the page made: POST for a new one, PUT for a new version. */
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[];
+  /** Every rename the page made (PATCH), the new name as sent. */
+  readonly scriptRenames: string[];
+  /** The libraries scripts import, as /api/libraries serves them (routes/libraries.ts). */
+  libraries: MockLibrary[];
+  /** Every library change the page made: each PUT's path and code, each DELETE's path. */
+  readonly libraryChanges: { method: 'PUT' | 'DELETE'; path: string; source?: string }[];
+}
+
+/** A library in the mock: its import path's parts, its code and when it was added. */
+export interface MockLibrary {
+  publisher: string;
+  name: string;
+  version: number;
+  source: string;
+  addedAt: number;
 }
 
 /** One of My scripts in the mock, every version kept. */
@@ -743,8 +760,12 @@ class MockGateway implements MockMarket {
   readonly flagSaves: FlagState[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
+  readonly barSymbols: [string, string][] = [];
   scripts: MockScript[] = [];
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[] = [];
+  readonly scriptRenames: string[] = [];
+  libraries: MockLibrary[] = [];
+  readonly libraryChanges: { method: 'PUT' | 'DELETE'; path: string; source?: string }[] = [];
   private nextScript = 1;
   private readonly page: Page;
   private socket: WebSocketRoute | null = null;
@@ -938,6 +959,11 @@ class MockGateway implements MockMarket {
         const found = script.versions.find((item) => item.version === Number(number));
         return found ? route.fulfill({ json: found }) : missing();
       }
+      if (method === 'PATCH') {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        this.scriptRenames.push(String(body.name));
+        script.name = String(body.name).trim();
+      }
       if (method === 'PUT') {
         const body = request.postDataJSON() as Record<string, unknown>;
         this.scriptSaves.push({ method: 'PUT', body });
@@ -951,6 +977,41 @@ class MockGateway implements MockMarket {
         }
       }
       return route.fulfill({ json: savedScript(script) });
+    });
+    // The libraries scripts import, as the gateway keeps them (apps/gateway/src/routes/libraries.ts).
+    await this.page.route(/\/api\/libraries(\/[^?]*)?$/, (route) => {
+      const request = route.request();
+      const method = request.method();
+      const parts = new URL(request.url()).pathname.split('/').slice(3).map(decodeURIComponent);
+      const byPath = (item: MockLibrary) => `${item.publisher}/${item.name}/${item.version}`;
+      if (parts.length === 0 && method === 'GET') {
+        const libraries = [...this.libraries].sort((a, b) => byPath(a).localeCompare(byPath(b)));
+        return route.fulfill({ json: { libraries } });
+      }
+      const [publisher = '', name = '', version = ''] = parts;
+      const path = `${publisher}/${name}/${version}`;
+      const others = this.libraries.filter(
+        (item) => byPath(item).toLowerCase() !== path.toLowerCase(),
+      );
+      if (method === 'PUT') {
+        const source = String((request.postDataJSON() as { source?: unknown }).source);
+        this.libraryChanges.push({ method: 'PUT', path, source });
+        const library = { publisher, name, version: Number(version), source, addedAt: NOW };
+        this.libraries = [...others, library];
+        return route.fulfill({ json: library });
+      }
+      if (method === 'DELETE') {
+        this.libraryChanges.push({ method: 'DELETE', path });
+        if (others.length === this.libraries.length) {
+          return route.fulfill({
+            status: 404,
+            json: { error: 'not_found', message: `There's no library ${path}` },
+          });
+        }
+        this.libraries = others;
+        return route.fulfill({ json: { libraries: others } });
+      }
+      return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'Bad request' } });
     });
     await this.page.route(/\/api\/bars\?/, (route) => {
       const params = new URL(route.request().url()).searchParams;
@@ -1205,7 +1266,10 @@ class MockGateway implements MockMarket {
           return;
         }
         const resolution = message.resolution ?? '1D';
-        if (message.channel === 'bars') this.barSubscriptions.push([message.id, resolution]);
+        if (message.channel === 'bars') {
+          this.barSubscriptions.push([message.id, resolution]);
+          this.barSymbols.push([message.symbol, resolution]);
+        }
         const last = (
           isStock ? this.stockBarsFor(resolution, message.session) : this.barsFor(resolution)
         ).at(-1);
@@ -1285,7 +1349,15 @@ export interface ChartState {
     kind: string;
     hidden: boolean;
     pane: number;
-    plots: { id: string; start: number; points: number; ghost: boolean; type: string }[];
+    /** Each drawn plot; for marks, how many it drew last. */
+    plots: {
+      id: string;
+      start: number;
+      points: number;
+      ghost: boolean;
+      type: string;
+      marks: number;
+    }[];
     levels: number;
     fills: { id: string; gradient: boolean }[];
     /** A script's backgrounds, by id. */
@@ -1294,6 +1366,8 @@ export interface ChartState {
     /** What stopped a script, if anything did. */
     error: string | null;
   }[];
+  /** The chart's bars a script's barcolor() colors: each one's index and body color. */
+  barColors: { index: number; color: string }[];
   panes: { height: number; stretch: number; autoScale: boolean }[];
 }
 

@@ -15,6 +15,7 @@ import { colorHex, hexColor, unpackColor, withTransparency } from '@tradingnerd/
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Dropdown } from '../chart/Dropdown';
+import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { CloseIcon } from '../toolbar/icons';
 import { definitionOf } from './definitions';
 import styles from './IndicatorSettingsDialog.module.css';
@@ -289,7 +290,16 @@ function InputControl({
         />
       );
     case 'string':
-      return (
+      return spec.multiline ? (
+        <textarea
+          id={id}
+          className={styles.textArea}
+          rows={3}
+          value={String(value)}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
         <input
           id={id}
           type="text"
@@ -299,6 +309,12 @@ function InputControl({
           onChange={(event) => onChange(event.target.value)}
         />
       );
+    case 'session':
+      return <SessionField id={id} value={String(value)} disabled={disabled} onChange={onChange} />;
+    case 'symbol':
+      return <SymbolField id={id} value={String(value)} disabled={disabled} onChange={onChange} />;
+    case 'time':
+      return <TimeField id={id} value={value as number} disabled={disabled} onChange={onChange} />;
     case 'color': {
       // A script's color input: its color here, its transparency kept as the script gave it.
       const packed = value as number;
@@ -324,19 +340,161 @@ function InputControl({
           onChange={(next) => onChange(Number(next))}
         />
       );
-    default:
+    case 'source':
       return (
         <Dropdown
           label={spec.title}
           value={String(value)}
-          options={(spec.kind === 'source' ? SOURCES : spec.options).map((option) => ({
+          options={SOURCES.map((option) => ({ value: option, label: option }))}
+          onChange={onChange}
+        />
+      );
+    case 'select':
+      return (
+        <Dropdown
+          label={spec.title}
+          value={String(value)}
+          options={spec.options.map((option, i) => ({
             value: option,
-            label: option,
+            label: spec.labels?.[i] ?? option,
           }))}
           onChange={onChange}
         />
       );
   }
+}
+
+/** "0930" ⇄ "09:30", for the time fields. */
+const toClock = (hhmm: string) => `${hhmm.slice(0, 2)}:${hhmm.slice(2, 4)}`;
+const fromClock = (clock: string) => clock.replace(':', '').padEnd(4, '0').slice(0, 4);
+
+/**
+ * A script's input.symbol: the symbol, a click away from Symbol Search to pick another, as
+ * TradingView's widget "mirrors the chart's Symbol Search widget" (Pine docs, Inputs: Symbol
+ * input); empty is the chart's own symbol (its look provisional, docs/SPEC.md §11).
+ */
+function SymbolField({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  disabled: boolean;
+  onChange(value: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        id={id}
+        type="button"
+        className={styles.symbolField}
+        disabled={disabled}
+        data-empty={value === '' || undefined}
+        onClick={() => setOpen(true)}
+      >
+        {value === '' ? "Chart's symbol" : value}
+      </button>
+      {open &&
+        createPortal(
+          <SymbolSearchDialog
+            mode="search"
+            onChoose={(symbol) => {
+              onChange(symbol);
+              setOpen(false);
+            }}
+            onClose={() => setOpen(false)}
+          />,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * input.session's field: its start and end times, as TradingView's Inputs tab shows a session
+ * (Pine docs, Inputs: Session input); the days after ":" are kept as the script gave them.
+ */
+function SessionField({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  disabled: boolean;
+  onChange(value: string): void;
+}) {
+  const match = /^(\d{4})-(\d{4})(:[1-7]+)?$/.exec(value);
+  const start = match?.[1] ?? '0000';
+  const end = match?.[2] ?? '0000';
+  const days = match?.[3] ?? '';
+  return (
+    <span className={styles.pair}>
+      <input
+        id={id}
+        type="time"
+        className={styles.text}
+        aria-label="Start"
+        value={toClock(start)}
+        disabled={disabled}
+        onChange={(event) => onChange(`${fromClock(event.target.value)}-${end}${days}`)}
+      />
+      <input
+        type="time"
+        className={styles.text}
+        aria-label="End"
+        value={toClock(end)}
+        disabled={disabled}
+        onChange={(event) => onChange(`${start}-${fromClock(event.target.value)}${days}`)}
+      />
+    </span>
+  );
+}
+
+/** input.time's field: a date and a time, in UTC (provisional: docs/SPEC.md §11). */
+function TimeField({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: number;
+  disabled: boolean;
+  onChange(value: number): void;
+}) {
+  const iso = Number.isFinite(value) ? new Date(value).toISOString() : '1970-01-01T00:00';
+  const date = iso.slice(0, 10);
+  const clock = iso.slice(11, 16);
+  const set = (nextDate: string, nextClock: string) => {
+    const ms = Date.parse(`${nextDate}T${nextClock}:00Z`);
+    if (Number.isFinite(ms)) onChange(ms);
+  };
+  return (
+    <span className={styles.pair}>
+      <input
+        id={id}
+        type="date"
+        className={styles.text}
+        aria-label="Date"
+        value={date}
+        disabled={disabled}
+        onChange={(event) => set(event.target.value, clock)}
+      />
+      <input
+        type="time"
+        className={styles.text}
+        aria-label="Time"
+        value={clock}
+        disabled={disabled}
+        onChange={(event) => set(date, event.target.value)}
+      />
+    </span>
+  );
 }
 
 /**
@@ -388,7 +546,12 @@ function NumberField({
   );
 }
 
-type StyleKind = 'line' | 'columns' | 'level' | 'fill' | 'gradient';
+/**
+ * A Style tab row's kind: marks (plotshape, plotchar, plotarrow) and candles (plotcandle, plotbar)
+ * show their color only; TradingView's menus for a mark's shape and place, and a candle's wick and
+ * border colors, come later (provisional, docs/SPEC.md §11).
+ */
+type StyleKind = 'line' | 'columns' | 'marks' | 'candles' | 'level' | 'fill' | 'gradient';
 
 function StyleTab({
   definition,

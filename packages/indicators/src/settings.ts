@@ -107,6 +107,15 @@ function sanitizeInput(spec: InputSpec, value: unknown): InputValue {
       return typeof value === 'boolean' ? value : spec.default;
     case 'string':
       return typeof value === 'string' ? value : spec.default;
+    case 'symbol':
+      // A ticker id, or "" for the chart's own symbol.
+      return typeof value === 'string' && value.length <= 200 ? value : spec.default;
+    case 'session':
+      return typeof value === 'string' && /^\d{4}-\d{4}(:[1-7]+)?$/.test(value)
+        ? value
+        : spec.default;
+    case 'time':
+      return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : spec.default;
     case 'color':
       return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 2 ** 32
         ? value

@@ -1,4 +1,4 @@
-import type { Bar } from '@tradingnerd/core';
+import { type Bar, menuLabel, parseResolution, STANDARD_INTERVALS } from '@tradingnerd/core';
 import { Change, Ema, type Kernel, Rma, Sma, Stdev, Vwma, Wma } from './kernels.ts';
 import {
   type IndicatorCalculator,
@@ -39,6 +39,21 @@ export type RsiSmoothing = (typeof RSI_SMOOTHING)[number];
 
 const withBands = (inputs: Inputs) => inputs.maType === 'SMA + Bollinger Bands';
 const smoothed = (inputs: Inputs) => inputs.maType !== 'None';
+
+/**
+ * The Timeframe menu's choices: "Chart" for the chart's own, then the intervals (no ticks), as a
+ * script's input.timeframe shows them (packages/chart, script.ts).
+ */
+export const TIMEFRAME_OPTIONS: readonly string[] = [
+  '',
+  ...STANDARD_INTERVALS.filter((tf) => !tf.endsWith('T')),
+];
+
+const timeframeLabel = (tf: string): string => {
+  if (tf === '') return 'Chart';
+  const resolution = parseResolution(tf);
+  return resolution ? menuLabel(resolution) : tf;
+};
 
 /** The smoothing average of the RSI, by type; VWMA weighs by the bar's volume. */
 interface Smoothing {
@@ -185,6 +200,24 @@ export const RSI: IndicatorDefinition = {
       step: 0.5,
       enabledWhen: withBands,
     },
+    // The built-in's code declares timeframe = "": its Calculation section's Timeframe and Wait
+    // for timeframe closes (TradingView's Help Center, multi-timeframe analysis; SPEC §11, 71).
+    {
+      id: 'timeframe',
+      kind: 'select',
+      title: 'Timeframe',
+      group: 'Calculation',
+      default: '',
+      options: TIMEFRAME_OPTIONS,
+      labels: TIMEFRAME_OPTIONS.map(timeframeLabel),
+    },
+    {
+      id: 'waitForClose',
+      kind: 'bool',
+      title: 'Wait for timeframe closes',
+      group: 'Calculation',
+      default: true,
+    },
   ],
   plots: [
     {
@@ -278,7 +311,11 @@ export const RSI: IndicatorDefinition = {
   ],
   legendName: () => 'RSI',
   // The built-in hides its other inputs from the legend (`display = display.none`).
-  legendInputs: (inputs) => `${inputs.length} ${inputs.source}`,
+  // A timeframe other than the chart's follows them, as Pine's default for a string input puts it
+  // in the status line (the v6 reference, input.*'s `display`); TradingView's own legend for it
+  // isn't documented: provisional (docs/SPEC.md §11).
+  legendInputs: (inputs) =>
+    [inputs.length, inputs.source, inputs.timeframe].filter((value) => value !== '').join(' '),
   create: (inputs, symbol) => new RsiCalculator(inputs, symbol),
   settledFrom(plotId, inputs) {
     const length = inputs.length as number;
