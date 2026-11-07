@@ -621,6 +621,8 @@ export interface MockMarket {
   readonly savedLcwKeys: string[];
   /** Every bars subscription the page has made: [id, resolution], in order. */
   readonly barSubscriptions: [string, string][];
+  /** The symbol and resolution of every bars subscription the page has made, in order. */
+  readonly barSymbols: [string, string][];
   /** Ids of subscriptions the page still holds. */
   activeSubscriptions(): string[];
   /** Query of every /api/bars request, in order. */
@@ -758,6 +760,7 @@ class MockGateway implements MockMarket {
   readonly flagSaves: FlagState[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
+  readonly barSymbols: [string, string][] = [];
   scripts: MockScript[] = [];
   readonly scriptSaves: { method: 'POST' | 'PUT'; body: Record<string, unknown> }[] = [];
   readonly scriptRenames: string[] = [];
@@ -1263,7 +1266,10 @@ class MockGateway implements MockMarket {
           return;
         }
         const resolution = message.resolution ?? '1D';
-        if (message.channel === 'bars') this.barSubscriptions.push([message.id, resolution]);
+        if (message.channel === 'bars') {
+          this.barSubscriptions.push([message.id, resolution]);
+          this.barSymbols.push([message.symbol, resolution]);
+        }
         const last = (
           isStock ? this.stockBarsFor(resolution, message.session) : this.barsFor(resolution)
         ).at(-1);

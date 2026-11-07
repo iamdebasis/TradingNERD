@@ -70,6 +70,12 @@ export type InputSpec =
   | (InputBase & { kind: 'session'; default: string })
   /** A script's input.time: a UNIX time in ms, picked as a date and a time in UTC. */
   | (InputBase & { kind: 'time'; default: number })
+  /**
+   * A script's input.symbol: a ticker id ("BINANCE:BTCUSDT"), picked with Symbol Search as the
+   * chart's symbol is (the Pine docs: "mirrors the chart's Symbol Search widget"); "" is the
+   * chart's own.
+   */
+  | (InputBase & { kind: 'symbol'; default: string })
   /** A script's color (input.color): Pine's packed color, red to transparency (packages/pine). */
   | (InputBase & { kind: 'color'; default: number })
   /** A script's input.int or input.float with options: a menu of numbers. */

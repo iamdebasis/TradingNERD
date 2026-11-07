@@ -45,8 +45,20 @@ describe('A script read as the chart reads a built-in (scriptDefinition)', () =>
       ['in_2', 'select', 'Type'],
       ['in_3', 'int', 'Length'],
       ['in_4', 'float', 'BB StdDev'],
+      // indicator(timeframe = "", timeframe_gaps = true)'s, in the Calculation section.
+      ['in_5', 'select', 'Timeframe'],
+      ['in_6', 'bool', 'Wait for timeframe closes'],
     ]);
-    expect(inputs).toEqual({ in_0: 14, in_1: 'close', in_2: 'SMA', in_3: 14, in_4: 2 });
+    expect(inputs).toEqual({
+      in_0: 14,
+      in_1: 'close',
+      in_2: 'SMA',
+      in_3: 14,
+      in_4: 2,
+      in_5: '',
+      in_6: true,
+    });
+    expect(definition.inputs[5]?.group).toBe('Calculation');
     expect(definition.inputs[4]?.enabledWhen?.(inputs)).toBe(false);
     expect(definition.inputs[4]?.enabledWhen?.({ ...inputs, in_2: 'SMA + Bollinger Bands' })).toBe(
       true,
@@ -58,6 +70,7 @@ describe('A script read as the chart reads a built-in (scriptDefinition)', () =>
     expect(definition.format).toEqual({ kind: 'decimals', decimals: 2 });
     expect(definition.legendName({ base: 'XRP', hasVolume: true })).toBe('RSI');
     expect(definition.legendInputs(inputs)).toBe('14 close');
+    expect(definition.legendInputs({ ...inputs, in_5: '1W' })).toBe('14 close 1W');
   });
 
   it('lists the built-in’s plots, levels and fills, by kind and place', () => {

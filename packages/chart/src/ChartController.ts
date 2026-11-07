@@ -12,7 +12,13 @@ import {
   UTC_ZONE,
 } from '@tradingnerd/core';
 import type { BarChange } from '@tradingnerd/indicators';
-import { DEFAULT_SYMBOL, hexColor } from '@tradingnerd/pine';
+import {
+  DEFAULT_SYMBOL,
+  hexColor,
+  type RequestFeed,
+  type RequestKey,
+  type ScriptSymbol,
+} from '@tradingnerd/pine';
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -107,6 +113,29 @@ export interface ChartInstrument {
 /** The chart's background as a Pine color (chart.bg_color); the default for other CSS. */
 const scriptColor = (css: string): number =>
   /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(css) ? hexColor(css) : DEFAULT_SYMBOL.background;
+
+/**
+ * What a Pine script knows of an instrument (syminfo.* and timeframe.*; docs/SPEC.md §6.17): the
+ * chart's, and each symbol a script's requests ask for (§6.18), the same way.
+ */
+export function instrumentSymbol(instrument: ChartInstrument, background: string): ScriptSymbol {
+  return {
+    ticker: instrument.ticker ?? '',
+    tickerid: instrument.tickerid ?? '',
+    description: instrument.description ?? '',
+    type: instrument.symbolType ?? 'crypto',
+    basecurrency: instrument.base ?? '',
+    currency: instrument.currency ?? '',
+    mintick: instrument.tickSize,
+    timeframe: formatResolution(instrument.resolution),
+    hasVolume: instrument.hasVolume ?? true,
+    timezone: instrument.exchangeTimezone ?? UTC_ZONE,
+    session: instrument.hours ?? 'regular',
+    clock: instrument.clock ?? UTC_CLOCK,
+    schedule: instrument.schedule ?? null,
+    background: scriptColor(background),
+  };
+}
 
 /** The pre/post-market price line: the price, its "Pre"/"Post" tag and color. */
 export type ExtendedPrice = Omit<ExtendedPriceState, 'text'>;
@@ -412,25 +441,7 @@ export class ChartController {
     });
     this.indicators.setSymbol(
       { base: instrument.base ?? '', hasVolume: instrument.hasVolume ?? true },
-      {
-        symbol: {
-          ticker: instrument.ticker ?? '',
-          tickerid: instrument.tickerid ?? '',
-          description: instrument.description ?? '',
-          type: instrument.symbolType ?? 'crypto',
-          basecurrency: instrument.base ?? '',
-          currency: instrument.currency ?? '',
-          mintick: tickSize,
-          timeframe: formatResolution(resolution),
-          hasVolume: instrument.hasVolume ?? true,
-          timezone: instrument.exchangeTimezone ?? UTC_ZONE,
-          session: instrument.hours ?? 'regular',
-          clock: instrument.clock ?? UTC_CLOCK,
-          schedule: instrument.schedule ?? null,
-          background: scriptColor(this.theme.background),
-        },
-        priceDecimals: precision,
-      },
+      { symbol: instrumentSymbol(instrument, this.theme.background), priceDecimals: precision },
     );
     this.chart.applyOptions({
       localization: {
@@ -538,6 +549,34 @@ export class ChartController {
   /** Each logging script's Pine Logs, in the legend's order (IndicatorLayer.logs). */
   scriptLogs(): ScriptLogs[] {
     return this.indicators.logs();
+  }
+
+  /**
+   * Where scripts' requests get their data from (docs/SPEC.md §6.18): the app's loader. The
+   * scripts run again with it.
+   */
+  setRequestFeed(feed: RequestFeed | undefined): void {
+    this.indicators.setFeed(feed);
+    this.recolorBars();
+  }
+
+  /** The contexts the scripts on the chart ask for: all they use, and those not loaded yet. */
+  scriptRequests(): { used: RequestKey[]; missing: RequestKey[] } {
+    return this.indicators.requests();
+  }
+
+  /** The scripts waiting for their requests' data, by id (their legend rows say so). */
+  waitingIndicators(): Set<string> {
+    return this.indicators.waiting();
+  }
+
+  /**
+   * A requested context's data changed: the scripts that request run again, afresh after a page
+   * of its history arrived, or their live bar after a live update.
+   */
+  requestsChanged(kind: 'history' | 'live'): void {
+    this.indicators.refreshRequests(kind);
+    this.recolorBars();
   }
 
   /**

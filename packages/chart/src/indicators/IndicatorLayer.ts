@@ -19,6 +19,9 @@ import {
   compileCached,
   DEFAULT_SYMBOL,
   type LogEntry,
+  type RequestFeed,
+  type RequestKey,
+  requestKeyText,
   type ScriptProgram,
 } from '@tradingnerd/pine';
 import {
@@ -63,6 +66,7 @@ import {
   withOpacity,
 } from './model';
 import { type ScriptContext, ScriptLayerRun, scriptDefinition } from './script';
+import { builtinTimeframe, TimeframedRun } from './timeframed';
 
 /** The overlay scale Volume and its MA share at the bottom of the price pane. */
 const VOLUME_SCALE = 'tn-volume';
@@ -74,7 +78,7 @@ const BREAKS = new Set(['linebr', 'steplinebr', 'areabr']);
 const POINTS = new Set(['circles', 'cross']);
 
 /** What the layer reads of a run: a built-in's IndicatorRun or a script's ScriptLayerRun. */
-type LayerRun = IndicatorRun | ScriptLayerRun;
+type LayerRun = IndicatorRun | ScriptLayerRun | TimeframedRun;
 
 /**
  * What scripts compile with (docs/SPEC.md §5.17): the code of the libraries they import, and
@@ -173,8 +177,19 @@ class IndicatorView {
     return this.run instanceof ScriptLayerRun ? this.run : null;
   }
 
-  /** Why nothing is drawn, if something stopped the script. */
+  /** A built-in on another timeframe (its Timeframe input), or null. */
+  get timeframed(): TimeframedRun | null {
+    return this.run instanceof TimeframedRun ? this.run : null;
+  }
+
+  /** What asks for data from the request feed: a script, or a built-in on another timeframe. */
+  get requesting(): ScriptLayerRun | TimeframedRun | null {
+    return this.script ?? this.timeframed;
+  }
+
+  /** Why nothing is drawn, if something stopped the script (or the built-in's timeframe). */
   get error(): string | null {
+    if (this.timeframed?.invalid) return 'This timeframe has no data for the symbol';
     return this.compileError ?? this.script?.run.error?.message ?? null;
   }
 }
@@ -290,6 +305,8 @@ export class IndicatorLayer {
   private barColorChanges: 'all' | Set<number> = new Set();
   /** The libraries scripts import. */
   private libraries: ScriptLibraries = { revision: '' };
+  /** Where scripts' requests get their data (the app's loader); none: they wait. */
+  private feed: RequestFeed | undefined;
 
   constructor(chart: IChartApi, theme: ChartTheme, font: string) {
     this.chart = chart;
@@ -390,20 +407,86 @@ export class IndicatorLayer {
     this.times = times;
     for (const view of this.views) {
       if (view.indicator.hidden || view.compileError) continue;
-      const stopped = view.error !== null;
-      const before = view.starts;
-      const changed = view.run.update(bars, change, index);
-      // A script's warm-up starts can move with a new bar; a stopped script draws nothing.
-      if (view.script) this.refreshStarts(view);
-      const moved = view.starts.some((start, p) => start !== before[p]);
-      const all = changed === 'all' || moved || (view.error !== null) !== stopped;
-      this.noteBarColors(view, all ? 'all' : changed);
-      if (all || this.needsFullPush(view)) {
+      this.updateView(view, change, index);
+    }
+  }
+
+  private updateView(view: IndicatorView, change: BarChange, index: number): void {
+    const stopped = view.error !== null;
+    const before = view.starts;
+    const changed = view.run.update(this.bars, change, index);
+    // A script's warm-up starts can move with a new bar, as a built-in's on another timeframe
+    // can; a stopped script draws nothing.
+    if (view.requesting) this.refreshStarts(view);
+    const moved = view.starts.some((start, p) => start !== before[p]);
+    const all = changed === 'all' || moved || (view.error !== null) !== stopped;
+    this.noteBarColors(view, all ? 'all' : changed);
+    if (all || this.needsFullPush(view)) {
+      this.push(view);
+      return;
+    }
+    for (const i of changed) this.pushPoint(view, i);
+    this.refreshDecorations(view);
+  }
+
+  /**
+   * Where scripts' requests get their data: the app's loader (docs/SPEC.md §6.18). The scripts
+   * run again with it.
+   */
+  setFeed(feed: RequestFeed | undefined): void {
+    if (feed === this.feed) return;
+    this.feed = feed;
+    for (const view of this.views) {
+      if (!view.requesting || view.indicator.hidden || view.compileError) continue;
+      view.run = this.makeRun(view.indicator, view.definition, view.program);
+      this.runBars(view);
+      this.refreshStarts(view);
+      this.push(view);
+    }
+    this.barColorChanges = 'all';
+  }
+
+  /** The contexts the scripts on the chart ask for: all they use, and those not loaded yet. */
+  requests(): { used: RequestKey[]; missing: RequestKey[] } {
+    const used = new Map<string, RequestKey>();
+    const missing = new Map<string, RequestKey>();
+    for (const view of this.views) {
+      const run = view.requesting;
+      if (!run || view.indicator.hidden || view.compileError) continue;
+      for (const key of run.requested) used.set(requestKeyText(key), key);
+      for (const key of run.missing) missing.set(requestKeyText(key), key);
+    }
+    return { used: [...used.values()], missing: [...missing.values()] };
+  }
+
+  /** The scripts waiting for their requests' data, by id: their legend rows say so. */
+  waiting(): Set<string> {
+    const ids = new Set<string>();
+    for (const view of this.views) {
+      if (view.indicator.hidden || view.compileError || view.error !== null) continue;
+      if (view.requesting?.waiting) ids.add(view.indicator.id);
+    }
+    return ids;
+  }
+
+  /**
+   * A requested context's data changed: the scripts that request run again, afresh after a page
+   * of its history arrived ('history'), or just their live bar after a live update ('live').
+   */
+  refreshRequests(kind: 'history' | 'live'): void {
+    const last = this.bars.length - 1;
+    for (const view of this.views) {
+      const run = view.requesting;
+      if (!run || view.indicator.hidden || view.compileError) continue;
+      if (run.requested.length === 0) continue;
+      if (kind === 'history' || run.waiting || last < 0) {
+        this.runBars(view);
+        this.refreshStarts(view);
         this.push(view);
+        this.barColorChanges = 'all';
         continue;
       }
-      for (const i of changed) this.pushPoint(view, i);
-      this.refreshDecorations(view);
+      this.updateView(view, 'tick', last);
     }
   }
 
@@ -673,13 +756,26 @@ export class IndicatorLayer {
     definition: IndicatorDefinition,
     program: ScriptProgram | null,
   ): LayerRun {
-    if (program)
-      return new ScriptLayerRun(program, indicator.settings.inputs, this.context, this.symbol);
+    if (program) {
+      return new ScriptLayerRun(
+        program,
+        indicator.settings.inputs,
+        this.context,
+        this.symbol,
+        this.feed,
+      );
+    }
     if (definition.kind === 'script') {
       // A script that doesn't compile: an empty run, never computed.
       return new IndicatorRun(indicatorDefinition('volume'), {}, this.symbol);
     }
-    return new IndicatorRun(definition, indicator.settings.inputs, this.symbol);
+    const { inputs } = indicator.settings;
+    const run = new IndicatorRun(definition, inputs, this.symbol);
+    // A built-in on another timeframe (its Timeframe input, docs/SPEC.md §11 item 71).
+    const timeframe = builtinTimeframe(inputs, this.context.symbol);
+    if (!timeframe) return run;
+    const { key, gaps } = timeframe;
+    return new TimeframedRun(run, key, gaps, this.context.symbol, this.feed, this.symbol);
   }
 
   private runBars(view: IndicatorView): void {
@@ -972,6 +1068,18 @@ export class IndicatorLayer {
       return;
     }
     const { inputs } = view.indicator.settings;
+    const timeframed = view.timeframed;
+    if (timeframed) {
+      // Its warm-up in its own timeframe's bars, then where that falls on the chart's.
+      view.starts = view.definition.plots.map((spec) =>
+        timeframed.waiting
+          ? Number.POSITIVE_INFINITY
+          : timeframed.chartStart(
+              plotStart(view.definition, spec.id, inputs, timeframed.fromListing),
+            ),
+      );
+      return;
+    }
     view.starts = view.definition.plots.map((spec) =>
       plotStart(view.definition, spec.id, inputs, this.fromListing),
     );

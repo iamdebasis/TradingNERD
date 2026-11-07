@@ -15,6 +15,7 @@ import { colorHex, hexColor, unpackColor, withTransparency } from '@tradingnerd/
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Dropdown } from '../chart/Dropdown';
+import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { CloseIcon } from '../toolbar/icons';
 import { definitionOf } from './definitions';
 import styles from './IndicatorSettingsDialog.module.css';
@@ -310,6 +311,8 @@ function InputControl({
       );
     case 'session':
       return <SessionField id={id} value={String(value)} disabled={disabled} onChange={onChange} />;
+    case 'symbol':
+      return <SymbolField id={id} value={String(value)} disabled={disabled} onChange={onChange} />;
     case 'time':
       return <TimeField id={id} value={value as number} disabled={disabled} onChange={onChange} />;
     case 'color': {
@@ -364,6 +367,51 @@ function InputControl({
 /** "0930" ⇄ "09:30", for the time fields. */
 const toClock = (hhmm: string) => `${hhmm.slice(0, 2)}:${hhmm.slice(2, 4)}`;
 const fromClock = (clock: string) => clock.replace(':', '').padEnd(4, '0').slice(0, 4);
+
+/**
+ * A script's input.symbol: the symbol, a click away from Symbol Search to pick another, as
+ * TradingView's widget "mirrors the chart's Symbol Search widget" (Pine docs, Inputs: Symbol
+ * input); empty is the chart's own symbol (its look provisional, docs/SPEC.md §11).
+ */
+function SymbolField({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  disabled: boolean;
+  onChange(value: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        id={id}
+        type="button"
+        className={styles.symbolField}
+        disabled={disabled}
+        data-empty={value === '' || undefined}
+        onClick={() => setOpen(true)}
+      >
+        {value === '' ? "Chart's symbol" : value}
+      </button>
+      {open &&
+        createPortal(
+          <SymbolSearchDialog
+            mode="search"
+            onChoose={(symbol) => {
+              onChange(symbol);
+              setOpen(false);
+            }}
+            onClose={() => setOpen(false)}
+          />,
+          document.body,
+        )}
+    </>
+  );
+}
 
 /**
  * input.session's field: its start and end times, as TradingView's Inputs tab shows a session

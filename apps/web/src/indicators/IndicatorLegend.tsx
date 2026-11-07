@@ -18,6 +18,9 @@ import {
   TrashIcon,
 } from './icons';
 
+/** No script waiting. */
+const NONE: ReadonlySet<string> = new Set();
+
 /** What a row's buttons do. */
 export interface RowActions {
   onHide(id: string, hidden: boolean): void;
@@ -130,6 +133,7 @@ export function IndicatorRow({
   values,
   actions,
   error,
+  loading = false,
 }: {
   indicator: ChartIndicator;
   symbol: SymbolContext;
@@ -137,6 +141,8 @@ export function IndicatorRow({
   actions: RowActions;
   /** What stopped a script, if something did: it draws nothing and says why. */
   error?: string | undefined;
+  /** A script waiting for its requests' data (docs/SPEC.md §6.18): it draws nothing yet. */
+  loading?: boolean;
 }) {
   const definition = definitionOf(indicator);
   const name = definition.legendName(symbol);
@@ -176,6 +182,8 @@ export function IndicatorRow({
         <span className={styles.error} role="img" aria-label={`Error: ${error}`} title={error}>
           <ErrorIcon />
         </span>
+      ) : loading && !indicator.hidden ? (
+        <span className={styles.loading} role="status" aria-label="Loading" title="Loading" />
       ) : indicator.hidden ? (
         <button
           type="button"
@@ -254,6 +262,7 @@ export function PriceLegendRows({
   folded,
   onFold,
   errors,
+  waiting = NONE,
   ...row
 }: {
   indicators: readonly ChartIndicator[];
@@ -263,6 +272,8 @@ export function PriceLegendRows({
   values: LegendValues;
   actions: RowActions;
   errors: ReadonlyMap<string, string>;
+  /** The scripts waiting for their requests' data. */
+  waiting?: ReadonlySet<string>;
 }) {
   if (indicators.length === 0) return null;
   return (
@@ -273,6 +284,7 @@ export function PriceLegendRows({
             key={indicator.id}
             indicator={indicator}
             error={errors.get(indicator.id)}
+            loading={waiting.has(indicator.id)}
             {...row}
           />
         ))}
@@ -301,6 +313,7 @@ export function PaneLegends({
   panes,
   indicators,
   errors,
+  waiting = NONE,
   ...row
 }: {
   panes: readonly PaneBox[];
@@ -309,6 +322,7 @@ export function PaneLegends({
   values: LegendValues;
   actions: RowActions;
   errors: ReadonlyMap<string, string>;
+  waiting?: ReadonlySet<string>;
 }) {
   return (
     <>
@@ -322,7 +336,12 @@ export function PaneLegends({
             style={{ top: pane.top }}
             data-pane-legend={indicator.id}
           >
-            <IndicatorRow indicator={indicator} error={errors.get(indicator.id)} {...row} />
+            <IndicatorRow
+              indicator={indicator}
+              error={errors.get(indicator.id)}
+              loading={waiting.has(indicator.id)}
+              {...row}
+            />
           </div>
         );
       })}

@@ -31,6 +31,10 @@ describe('settings', () => {
       maType: 'SMA',
       maLength: 14,
       bbMult: 2,
+      // The Calculation section's two inputs (docs/SPEC.md §6.18): the chart's timeframe, and
+      // waiting for that timeframe's closes.
+      timeframe: '',
+      waitForClose: true,
     });
     expect(defaultSettings(RSI).styles.upper).toMatchObject({ value: 70, dash: 'dashed' });
     expect(defaultSettings(VOLUME).inputs).toEqual({ maLength: 20, previousClose: false });
@@ -38,7 +42,15 @@ describe('settings', () => {
 
   it('from storage fall back to the defaults wherever they are missing or wrong', () => {
     const settings = sanitizeSettings(RSI, {
-      inputs: { length: 21.6, source: 'hlc3', maType: 'Kalman', maLength: -5, bbMult: 'x' },
+      inputs: {
+        length: 21.6,
+        source: 'hlc3',
+        maType: 'Kalman',
+        maLength: -5,
+        bbMult: 'x',
+        timeframe: '7Q',
+        waitForClose: 'no',
+      },
       styles: { rsi: { color: '#abcdef', opacity: 3, width: 9 }, upper: { value: 80 } },
     });
     expect(settings.inputs).toEqual({
@@ -47,6 +59,8 @@ describe('settings', () => {
       maType: 'SMA',
       maLength: 1,
       bbMult: 2,
+      timeframe: '',
+      waitForClose: true,
     });
     expect(settings.styles.rsi).toEqual({ visible: true, color: '#ABCDEF', opacity: 1, width: 1 });
     expect(settings.styles.upper?.value).toBe(80);

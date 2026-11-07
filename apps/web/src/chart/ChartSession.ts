@@ -1,4 +1,10 @@
-import type { ChartController, ExtendedPrice, HoverInfo, SessionShading } from '@tradingnerd/chart';
+import type {
+  ChartController,
+  ChartInstrument,
+  ExtendedPrice,
+  HoverInfo,
+  SessionShading,
+} from '@tradingnerd/chart';
 import {
   type Bar,
   isIntraday,
@@ -39,6 +45,39 @@ function pineType(kind: SymbolKind): string {
     default:
       return 'stock';
   }
+}
+
+/**
+ * A symbol as the chart shows it, and as a script knows it: the chart's own, and each symbol a
+ * script's requests ask for (requestLoader.ts), the same way. `timezone` is the time axis's;
+ * `schedule` the market's calendar, made from the symbol's when not given.
+ */
+export function instrumentOf(
+  info: SymbolInfo,
+  resolution: Resolution,
+  hours: SessionHours,
+  timezone: string,
+  schedule: MarketSchedule | null = info.schedule ? new MarketSchedule(info.schedule) : null,
+): ChartInstrument {
+  return {
+    pricePrecision: info.pricePrecision,
+    tickSize: info.tickSize,
+    ...(info.format ? { format: info.format } : {}),
+    resolution,
+    timezone,
+    exchangeTimezone: info.timezone,
+    ...(schedule ? { schedule } : {}),
+    hours,
+    clock: schedule ? sessionClock(schedule, hours) : UTC_CLOCK,
+    delayMs: info.delayMs,
+    base: volumeUnit(info),
+    hasVolume: hasRealVolume(info),
+    ticker: info.ticker,
+    tickerid: info.id,
+    description: info.description,
+    symbolType: pineType(info.type),
+    currency: info.quote,
+  };
 }
 
 export type LegendStatus = 'loading' | 'live' | 'reconnecting' | 'error';
@@ -164,26 +203,9 @@ export class ChartSession {
       );
       if (this.disposed) return;
       // Swap the chart over in one go: the previous interval stays up until this one is ready.
-      chart.setInstrument({
-        pricePrecision: info.pricePrecision,
-        tickSize: info.tickSize,
-        ...(info.format ? { format: info.format } : {}),
-        resolution,
-        timezone:
-          this.settings.timezone === 'exchange' ? info.timezone : intlZone(this.settings.timezone),
-        exchangeTimezone: info.timezone,
-        ...(this.schedule ? { schedule: this.schedule } : {}),
-        hours: this.hours,
-        clock: this.schedule ? sessionClock(this.schedule, this.hours) : UTC_CLOCK,
-        delayMs: info.delayMs,
-        base: volumeUnit(info),
-        hasVolume: hasRealVolume(info),
-        ticker: info.ticker,
-        tickerid: info.id,
-        description: info.description,
-        symbolType: pineType(info.type),
-        currency: info.quote,
-      });
+      const timezone =
+        this.settings.timezone === 'exchange' ? info.timezone : intlZone(this.settings.timezone);
+      chart.setInstrument(instrumentOf(info, resolution, this.hours, timezone, this.schedule));
       chart.setSessionShading(this.shading());
       chart.setExtendedPrice(null);
       chart.setBars(bars, fromListing);

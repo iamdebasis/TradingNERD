@@ -2,7 +2,7 @@ import { ChartController } from '@tradingnerd/chart';
 import type { SymbolInfo } from '@tradingnerd/core';
 import type { SymbolContext } from '@tradingnerd/indicators';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { marketApi } from '../data/api';
+import { marketApi, searchApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
 import { gestureSettings } from '../gestures/gestureSettings';
 import { definitionOf } from '../indicators/definitions';
@@ -26,6 +26,7 @@ import { ChartSession, type LegendView } from './ChartSession';
 import { chartSettings, useChartSettings } from './chartSettings';
 import { toChartTheme } from './chartTheme';
 import { Legend } from './Legend';
+import { RequestLoader } from './requestLoader';
 
 const chartTheme = toChartTheme(darkTheme);
 
@@ -42,6 +43,19 @@ declare global {
 
 /** Until the symbol resolves, Volume's title names no coin. */
 const NO_SYMBOL: SymbolContext = { base: '', hasVolume: true };
+
+/** Live updates of scripts' requested data run their live bar at most this often, ms. */
+const REQUEST_LIVE_MS = 250;
+
+/**
+ * A ticker a script requests without its exchange ("AAPL"), as TradingView picks one: the
+ * search's first listing of that exact ticker; null when there's none.
+ */
+async function findSymbol(ticker: string, signal: AbortSignal): Promise<string | null> {
+  const { matches } = await searchApi.search({ query: ticker, exchange: null, offset: 0 }, signal);
+  const exact = matches.find((match) => match.ticker.toUpperCase() === ticker.toUpperCase());
+  return exact?.listings[0]?.id ?? null;
+}
 
 /**
  * The chart panel. One chart lives as long as the pane; each symbol or interval gets its own
@@ -78,6 +92,12 @@ export function ChartPane({
   const [editing, setEditing] = useState<string | null>(null);
   /** Why each script on the chart draws nothing, for its legend row. */
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  /** The scripts waiting for their requests' data, for their legend rows. */
+  const [waiting, setWaiting] = useState<ReadonlySet<string>>(new Set());
+  /** Brings the scripts' requests, errors and logs up to date (set once the loader is). */
+  const sync = useRef<() => void>(() => {});
+  const resolutionRef = useRef(resolution);
+  resolutionRef.current = resolution;
   /** A Pine Logs entry's bar, brought into view: its time over it for a moment. */
   const [barTip, setBarTip] = useState<{ x: number; label: string } | null>(null);
 
@@ -88,10 +108,12 @@ export function ChartPane({
       showBar: (bar, previous, index) => {
         legend.current?.showBar(bar, previous, index);
         values.show(index);
-        // A script can stop on a live bar: its row says so. Its logs may have grown too.
+        // A script can stop on a live bar: its row says so. Its logs may have grown too, and
+        // its requests may ask for more.
         const now = values.chart?.indicatorErrors();
         if (now) setErrors((before) => (sameErrors(before, now) ? before : now));
         if (values.chart) logsStore.setScripts(values.chart.scriptLogs());
+        sync.current();
       },
       setBook: (bid, ask) => legend.current?.setBook(bid, ask),
       setStatus: (status, message) => legend.current?.setStatus(status, message),
@@ -127,6 +149,66 @@ export function ChartPane({
     };
   }, [values]);
 
+  // Scripts' requests (docs/SPEC.md §6.18): the data they ask for loads from the gateway as the
+  // chart's own; they run again when it's in, and their live bar when it moves.
+  useEffect(() => {
+    if (!chart) return;
+    let frame = 0;
+    let timer = 0;
+    let pending: 'history' | 'live' | null = null;
+    let lastLive = 0;
+    const refresh = () => {
+      frame = 0;
+      const kind = pending;
+      pending = null;
+      if (!kind) return;
+      if (kind === 'live') lastLive = Date.now();
+      chart.requestsChanged(kind);
+      values.refresh();
+      // A context that doesn't exist stops its script only now: its row says so.
+      const now = chart.indicatorErrors();
+      setErrors((before) => (sameErrors(before, now) ? before : now));
+      logsStore.setScripts(chart.scriptLogs());
+      sync.current();
+    };
+    const schedule = (kind: 'history' | 'live') => {
+      pending = kind === 'history' || pending === 'history' ? 'history' : 'live';
+      if (frame || timer) return;
+      const wait = pending === 'live' ? REQUEST_LIVE_MS - (Date.now() - lastLive) : 0;
+      if (wait > 0) {
+        timer = window.setTimeout(() => {
+          timer = 0;
+          frame = requestAnimationFrame(refresh);
+        }, wait);
+      } else frame = requestAnimationFrame(refresh);
+    };
+    const loader = new RequestLoader({
+      api: marketApi,
+      feed: gateway,
+      background: chartTheme.background,
+      onHistory: () => schedule('history'),
+      onLive: () => schedule('live'),
+      find: findSymbol,
+    });
+    chart.setRequestFeed(loader);
+    sync.current = () => {
+      const { missing, used } = chart.scriptRequests();
+      loader.want(missing, used, {
+        firstBarTime: chart.firstBarTime(),
+        timeframe: resolutionRef.current,
+      });
+      const now = chart.waitingIndicators();
+      setWaiting((before) => (sameSet(before, now) ? before : now));
+    };
+    sync.current();
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      sync.current = () => {};
+      loader.dispose();
+    };
+  }, [chart, gateway, values]);
+
   // The indicators on the chart follow the store: added, changed, hidden and removed.
   useEffect(() => {
     chart?.setIndicators(indicators.list);
@@ -134,6 +216,7 @@ export function ChartPane({
     if (!chart) return;
     setErrors(chart.indicatorErrors());
     logsStore.setScripts(chart.scriptLogs());
+    sync.current();
   }, [chart, indicators.list, values]);
 
   // A Pine Logs entry's Scroll to bar: the bar comes into view, then its time shows over it for a
@@ -168,6 +251,7 @@ export function ChartPane({
     values.refresh();
     setErrors(chart.indicatorErrors());
     logsStore.setScripts(chart.scriptLogs());
+    sync.current();
   }, [chart, libraries.revision, values]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new key, session or time zone restarts the session
@@ -241,6 +325,7 @@ export function ChartPane({
           values={values}
           actions={actions}
           errors={errors}
+          waiting={waiting}
         />
       </Legend>
       <PaneLegends
@@ -250,6 +335,7 @@ export function ChartPane({
         values={values}
         actions={actions}
         errors={errors}
+        waiting={waiting}
       />
       {editing !== null && (
         <IndicatorSettingsDialog id={editing} onClose={() => setEditing(null)} />
@@ -266,3 +352,6 @@ export function ChartPane({
 
 const sameErrors = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>) =>
   a.size === b.size && [...a].every(([id, message]) => b.get(id) === message);
+
+const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+  a.size === b.size && [...a].every((id) => b.has(id));

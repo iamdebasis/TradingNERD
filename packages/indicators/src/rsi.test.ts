@@ -190,6 +190,8 @@ describe("TradingView's RSI", () => {
     expect(indicatorTitle(RSI, inputs, XRP)).toBe('RSI 14 close');
     expect(RSI.legendName(XRP)).toBe('RSI');
     expect(RSI.legendInputs({ ...inputs, length: 21, source: 'hl2' })).toBe('21 hl2');
+    // On another timeframe, it follows them (provisional, docs/SPEC.md §11).
+    expect(RSI.legendInputs({ ...inputs, timeframe: '1W' })).toBe('14 close 1W');
   });
 
   it("fills beyond 70 and 30 with the built-in's gradients, between the RSI and 50", () => {

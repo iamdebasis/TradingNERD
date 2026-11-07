@@ -29,11 +29,14 @@ export { KEYWORDS, versionIn } from './lexer.ts';
 export {
   alignBar,
   type ContextData,
+  type CurrencyLeg,
   canonicalTimeframe,
+  isLower,
   MAX_REQUESTS,
   type RequestFeed,
   type RequestKey,
   requestKeyText,
+  timesOf,
 } from './requests.ts';
 export { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
 export {

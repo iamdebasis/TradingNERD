@@ -7,6 +7,7 @@ export {
   DEFAULT_RIGHT_OFFSET,
   type ExtendedPrice,
   type HoverInfo,
+  instrumentSymbol,
 } from './ChartController';
 export {
   formatCountdown,

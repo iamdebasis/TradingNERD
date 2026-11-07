@@ -20,6 +20,8 @@ import {
   colorOpacity,
   type InputDef,
   type OutputRef,
+  type RequestFeed,
+  type RequestKey,
   type ScriptDescription,
   type ScriptMark,
   type ScriptPlot,
@@ -172,8 +174,10 @@ function inputSpec(
         options: input.options as string[],
         labels: input.optionTitles ?? (input.options as string[]),
       };
+    case 'symbol':
+      // Picked with Symbol Search (docs/SPEC.md §5.17, §6.18).
+      return { ...base, kind: 'symbol', default: String(input.defval ?? '') };
     default:
-      // input.symbol, as text until data from other symbols comes (docs/SPEC.md §5.17).
       return { ...base, kind: 'string', default: String(input.defval ?? '') };
   }
 }
@@ -191,7 +195,7 @@ const edgeId = (ref: OutputRef) => (ref.output === 'plot' ? plotId(ref.index) : 
 /** An input's value as the legend writes it ("14", "close"); null for one it doesn't show. */
 function legendValue(value: Value): string | null {
   if (typeof value === 'number') return Number.isNaN(value) ? null : String(value);
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return value === '' ? null : value;
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return null;
 }
@@ -454,9 +458,29 @@ export class ScriptLayerRun {
   readonly growing: readonly boolean[] = [];
   private fromListing = false;
 
-  constructor(program: ScriptProgram, inputs: Inputs, context: ScriptContext, symbol: unknown) {
-    this.run = new ScriptRun(program, scriptInputs(program, inputs), context.symbol);
+  constructor(
+    program: ScriptProgram,
+    inputs: Inputs,
+    context: ScriptContext,
+    symbol: unknown,
+    feed?: RequestFeed,
+  ) {
+    this.run = new ScriptRun(program, scriptInputs(program, inputs), context.symbol, feed);
     this.symbol = symbol;
+  }
+
+  /** Whether its requests' data hasn't all loaded yet: it draws nothing meanwhile. */
+  get waiting(): boolean {
+    return this.run.waiting;
+  }
+
+  /** The contexts its requests use, and those not loaded yet (docs/SPEC.md §6.18). */
+  get requested(): readonly RequestKey[] {
+    return this.run.requested;
+  }
+
+  get missing(): readonly RequestKey[] {
+    return this.run.missing;
   }
 
   get length(): number {
