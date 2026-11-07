@@ -22,6 +22,10 @@ const offlineExchanges = Object.fromEntries(
   ]),
 );
 offlineExchanges.OKX_BUSINESS_STREAM_URL = nowhere.stream;
+// Binance's open interest: its two futures APIs and its archive (Bybit's and OKX's use the above).
+offlineExchanges.BINANCE_FUTURES_URL = nowhere.rest;
+offlineExchanges.BINANCE_COINM_URL = nowhere.rest;
+offlineExchanges.BINANCE_ARCHIVE_URL = nowhere.rest;
 // US stocks: Alpaca's hosts and Nasdaq's symbol directory, unreachable too.
 offlineExchanges.ALPACA_DATA_URL = nowhere.rest;
 offlineExchanges.ALPACA_TRADING_URL = nowhere.rest;

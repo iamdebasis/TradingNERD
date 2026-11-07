@@ -21,6 +21,7 @@ import {
   UTC_CLOCK,
 } from '@tradingnerd/core';
 import { FormulaExchange } from '../formula/FormulaExchange.ts';
+import { isOiTicker } from '../openinterest/symbols.ts';
 import { type Coalescer, createCoalescer } from './coalesce.ts';
 import { Feed } from './feed.ts';
 import { fetchHistory, fetchSlices, type History, pageBack } from './history.ts';
@@ -62,6 +63,11 @@ export interface MarketServiceOptions {
   retryDelayMs?: (attempt: number) => number;
   /** Keeps recent history pages (default); false fetches every page from the exchange. */
   cacheHistory?: boolean;
+  /**
+   * The exchanges' open interest symbols ("BINANCE:BTCUSDT.P_OI"), by exchange: a ticker ending
+   * in _OI goes to these instead of the exchange's spot adapter (docs/SPEC.md §6.18).
+   */
+  openInterest?: readonly ExchangeAdapter[];
 }
 
 export const MAX_COUNT_BACK = 5_000;
@@ -82,6 +88,7 @@ type IntervalPlan =
  */
 export class MarketService {
   private readonly exchanges = new Map<string, ExchangeAdapter>();
+  private readonly openInterest = new Map<string, ExchangeAdapter>();
   private readonly barFeeds = new Map<string, BarFeed<unknown>>();
   private readonly tickHistory = new TickHistory();
   private readonly bookFeeds = new Map<string, BookFeed>();
@@ -95,6 +102,7 @@ export class MarketService {
 
   constructor(adapters: readonly ExchangeAdapter[], options: MarketServiceOptions = {}) {
     for (const adapter of adapters) this.exchanges.set(adapter.id, adapter);
+    for (const adapter of options.openInterest ?? []) this.openInterest.set(adapter.id, adapter);
     this.emitIntervalMs = options.emitIntervalMs ?? 50;
     this.quoteIntervalMs = options.quoteIntervalMs ?? 250;
     this.retryDelayMs = options.retryDelayMs ?? ((n) => Math.min(1_000 * 2 ** n, 30_000));
@@ -254,7 +262,9 @@ export class MarketService {
     for (const feed of [...this.quoteFeeds.values()]) feed.close();
     for (const feed of [...this.barFeeds.values(), ...this.bookFeeds.values()]) feed.close();
     await Promise.all([...this.formulas.values()].map((adapter) => adapter.close()));
-    await Promise.all([...this.exchanges.values()].map((adapter) => adapter.close()));
+    await Promise.all(
+      [...this.exchanges.values(), ...this.openInterest.values()].map((adapter) => adapter.close()),
+    );
   }
 
   private route(symbolId: string) {
@@ -272,7 +282,10 @@ export class MarketService {
     if (!parsed) {
       throw new MarketError('bad_request', `"${symbolId}" is not a symbol like BINANCE:XRPUSDT`);
     }
-    const adapter = this.exchanges.get(parsed.exchange);
+    const openInterest = isOiTicker(parsed.ticker)
+      ? this.openInterest.get(parsed.exchange)
+      : undefined;
+    const adapter = openInterest ?? this.exchanges.get(parsed.exchange);
     if (!adapter) {
       throw new MarketError('unknown_symbol', `Exchange "${parsed.exchange}" isn't supported yet`);
     }

@@ -23,6 +23,7 @@ const config: GatewayConfig = {
   allowedOrigins: ['http://127.0.0.1:5173'],
   logLevel: 'silent',
   binance: { restUrl: undefined, streamUrl: undefined },
+  binanceFutures: { futuresUrl: undefined, coinmUrl: undefined, archiveUrl: undefined },
   bybit: { restUrl: undefined, streamUrl: undefined },
   okx: { restUrl: undefined, streamUrl: undefined, businessStreamUrl: undefined },
   coinbase: { restUrl: undefined, streamUrl: undefined },
