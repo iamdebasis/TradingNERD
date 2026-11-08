@@ -117,6 +117,17 @@ plotshape(true, style = s, location = where, size = z)`),
   });
 });
 
+describe('fill() between hlines', () => {
+  it('takes the hline overload’s own names, hline1 and hline2 (the v6 reference)', () => {
+    const p = program(
+      indicator(
+        'a = hline(70)\nb = hline(30)\nfill(hline1 = a, hline2 = b, color = color.new(color.blue, 90))\nplot(close)',
+      ),
+    );
+    expect(p.describe([]).fills).toHaveLength(1);
+  });
+});
+
 describe('plotcandle and plotbar', () => {
   it('keep the open as their value and the high, low and close in hidden parts', () => {
     const source = indicator('plotcandle(open, high, low, close, "Candles")');

@@ -389,6 +389,7 @@ function timeCall(close: boolean): Handler {
     const tfEv = timeframe?.ev;
     const sessionEv = session?.ev;
     const zoneEv = zone?.ev;
+    const days = c.version <= 4 ? '23456' : '1234567';
     return series(
       'int',
       (rt) =>
@@ -400,6 +401,7 @@ function timeCall(close: boolean): Handler {
           barsBack ? barsBack(rt) : 0,
           tfBack ? tfBack(rt) : 0,
           close,
+          days,
         ),
       call.span,
     );
@@ -414,6 +416,7 @@ function timeOn(
   barsBack: number,
   timeframeBack: number,
   close: boolean,
+  defaultDays = '1234567',
 ): number {
   const chart = chartResolution(rt);
   const resolution = timeframeOf(timeframe, chart);
@@ -431,7 +434,7 @@ function timeOn(
   if (resolution.unit === 'tick') return close ? barCloseTime(rt, Math.max(0, barsBack)) : t;
   const clock = rt.symbol.clock;
   if (session !== '') {
-    const periods = parseSession(session);
+    const periods = parseSession(session, defaultDays);
     if (!periods) throw new PineRuntimeError(`Invalid session "${session}"`);
     const zone = zoneArg(zoneName, rt);
     const open = sessionOpen(periods, t, zone);

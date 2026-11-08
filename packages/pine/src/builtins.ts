@@ -1441,7 +1441,18 @@ const GRADIENT_FILL = [
 ];
 
 /** fill() between two plots or two hlines, solid or a gradient (TradingView's blog, 2022). */
-function fillCall(c: Compiler, call: Call, scope: Scope): Compiled {
+function fillCall(c: Compiler, given: Call, scope: Scope): Compiled {
+  // The hline overload names its edges hline1 and hline2 (the v6 reference).
+  const call: Call = {
+    ...given,
+    args: given.args.map((arg) =>
+      arg.name === 'hline1'
+        ? { ...arg, name: 'plot1' }
+        : arg.name === 'hline2'
+          ? { ...arg, name: 'plot2' }
+          : arg,
+    ),
+  };
   const named = new Set(call.args.map((arg) => arg.name));
   const gradient =
     named.has('top_value') ||

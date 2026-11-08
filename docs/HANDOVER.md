@@ -2,14 +2,15 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 8 November 2026, by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 8 November 2026 (Pine compatibility), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
 | | |
 |---|---|
 | Branches | `main` is at `684091e` (pull request #4 (https://github.com/iamdebasis/TradingNERD/pull/4) merged on 7 November: P2 and P4; #3 before it: P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
-| Open | **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), from `claude/keen-allen-7wubfe`: the hand-over of P2 and P4. It carries the docs as merged, the check of 8 November, and one fix to the settings dialog's fields (§2). Merging it is the user's call; nothing else waits on it |
+| Merged | **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, merged on 8 November: `main` is at `6ee4bf0` |
+| Under way | **Pine like TradingView's, for any script** (8 November, the user's YES: "FIX whatever it takes to run any possible scripts like tradingview … and DELIVER"), on `claude/keen-allen-7wubfe` from `main` at `6ee4bf0`, in steps: 1. compatibility with older versions (done: §2c); 2. drawings (labels, lines, boxes, tables, polylines, linefills); 3. strategies and the Strategy Tester; 4. alerts, and Renko, Kagi, Line Break and Point & Figure data |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
@@ -20,6 +21,17 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
 What's left for the Mac, for every milestone, is one list: §9. The milestone table is SPEC §8.
+
+## 2c. Pine compatibility with older versions (8 November)
+
+Your VuManChu B Divergences (v4) failed to compile: "Cannot call 'ta.valuewhen' with argument 'condition'='fractalTop'". **The cause:** v4 and v5 let a number stand for a bool wherever a function or variable needs one, and our engine allowed it only in conditions. **Why we missed it:** the corpus had no script that did it, and the version rules were never tested one by one. Both are now fixed: the script compiles and runs, all 34 plots, its 4h, 12h and 1h requests, 1,000 bars in 1.3 s (synthetic bars in the cloud; its values against TradingView's are the Mac's check).
+
+**Then, systematically** (SPEC §3 and §4.17, 8 November):
+- **TradingView's reference, all 884 entries:** everything is known but the drawings, the strategies, TradingView's own data, and `bid`/`ask`.
+- **The migration guides, rule by rule:** fixed v5's na bools and v4's Monday-to-Friday sessions; constants are plain text as the reference types them (`shape.*`, `location.*`, `size.*`).
+- **The corpus, grown from 271 to 854 community scripts:** fixed `fill(hline1, hline2)`, `linktoseries`, a repeated `transp`, `plot(style = dashed)` and `array.new(na)`. 723 run; of the 722 that need neither drawings nor strategies, 683 (94.6%); the rest are mostly the scripts' own mistakes. Known gaps: SPEC §11, item 122.
+
+**Left:** drawings (327 of the corpus's failures), strategies (169), TradingView's own data (no free source), the chart types Renko and the like: the next steps of this work.
 
 ## 2. The hand-over check of 8 November (pull request #5)
 

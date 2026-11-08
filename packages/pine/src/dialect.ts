@@ -430,6 +430,21 @@ class Rewriter {
           arg.name && renames[arg.name] ? { ...arg, name: renames[arg.name] as string } : arg,
         );
       }
+      // study()'s linktoseries (v3 and v4: the study kept to the chart's own scale) left with
+      // v5; a study that set it sits on the price pane anyway, so it changes nothing here.
+      if (callee === 'indicator') args = args.filter((arg) => arg.name !== 'linktoseries');
+      // v3's plot() took any style constant: an hline style there draws a line (provisional,
+      // docs/SPEC.md §11; a published v3 script writes style=dashed).
+      if (callee === 'plot' && this.version <= 3) {
+        args = args.filter(
+          (arg) =>
+            !(
+              arg.name === 'style' &&
+              arg.value.kind === 'name' &&
+              /^hline\.style_|^(dashed|dotted|solid)$/.test(arg.value.name)
+            ),
+        );
+      }
     }
     if (TRANSP_CALLS.has(callee)) args = this.transp(callee, args, expr.span);
     return { ...expr, callee, args };
@@ -465,7 +480,9 @@ class Rewriter {
    * and older, bgcolor() and fill() took a transparency of 90 when none was given.
    */
   private transp(callee: string, args: Arg[], span: Span): Arg[] {
+    // v5 and older took a repeated argument's first value (v6 guide: Cannot repeat parameters).
     const transp = args.find((arg) => arg.name === 'transp');
+    if (transp) args = args.filter((arg) => arg.name !== 'transp' || arg === transp);
     const defaultTransp =
       !transp && this.version <= 4 && (callee === 'bgcolor' || callee === 'fill') ? 90 : null;
     if (!transp && defaultTransp === null) return args;

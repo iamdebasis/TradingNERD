@@ -114,6 +114,41 @@ plot(ta.barssince(close > open))`;
     expect(program(v3).describe([]).hlines[0]?.linestyle).toBe('solid');
   });
 
+  it('runs what published v3 and v4 scripts write: linktoseries, a repeated transp, plot(style = dashed)', () => {
+    // Found in a community collection (2026-11-08): each compiled on TradingView.
+    for (const source of [
+      '//@version=3\nstudy("T", overlay=true, linktoseries=true)\nplot(close)',
+      '//@version=3\nstudy("T")\nplot(close, transp=0, style=histogram, transp=50)',
+      '//@version=3\nstudy("T")\nplot(close, style=dashed, linewidth=1)',
+      '//@version=4\nstudy("T", linktoseries=true)\nplot(close)',
+    ]) {
+      expect(() => program(source)).not.toThrow();
+    }
+    expect(
+      program('//@version=3\nstudy("T")\nplot(close, style=dashed)').describe([]).plots[0]?.style,
+    ).toBe('line');
+  });
+
+  it('reads a v4 session without days as Monday to Friday; v5 as every day', () => {
+    // The v5 guide, "Changed the default session days for time() and time_close()": "23456"
+    // became "1234567", which matters on symbols that trade at weekends.
+    const days = Array.from({ length: 7 }, (_, i) => ({
+      time: 1_699_920_000 + i * 86_400, // Tuesday 14 November 2023 onward, 00:00 UTC
+      open: 1,
+      high: 2,
+      low: 0.5,
+      close: 1.5,
+      volume: 1,
+    }));
+    const body = 't = time(timeframe.period, "0000-2359")\nplot(na(t) ? 0 : 1)\nplot(dayofweek)';
+    const daily = { ...DEFAULT_SYMBOL, timeframe: 'D' };
+    const [v4, weekday] = plots(`//@version=4\nstudy("Test")\n${body}`, days, [], daily);
+    const [v5] = plots(`//@version=5\nindicator("Test")\n${body}`, days, [], daily);
+    expect(weekday).toEqual([3, 4, 5, 6, 7, 1, 2]);
+    expect(v4).toEqual([1, 1, 1, 1, 0, 0, 1]);
+    expect(v5).toEqual([1, 1, 1, 1, 1, 1, 1]);
+  });
+
   it('gives v4’s bgcolor() and fill() a transparency of 90 when none is given', () => {
     const background = program(`//@version=4
 study("Test")
