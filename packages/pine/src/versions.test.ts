@@ -179,6 +179,27 @@ plot(bar_index ? 1 : 0)`).message,
     ).toMatch(/must be a bool/);
   });
 
+  it('compares a bool with a number as two bools in v5: `flag == 1` is `flag == true`', () => {
+    // A published v5 script's `barcolor(vis and (test_50 == 1) ? …)` (found 2026-11-08).
+    expect(
+      first(`//@version=5
+indicator("Test")
+up = close > open
+plot(up == 1 ? 1 : up == 0 ? 0 : -1)`).slice(0, 3),
+    ).toEqual(
+      first(`//@version=6
+indicator("Test")
+up = close > open
+plot(up == true ? 1 : up == false ? 0 : -1)`).slice(0, 3),
+    );
+    expect(
+      compileError(`//@version=6
+indicator("Test")
+up = close > open
+plot(up == 1 ? 1 : 0)`).message,
+    ).toMatch(/Cannot compare/);
+  });
+
   it('casts numbers where a function or a bool variable needs a bool, in v4 and v5; v6 asks for one', () => {
     // The v6 guide: v5 cast "when an expression or function requires a boolean value". Found
     // with VuManChu B (v4), whose valuewhen() takes a price or na as its condition (2026-11-08).

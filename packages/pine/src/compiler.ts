@@ -1,4 +1,4 @@
-import type { Block, Expr, Param, Script, Stmt, TypeRef } from './ast.ts';
+import type { Arg, Block, Expr, Param, Script, Stmt, TypeRef } from './ast.ts';
 import { versionOf } from './ast.ts';
 import {
   compileBuiltinName,
@@ -148,7 +148,8 @@ export interface PlotDef {
   histbase: Fold;
   offset: Fold;
   join: Fold;
-  editable: boolean;
+  /** "input bool" in the v6 reference: published scripts pass a bool input. */
+  editable: Fold;
   showLast: Fold;
   display: Fold;
   format: Fold;
@@ -163,7 +164,7 @@ export interface HlineDef {
   color: Fold;
   linestyle: Fold;
   linewidth: Fold;
-  editable: boolean;
+  editable: Fold;
   display: Fold;
   span: Span;
 }
@@ -176,7 +177,7 @@ export interface FillDef {
   color: StyleArg | null;
   gradient: { top: Fold; bottom: Fold; topColor: Fold; bottomColor: Fold } | null;
   title: string;
-  editable: boolean;
+  editable: Fold;
   showLast: Fold;
   fillgaps: boolean;
   display: Fold;
@@ -189,7 +190,7 @@ export interface BgcolorDef {
   bars: boolean;
   color: StyleArg;
   offset: Fold;
-  editable: boolean;
+  editable: Fold;
   showLast: Fold;
   title: string;
   display: Fold;
@@ -218,8 +219,35 @@ export interface IndicatorDecl {
    * and "Wait for timeframe closes" (`timeframe_gaps`). Null when it isn't declared so.
    */
   timeframe: { input: number; gaps: number } | null;
+  /** How many of each drawing it keeps on the chart (max_labels_count and the rest). */
+  drawings: Record<'label' | 'line' | 'box' | 'polyline', number>;
   span: Span;
 }
+
+/** Built-in namespaces whose functions a variable of the same name doesn't hide. */
+const BUILTIN_NAMESPACES: ReadonlySet<string> = new Set([
+  'array',
+  'matrix',
+  'map',
+  'label',
+  'line',
+  'box',
+  'table',
+  'linefill',
+  'polyline',
+  'str',
+  'math',
+  'ta',
+  'color',
+  'timeframe',
+  'syminfo',
+  'request',
+  'ticker',
+  'input',
+  'chart',
+  'log',
+  'runtime',
+]);
 
 /** A variable in a scope. */
 export interface Var {
@@ -384,7 +412,12 @@ interface Frame {
   params?: Var[];
   exported?: boolean;
   /** A loop's: the requests inside it, and what their expressions need (checked at its end). */
-  requests?: { call: Extract<Expr, { kind: 'call' }>; needed: ReadonlySet<Var> }[];
+  requests?: {
+    call: Extract<Expr, { kind: 'call' }>;
+    needed: ReadonlySet<Var>;
+    /** What the expression itself writes: a function's own variables, not the loop's. */
+    own: ReadonlySet<Var>;
+  }[];
 }
 
 /** Pine's display.all and display.none (builtins.ts DISPLAY), for the inputs the compiler adds. */
@@ -621,6 +654,19 @@ export class Compiler {
     const global = new Scope(null, 'global');
     const main = new Module('', this.version, global);
     this.module = main;
+    // chart.point: a built-in object type with three fields (the v6 reference, chart.point).
+    this.types.set('chart.point', {
+      key: 'chart.point',
+      name: 'chart.point',
+      fields: [
+        { name: 'time', type: 'int', default: null, varip: false },
+        { name: 'index', type: 'int', default: null, varip: false },
+        { name: 'price', type: 'float', default: null, varip: false },
+      ],
+      module: main,
+      exported: true,
+      span: { line: 1, column: 1, endLine: 1, endColumn: 1 },
+    });
     this.declareAll(main, this.script.statements);
     const body = this.statements(this.script.statements, global, this.plan !== null);
     if (!this.indicator) {
@@ -1033,6 +1079,7 @@ export class Compiler {
 
   /** Notes a variable written (declared, or reassigned) by the statements being compiled. */
   private noteWrite(v: Var, reassigned = false): void {
+    for (const collector of this.writeCollectors) collector.add(v);
     for (const frame of this.frames) {
       frame.current?.writes.add(v);
       if (reassigned) frame.current?.assigns.add(v);
@@ -1052,9 +1099,12 @@ export class Compiler {
   private checkLoopRequests(frame: Frame): void {
     const changed = new Set<Var>();
     for (const info of frame.infos) for (const v of info.assigns) changed.add(v);
-    for (const { call, needed } of frame.requests ?? []) {
+    for (const { call, needed, own } of frame.requests ?? []) {
       for (const v of needed) {
-        if (changed.has(v)) {
+        // The expression's own variables (a function's, declared and changed inside its call)
+        // change with every evaluation, not with the loop (a screener's request of a function
+        // with var locals runs on TradingView; found 2026-11-08).
+        if (changed.has(v) && !own.has(v)) {
           this.fail(
             `The expression of '${call.callee}' can't depend on a variable that changes in the loop: only the symbol and the timeframe can`,
             call.span,
@@ -1065,14 +1115,19 @@ export class Compiler {
   }
 
   /** Compiles something, noting every variable it reads into `into`. */
-  collectReads<T>(into: Set<Var>, compile: () => T): T {
+  collectReads<T>(into: Set<Var>, compile: () => T, writes?: Set<Var>): T {
     this.collectors.push(into);
+    if (writes) this.writeCollectors.push(writes);
     try {
       return compile();
     } finally {
       this.collectors.pop();
+      if (writes) this.writeCollectors.pop();
     }
   }
+
+  /** Sets that hear every variable written while they're on the stack (requests' own writes). */
+  private readonly writeCollectors: Set<Var>[] = [];
 
   /** Whether this compile is a context program and this is the request it captures. */
   capturing(call: Extract<Expr, { kind: 'call' }>): boolean {
@@ -1099,14 +1154,19 @@ export class Compiler {
     call: Extract<Expr, { kind: 'call' }>,
     reads: ReadonlySet<Var>,
     result: { base: Base; items?: Base[] },
+    own: ReadonlySet<Var> = new Set(),
   ): RequestSite {
     const keep = new Set<Stmt>();
     const next = new Map<object, object>();
     const needed = new Set(reads);
+    // What the kept statements also set: a kept if that sets other variables too compiles whole,
+    // so their declarations must compile with it (a screener's crash, found 2026-11-08).
+    const declared = new Set<Var>();
     const isObject = (v: Var) => isReferenceType(v.base) || this.types.has(v.base);
     const needs = (info: StmtInfo): boolean => {
       for (const v of info.writes) if (needed.has(v)) return true;
       for (const v of info.reads) if (needed.has(v) && isObject(v)) return true;
+      for (const v of info.writes) if (declared.has(v) && !info.assigns.has(v)) return true;
       return false;
     };
     const calls: Expr[] = [];
@@ -1119,6 +1179,7 @@ export class Compiler {
         if (!needs(info)) continue;
         keep.add(info.stmt);
         for (const v of info.reads) needed.add(v);
+        for (const v of info.writes) declared.add(v);
       }
       if (frame.kind === 'loop') {
         if (frame.loopVars.some((v) => needed.has(v))) {
@@ -1128,7 +1189,7 @@ export class Compiler {
           );
         }
         frame.requests ??= [];
-        frame.requests.push({ call, needed: new Set(needed) });
+        frame.requests.push({ call, needed: new Set(needed), own });
       }
       // "provided that the evaluated expressions do not depend on any exported function
       // parameters" (Pine docs, Dynamic requests: In libraries).
@@ -1348,7 +1409,10 @@ export class Compiler {
           stmt.span,
         );
     }
-    if (stmt.qualifier === 'const' && value.qual > CONST && this.strict) {
+    // A const variable can keep a constant reference to an object, its id a series value: "a
+    // script can declare a const variable that maintains a constant reference to an expression
+    // returning the ID of a special type" (the manual, Type system: const).
+    if (stmt.qualifier === 'const' && value.qual > CONST && this.strict && !isReferenceType(base)) {
       this.fail(
         `"${stmt.name}" is declared const, but its value is ${typeName(value)}`,
         stmt.value.span,
@@ -1952,8 +2016,17 @@ export class Compiler {
 
   binary(op: string, leftRaw: Compiled, rightRaw: Compiled, span: Span): Compiled {
     const equality = op === '==' || op === '!=';
-    const left = equality ? leftRaw : this.numberOfBool(leftRaw);
-    const right = equality ? rightRaw : this.numberOfBool(rightRaw);
+    let [leftGiven, rightGiven] = [leftRaw, rightRaw];
+    // v5 and older cast a number compared with a bool to a bool, as they do "when an expression
+    // or function requires a boolean value" (the v6 migration guide): `flag == 1` is
+    // `flag == true` (a published v5 script's, found 2026-11-08). v6 refuses it.
+    if (equality && this.version <= 5) {
+      const number = (c: Compiled) => c.base === 'int' || c.base === 'float';
+      if (leftGiven.base === 'bool' && number(rightGiven)) rightGiven = this.toBool(rightGiven);
+      else if (rightGiven.base === 'bool' && number(leftGiven)) leftGiven = this.toBool(leftGiven);
+    }
+    const left = equality ? leftGiven : this.numberOfBool(leftGiven);
+    const right = equality ? rightGiven : this.numberOfBool(rightGiven);
     const qual = maxQual(left.qual, right.qual);
     const a = left.ev;
     const b = right.ev;
@@ -2597,9 +2670,13 @@ export class Compiler {
     const parts = expr.callee.split('.');
     const first = parts[0] as string;
     if (parts.length > 1) {
-      // A method on a variable or its fields: `arr.push(x)`, `p.pos.move()`.
+      // A method on a variable or its fields: `arr.push(x)`, `p.pos.move()`. A variable named
+      // after a namespace doesn't hide its functions: `line.delete(line)`, `matrix.set(matrix,
+      // r, c, v)` and `timeframe.change(timeframe)` call the built-ins, as on TradingView (the
+      // manual's own examples write them; found 2026-11-08).
       const v = scope.lookup(first);
-      if (v && this.hasMethods(v.base, parts.at(-1) as string)) {
+      const builtin = isBuiltinNamespace(expr.callee) && BUILTIN_NAMESPACES.has(first);
+      if (v && !builtin && this.hasMethods(v.base, parts.at(-1) as string)) {
         const receiver = this.dotted(parts.slice(0, -1).join('.'), expr.calleeSpan, scope);
         if (receiver) return this.methodCall(receiver, parts.at(-1) as string, expr, scope);
       }
@@ -2608,6 +2685,14 @@ export class Compiler {
       if (!v && !isBuiltinNamespace(expr.callee) && this.findMethods(method).length > 0) {
         const receiver = compileBuiltinName(this, parts.slice(0, -1).join('.'), expr.calleeSpan);
         if (receiver) return this.methodCall(receiver, method, expr, scope);
+      }
+      // A built-in method on a built-in value: `label.all.size()`, `line.all.get(0)`.
+      if (!v && !isBuiltinNamespace(expr.callee) && parts.length > 2) {
+        const receiver = compileBuiltinName(this, parts.slice(0, -1).join('.'), expr.calleeSpan);
+        const space = receiver ? methodNamespace(receiver.base) : null;
+        if (receiver && space && isBuiltinNamespace(`${space}.${method}`)) {
+          return this.methodCall(receiver, method, expr, scope);
+        }
       }
       // A type's constructor or copy: `Point.new(…)`, `lib.Point.new(…)`.
       const typeCall = this.typeCall(parts, expr, scope);
@@ -2627,6 +2712,16 @@ export class Compiler {
     } else {
       const own = this.findFunctions(first);
       if (own.length > 0) return this.userCall(own, expr, scope, null);
+      // A method called as a function, its receiver the first argument (Pine docs, Methods:
+      // "can be called using dot notation ... or as regular functions").
+      const methods = this.findMethods(first);
+      if (methods.length > 0 && expr.args.length > 0 && !isBuiltinNamespace(first)) {
+        const [head, ...rest] = expr.args as [Arg, ...Arg[]];
+        if (head.name === null) {
+          const receiver = this.expr(head.value, scope);
+          return this.methodCall(receiver, first, { ...expr, args: rest }, scope);
+        }
+      }
     }
     return compileCall(this, expr, scope);
   }

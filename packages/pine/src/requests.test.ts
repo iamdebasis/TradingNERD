@@ -379,6 +379,45 @@ describe('request.security(): loading, limits and errors', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors[0]?.message).toContain('127');
+    // "Two request.security() calls that each retrieve a tuple with 64 elements will also cause
+    // an error" (the manual).
+    const half = (n: number) => Array.from({ length: n }, () => 'close').join(', ');
+    const named = (from: number) => Array.from({ length: 64 }, (_, i) => `v${from + i}`).join(', ');
+    const split = compileScript(
+      v6(
+        `[${named(0)}] = request.security(syminfo.tickerid, "D", [${half(64)}])\n[${named(64)}] = request.security(syminfo.tickerid, "W", [${half(64)}])\nplot(v0)`,
+      ),
+    );
+    expect(split.ok).toBe(false);
+  });
+
+  it('counts a request written once in a function once, however often the function is called', () => {
+    // A screener's shape: one function with a 4-element request, called for 40 symbols.
+    const calls = Array.from({ length: 40 }, (_, i) => `screen("X${i}")`).join('\n');
+    const result = compileScript(
+      v6(`screen(string sym) =>
+    [a, b, c, d] = request.security(sym, timeframe.period, [open, high, low, close])
+    a + b + c + d
+${calls}
+plot(close)`),
+    );
+    expect(result.ok ? [] : result.errors.map((e) => e.message)).toEqual([]);
+  });
+
+  it('compiles a kept statement whole: the other variables it sets are declared in the context', () => {
+    // The if is kept for `active`, which the request reads; it also sets `start`, which the
+    // request doesn't read (a screener's crash, found 2026-11-08).
+    const r = run(
+      v6(`var bool active = false
+var int start = na
+if close > open
+    active := true
+    start := bar_index
+calc() => active ? close : -close
+plot(request.security(syminfo.tickerid, "D", calc()))`),
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0).some((value) => Number.isFinite(value))).toBe(true);
   });
 
   it("stops with the context's own runtime error", () => {
@@ -474,6 +513,27 @@ plot(sum)`),
     );
     expect(changing.ok).toBe(false);
     if (!changing.ok) expect(changing.errors[0]?.message).toMatch(/changes in the loop/);
+  });
+
+  it("lets a loop's request call a function whose own variables change inside it", () => {
+    // A screener's shape: the requested function keeps var locals and reassigns them; they're
+    // the function's, not the loop's (found 2026-11-08 in published screeners).
+    const r = run(
+      v6(`calc() =>
+    var int t = na
+    float level = na
+    t := time
+    level := close
+    [t, level]
+var array<string> symbols = array.from("BINANCE:BTCUSDT", "COINBASE:ETHUSD")
+float sum = 0.0
+for symbol in symbols
+    [t, level] = request.security(symbol, timeframe.period, calc())
+    sum += level
+plot(sum)`),
+    );
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[5]).toBe(105 + 1010);
   });
 
   it('runs in an if block, the copy computing on every bar of its context', () => {

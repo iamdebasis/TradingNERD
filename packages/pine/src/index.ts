@@ -25,6 +25,20 @@ export {
   PineRuntimeError,
   type Span,
 } from './diagnostics.ts';
+export {
+  BoxObject,
+  type DrawingSnapshot,
+  EMPTY_DRAWINGS,
+  LABEL_STYLES,
+  LabelObject,
+  LineObject,
+  linePrice,
+  POSITIONS,
+  PolylineObject,
+  type TableCell,
+  TableObject,
+  TEXT_FORMATS,
+} from './drawings.ts';
 export { KEYWORDS, versionIn } from './lexer.ts';
 export {
   alignBar,

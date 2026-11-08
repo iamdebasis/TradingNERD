@@ -430,7 +430,13 @@ function joinLines(source: string, multiline: boolean): SourceLine[] {
         text += physical[index] as string;
         continue;
       }
-      if (!more || end.depth === 0) {
+      // A string left open runs on into the next line inside brackets, or outside them on a
+      // wrapped line (indented by spaces that aren't a multiple of four): the manual's own
+      // `BOTTOM_TTIP = "… and then set` / `  the bottom margin …"` (Lines and boxes). The break and
+      // the next line's indentation add nothing, as the manual's Pine Logs figure for its wrapped
+      // `log.info()` message shows (Time, UNIX timestamps); provisional (docs/SPEC.md §11).
+      const wraps = more && (end.depth > 0 || indentOf(physical[index + 1] as string) % 4 !== 0);
+      if (!wraps) {
         depth = end.depth;
         break;
       }

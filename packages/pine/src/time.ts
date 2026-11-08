@@ -37,9 +37,11 @@ export function zoneOf(name: string): Zone | null {
 }
 
 function parseZone(text: string): Zone | null {
-  const fixed = /^(?:UTC|GMT)(?:([+-])(\d{1,2})(?::?(\d{2}))?)?$/i.exec(text);
+  // "UTC-5", "UTC+05:30", "GMT+0100" (the manual, Time zone strings); the sign can be left out,
+  // as the manual's own "UTC0" (UTC+0) shows (Time, timestamp()).
+  const fixed = /^(?:UTC|GMT)(?:([+-]?)(\d{1,2})(?::?(\d{2}))?)?$/i.exec(text);
   if (fixed) {
-    if (!fixed[1]) return UTC_ZONE;
+    if (fixed[2] === undefined) return UTC_ZONE;
     const minutes = Number(fixed[2]) * 60 + Number(fixed[3] ?? 0);
     if (minutes > 14 * 60) return null;
     const offset = (fixed[1] === '-' ? -1 : 1) * minutes * MINUTE;

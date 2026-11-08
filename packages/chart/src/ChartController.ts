@@ -354,7 +354,7 @@ export class ChartController {
     this.series.attachPrimitive(this.extendedPrice);
     this.series.attachPrimitive(this.lastPrice);
     this.series.attachPrimitive(this.crosshair);
-    this.indicators = new IndicatorLayer(this.chart, theme, this.font);
+    this.indicators = new IndicatorLayer(this.chart, theme, this.font, this.series);
 
     const onCrosshairMove = (param: MouseEventParams<Time>) => this.onCrosshairMove(param);
     this.chart.subscribeCrosshairMove(onCrosshairMove);

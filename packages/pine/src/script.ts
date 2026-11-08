@@ -19,6 +19,7 @@ import {
 } from './compiler.ts';
 import { PineCompileError, type PineDiagnostic } from './diagnostics.ts';
 import { upgrade } from './dialect.ts';
+import { type DrawingSnapshot, EMPTY_DRAWINGS } from './drawings.ts';
 import { spanText } from './edits.ts';
 import { CHECKS, Execution, type RunClock, type ScriptError, scaledBar } from './execution.ts';
 import { LOCATIONS, SHAPES, SIZES } from './marks.ts';
@@ -352,7 +353,7 @@ export class ScriptProgram {
         histbase: numberOr(plot.histbase(env), 0),
         offset: Math.round(numberOr(plot.offset(env), 0)),
         join: plot.join(env) === true,
-        editable: plot.editable,
+        editable: plot.editable(env) !== false,
         showLast: countOf(plot.showLast(env)),
         display: Math.round(numberOr(plot.display(env), DISPLAY.all)),
         format: formatOf(plot.format(env)),
@@ -380,7 +381,7 @@ export class ScriptProgram {
         color: colorOf(hline.color(env)),
         linestyle: oneOf(LINE_STYLES, hline.linestyle(env), 'dashed'),
         linewidth: Math.max(1, Math.round(numberOr(hline.linewidth(env), 1))),
-        editable: hline.editable,
+        editable: hline.editable(env) !== false,
         display: Math.round(numberOr(hline.display(env), DISPLAY.all)),
       })),
       fills: p.fills.map((fill) => ({
@@ -399,7 +400,7 @@ export class ScriptProgram {
             }
           : null,
         title: fill.title,
-        editable: fill.editable,
+        editable: fill.editable(env) !== false,
         showLast: countOf(fill.showLast(env)),
         fillgaps: fill.fillgaps,
         display: Math.round(numberOr(fill.display(env), DISPLAY.all)),
@@ -410,7 +411,7 @@ export class ScriptProgram {
         colorChanges: bg.color.dynamic,
         offset: Math.round(numberOr(bg.offset(env), 0)),
         title: bg.title,
-        editable: bg.editable,
+        editable: bg.editable(env) !== false,
         showLast: countOf(bg.showLast(env)),
         display: Math.round(numberOr(bg.display(env), DISPLAY.all)),
       })),
@@ -874,7 +875,17 @@ export class ScriptRun {
     this.backgrounds = main.outputs.backgrounds;
     this.fillColors = main.outputs.fillColors;
     this.error = main.error;
+    // Its drawings as they stand, copied only when they changed (each change bumps the version).
+    const drawn = main.runtime.drawings;
+    if (drawn.version !== this.drawingsVersion) {
+      this.drawings = drawn.snapshot();
+      this.drawingsVersion = drawn.version;
+    }
   }
+
+  /** Its labels, lines, boxes, tables, polylines and linefills at the last bar it ran. */
+  drawings: DrawingSnapshot = EMPTY_DRAWINGS;
+  private drawingsVersion = -1;
 
   /** Each output's agreement with each check run, over the closed bars. */
   private compare(length: number): OutputAgreements {

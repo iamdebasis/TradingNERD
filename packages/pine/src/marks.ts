@@ -93,7 +93,8 @@ function colorOf(args: Args, name: string, fallback: number) {
 }
 
 const constTitle = (args: Args) => String(args.constant('title', '', 'string') ?? '');
-const constEditable = (args: Args) => args.constant('editable', true, 'bool') !== false;
+/** `editable`: an input bool, as the v6 reference types it (a published script passes one). */
+const editableOf = (args: Args): Fold => args.foldedAs('editable', 'bool', true);
 
 /** A plot entry's fields that marks and bars don't use, at plot()'s defaults. */
 function plotLike(
@@ -113,7 +114,7 @@ function plotLike(
     histbase: () => 0,
     offset: names.includes('offset') ? args.foldedAs('offset', 'int', 0) : () => 0,
     join: () => false,
-    editable: constEditable(args),
+    editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     display: args.foldedAs('display', 'int', 31),
     format: args.foldedAs('format', 'string', null),
@@ -137,7 +138,7 @@ function part(c: Compiler, color: { fold: Fold; dynamic: boolean }, span: Span):
     histbase: () => 0,
     offset: () => 0,
     join: () => false,
-    editable: false,
+    editable: () => false,
     showLast: () => Number.NaN,
     display: () => 0,
     format: () => null,
@@ -440,7 +441,7 @@ const barcolorCall: Handler = (c, call, scope) => {
     bars: true,
     color: { fold: dynamic ? () => Number.NaN : args.folded('color', Number.NaN), dynamic },
     offset: args.foldedAs('offset', 'int', 0),
-    editable: constEditable(args),
+    editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     title: constTitle(args),
     display: args.foldedAs('display', 'int', 31),

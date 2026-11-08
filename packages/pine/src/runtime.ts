@@ -6,6 +6,7 @@ import {
   UTC_ZONE,
 } from '@tradingnerd/core';
 import { PineRuntimeError } from './diagnostics.ts';
+import { DrawingStore } from './drawings.ts';
 import type { RequestBroker } from './requests.ts';
 import type { Stateful } from './ta.ts';
 import type { Value } from './values.ts';
@@ -295,6 +296,8 @@ export class Runtime {
   /** How many messages it has logged in all, so a reader can tell when there are new ones. */
   logsWritten = 0;
   outputs: Outputs = { plots: [], plotColors: [], backgrounds: [], fillColors: [] };
+  /** Its labels, lines, boxes, tables, polylines and linefills (drawings.ts). */
+  readonly drawings = new DrawingStore();
   /** A context program's values, by bar: what its request expression gives (requests.ts). */
   captured: Value[] = [];
   /**

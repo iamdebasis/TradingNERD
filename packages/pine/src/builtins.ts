@@ -14,6 +14,13 @@ import type { Arg } from './ast.ts';
 import { collectionCalls } from './collections.ts';
 import type { Compiler, EnumDef, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
+import {
+  DEFAULT_DRAWING_LIMIT,
+  drawingCalls,
+  drawingCasts,
+  drawingName,
+  MAX_DRAWING_LIMIT,
+} from './drawings.ts';
 import { markCalls, markConstant } from './marks.ts';
 import { requestCalls } from './requestCalls.ts';
 import { canonicalTimeframe } from './requests.ts';
@@ -151,10 +158,6 @@ export type ScriptFormat = (typeof FORMATS)[number];
  */
 const LATER: readonly [RegExp, string][] = [
   [
-    /^(label|line|box|table|polyline|linefill|chart\.point)\./,
-    "isn't supported in tradingNerd yet: drawings (labels, lines, boxes, tables) come in a later update",
-  ],
-  [
     /^request\.(financial|earnings|dividends|splits|economic)$/,
     "isn't supported in tradingNerd yet: companies' financial data comes in a later update",
   ],
@@ -235,6 +238,10 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
   const dot = name.indexOf('.');
   const space = dot < 0 ? '' : name.slice(0, dot);
   const member = dot < 0 ? name : name.slice(dot + 1);
+  const drawn = drawingName(c, space, member, span);
+  if (drawn) return drawn;
+  // The bid and ask: only on tick charts, which carry trades here, not quotes (provisional).
+  if (name === 'bid' || name === 'ask') return series('float', () => Number.NaN, span);
   switch (space) {
     case 'color': {
       // v5 and older had other values for three of them (v6 guide: Color changes).
@@ -807,6 +814,8 @@ const CALLS: Record<string, Handler> = {
   ...markCalls(),
   ...requestCalls(),
   ...tickerCalls(),
+  ...drawingCalls(),
+  ...drawingCasts(),
 };
 
 /** Whether a built-in function of this full name exists (`array.push`, `ta.sma`). */
@@ -917,6 +926,12 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
   ) {
     c.fail("'precision' must be from 0 to 16", args.get('precision')?.span as Span);
   }
+  // How many of each drawing stay on the chart: 50 unless set, at most 500, polylines 100.
+  const limit = (name: string, kind: keyof typeof MAX_DRAWING_LIMIT) => {
+    const given = args.constant(name, DEFAULT_DRAWING_LIMIT, 'int');
+    const n = typeof given === 'number' && Number.isFinite(given) ? given : DEFAULT_DRAWING_LIMIT;
+    return Math.max(1, Math.min(MAX_DRAWING_LIMIT[kind], Math.floor(n)));
+  };
   c.indicator = {
     title,
     shorttitle: String(args.constant('shorttitle', '', 'string') ?? ''),
@@ -926,6 +941,12 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     library: false,
     dynamicRequests: dynamicRequests(c, args),
     timeframe: null,
+    drawings: {
+      label: limit('max_labels_count', 'label'),
+      line: limit('max_lines_count', 'line'),
+      box: limit('max_boxes_count', 'box'),
+      polyline: limit('max_polylines_count', 'polyline'),
+    },
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };
@@ -955,6 +976,12 @@ function libraryCall(c: Compiler, call: Call, scope: Scope): Compiled {
     library: true,
     dynamicRequests: dynamicRequests(c, args),
     timeframe: null,
+    drawings: {
+      label: DEFAULT_DRAWING_LIMIT,
+      line: DEFAULT_DRAWING_LIMIT,
+      box: DEFAULT_DRAWING_LIMIT,
+      polyline: DEFAULT_DRAWING_LIMIT,
+    },
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };
@@ -1338,7 +1365,8 @@ function colorArg(args: Args, name: string, fallback: number) {
 }
 
 const constTitle = (args: Args) => String(args.constant('title', '', 'string') ?? '');
-const constEditable = (args: Args) => args.constant('editable', true, 'bool') !== false;
+/** `editable`: an input bool, as the v6 reference types it (a published script passes one). */
+const editableOf = (args: Args): Fold => args.foldedAs('editable', 'bool', true);
 
 function plotCall(c: Compiler, call: Call, scope: Scope): Compiled {
   const args = new Args(c, call, scope, PLOT_NAMES, 1);
@@ -1366,7 +1394,7 @@ function plotCall(c: Compiler, call: Call, scope: Scope): Compiled {
     histbase: args.foldedAs('histbase', 'float', 0),
     offset: args.foldedAs('offset', 'int', 0),
     join: args.foldedAs('join', 'bool', false),
-    editable: constEditable(args),
+    editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     display: args.foldedAs('display', 'int', DISPLAY.all),
     format: args.foldedAs('format', 'string', null),
@@ -1409,7 +1437,7 @@ function hlineCall(c: Compiler, call: Call, scope: Scope): Compiled {
     color: args.foldedAs('color', 'color', COLORS.gray as number),
     linestyle: plotStyle ? () => 'solid' : args.foldedAs('linestyle', 'hline_style', 'dashed'),
     linewidth: args.foldedAs('linewidth', 'int', 1),
-    editable: constEditable(args),
+    editable: editableOf(args),
     display: args.foldedAs('display', 'int', DISPLAY.all),
     span: call.span,
   });
@@ -1511,7 +1539,7 @@ function fillCall(c: Compiler, given: Call, scope: Scope): Compiled {
         }
       : null,
     title: constTitle(args),
-    editable: constEditable(args),
+    editable: editableOf(args),
     showLast: gradient ? () => Number.NaN : args.foldedAs('show_last', 'int', Number.NaN),
     fillgaps: args.constant('fillgaps', false, 'bool') === true,
     display: args.foldedAs('display', 'int', DISPLAY.all),
@@ -1548,7 +1576,7 @@ function bgcolorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     bars: false,
     color: { fold: dynamic ? () => Number.NaN : args.folded('color', Number.NaN), dynamic },
     offset: args.foldedAs('offset', 'int', 0),
-    editable: constEditable(args),
+    editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     title: constTitle(args),
     display: args.foldedAs('display', 'int', DISPLAY.all),
@@ -1896,7 +1924,18 @@ function taCalls(): Record<string, Handler> {
         const fn = c.rt.register(new BoolChangeFn());
         return series('bool', (rt) => fn.call(value(rt), rt.final, rt.index), call.span);
       }
-      return sourceLength(c, call, scope, SERIES, () => new ChangeFn('change'), 'length', 1, 1);
+      const change = sourceLength(
+        c,
+        call,
+        scope,
+        SERIES,
+        () => new ChangeFn('change'),
+        'length',
+        1,
+        1,
+      );
+      // An int source's change is an int (the v6 reference's overloads: int, float and bool).
+      return source.base === 'int' ? { ...change, base: 'int' } : change;
     },
     'ta.vwma': (c, call, scope) => {
       const args = new Args(c, call, scope, ['source', 'length'], 2);
@@ -1944,11 +1983,40 @@ function taCalls(): Record<string, Handler> {
     'ta.valuewhen': (c, call, scope) => {
       const args = new Args(c, call, scope, ['condition', 'source', 'occurrence'], 3);
       const condition = args.bool('condition') as (rt: Runtime) => boolean;
-      const source = args.number('source') as NumEv;
+      const given = args.get('source') as Compiled;
       const occurrence = args.int('occurrence') as NumEv;
       const fn = c.rt.register(new ValuewhenFn());
+      // The source's own type: the v6 reference's overloads for int, float, bool and color.
+      // A bool is kept as 1 or 0; none found yet is the version's na bool.
+      if (given.base === 'bool') {
+        const value = given.ev;
+        const na = c.boolNa;
+        return series(
+          'bool',
+          (rt) => {
+            const v = value(rt);
+            const n = fn.call(
+              condition(rt),
+              v === true ? 1 : v === false ? 0 : Number.NaN,
+              occurrence(rt),
+              rt.final,
+            );
+            return Number.isNaN(n) ? na : n === 1;
+          },
+          call.span,
+        );
+      }
+      if (given.base === 'color') {
+        const value = args.color('source')?.ev as NumEv;
+        return series(
+          'color',
+          (rt) => fn.call(condition(rt), value(rt), occurrence(rt), rt.final),
+          call.span,
+        );
+      }
+      const source = args.number('source') as NumEv;
       return series(
-        'float',
+        given.base === 'int' ? 'int' : 'float',
         (rt) => fn.call(condition(rt), source(rt), occurrence(rt), rt.final),
         call.span,
       );

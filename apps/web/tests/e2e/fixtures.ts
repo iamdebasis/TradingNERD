@@ -1363,6 +1363,18 @@ export interface ChartState {
     /** A script's backgrounds, by id. */
     backgrounds: string[];
     valueLabels: string[];
+    /** How many of each drawing a script has on the chart, and its labels' and cells' text. */
+    drawings: {
+      labels: number;
+      lines: number;
+      boxes: number;
+      tables: number;
+      polylines: number;
+      linefills: number;
+      texts: string[];
+      /** How many the last frame painted: those in view, at prices on the scale. */
+      painted: { labels: number; lines: number; boxes: number; tables: number };
+    };
     /** What stopped a script, if anything did. */
     error: string | null;
   }[];

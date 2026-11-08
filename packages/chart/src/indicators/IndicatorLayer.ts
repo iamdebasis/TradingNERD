@@ -18,6 +18,8 @@ import {
   colorCss,
   compileCached,
   DEFAULT_SYMBOL,
+  type DrawingSnapshot,
+  EMPTY_DRAWINGS,
   type LogEntry,
   type RequestFeed,
   type RequestKey,
@@ -45,6 +47,7 @@ import {
 import type { AxisContext } from '../plugins/axisLabel';
 import { type BackgroundBand, BackgroundPrimitive } from '../plugins/BackgroundPrimitive';
 import { CrosshairPrimitive } from '../plugins/CrosshairPrimitive';
+import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
 import { type BandEdge, FillPrimitive, type FillShape } from '../plugins/FillPrimitive';
 import { type BarExtent, type MarkSet, MarksPrimitive } from '../plugins/MarksPrimitive';
 import { type ValueLabel, ValueLabelsPrimitive } from '../plugins/ValueLabelsPrimitive';
@@ -141,6 +144,8 @@ class IndicatorView {
   background: BackgroundPrimitive | null = null;
   crosshair: CrosshairPrimitive | null = null;
   labels: ValueLabelsPrimitive | null = null;
+  /** A script's labels, lines, boxes, tables, polylines and linefills. */
+  drawings: DrawingsPrimitive | null = null;
   /** Prices of its pane's tick labels, so its labels can hide the ones they cover. */
   tickPrices: readonly number[] = [];
   /** The libraries' revision a script was compiled with. */
@@ -219,6 +224,18 @@ export interface IndicatorDebugState {
   backgrounds: string[];
   /** Its value labels on the price axis, as drawn. */
   valueLabels: string[];
+  /** How many of each drawing a script has on the chart, and its labels' and cells' text. */
+  drawings: {
+    labels: number;
+    lines: number;
+    boxes: number;
+    tables: number;
+    polylines: number;
+    linefills: number;
+    texts: string[];
+    /** How many the last frame painted: those in view, at prices on the scale. */
+    painted: { labels: number; lines: number; boxes: number; tables: number };
+  };
   /** What stopped a script, if anything did. */
   error: string | null;
 }
@@ -294,6 +311,7 @@ export class IndicatorLayer {
   private readonly theme: ChartTheme;
   private readonly font: string;
   private views: IndicatorView[] = [];
+  private readonly priceSeries: ISeriesApi<SeriesType> | null;
   private bars: readonly Bar[] = [];
   private times: readonly number[] = [];
   private fromListing = false;
@@ -308,7 +326,17 @@ export class IndicatorLayer {
   /** Where scripts' requests get their data (the app's loader); none: they wait. */
   private feed: RequestFeed | undefined;
 
-  constructor(chart: IChartApi, theme: ChartTheme, font: string) {
+  /**
+   * `priceSeries`: the chart's own bars, on the price pane's scale. An overlay script's drawings
+   * find their prices through it when the script has no plot with values.
+   */
+  constructor(
+    chart: IChartApi,
+    theme: ChartTheme,
+    font: string,
+    priceSeries: ISeriesApi<SeriesType> | null = null,
+  ) {
+    this.priceSeries = priceSeries;
     this.chart = chart;
     this.theme = theme;
     this.font = font;
@@ -703,6 +731,10 @@ export class IndicatorLayer {
         })) ?? [],
       backgrounds: view.background?.current().map((band) => band.id) ?? [],
       valueLabels: view.labels?.current().map((label) => label.text) ?? [],
+      drawings: {
+        ...drawingCounts(view.drawings?.current() ?? EMPTY_DRAWINGS),
+        painted: view.drawings?.paintedCounts() ?? { labels: 0, lines: 0, boxes: 0, tables: 0 },
+      },
       error: view.error,
     }));
   }
@@ -895,6 +927,11 @@ export class IndicatorLayer {
       view.labels = new ValueLabelsPrimitive(this.font, this.theme.labelText, axis);
       host.attachPrimitive(view.fill);
       host.attachPrimitive(view.labels);
+      // A script's drawings, on the scale of its pane's plots (the candles' for an overlay).
+      if (view.program) {
+        view.drawings = new DrawingsPrimitive(this.font, (price) => this.drawingY(view, price));
+        host.attachPrimitive(view.drawings);
+      }
       // barcolor() colors the chart's bars instead (ChartController).
       if ((definition.backgrounds ?? []).some((spec) => !spec.bars)) {
         view.background = new BackgroundPrimitive();
@@ -1294,6 +1331,13 @@ export class IndicatorLayer {
     view.fill?.update(stopped ? [] : this.fills(view));
     view.background?.update(stopped ? [] : this.backgrounds(view));
     view.labels?.update(stopped ? [] : this.valueLabels(view));
+    view.drawings?.update(
+      stopped ? EMPTY_DRAWINGS : (view.script?.run.drawings ?? EMPTY_DRAWINGS),
+      {
+        times: this.times,
+        bars: this.barExtent,
+      },
+    );
     for (const plot of view.plots) {
       const set = stopped ? null : this.markSet(view, plot);
       plot.marks?.update(set ? [set] : [], this.barExtent);
@@ -1308,6 +1352,22 @@ export class IndicatorLayer {
         last + (plot.spec.look?.offset ?? 0) >= this.drawnFrom(view, plot.spec, plot.index);
       plot.track.applyOptions(show ? { price: value, lineVisible: true } : { lineVisible: false });
     }
+  }
+
+  /**
+   * Where a price is on a script's pane: through a series with values on its scale, since one
+   * with none gives no place (a script that only draws). An overlay's scale is the bars'.
+   */
+  private drawingY(view: IndicatorView, price: number): number | null {
+    if (!view.ownPane && this.priceSeries) {
+      const y = this.priceSeries.priceToCoordinate(price);
+      if (y !== null) return y;
+    }
+    for (const series of view.series) {
+      const y = series.priceToCoordinate(price);
+      if (y !== null) return y;
+    }
+    return null;
   }
 
   /** The chart's bars' highs and lows, for marks above and below them. */
@@ -1519,4 +1579,20 @@ export class IndicatorLayer {
     }
     return ys;
   }
+}
+
+/** A script's drawings as the debug state counts them. */
+function drawingCounts(d: DrawingSnapshot): Omit<IndicatorDebugState['drawings'], 'painted'> {
+  const cells = d.tables.flatMap((table) =>
+    table.cells.flatMap((row) => row.map((cell) => cell?.text ?? '')),
+  );
+  return {
+    labels: d.labels.length,
+    lines: d.lines.length,
+    boxes: d.boxes.length,
+    tables: d.tables.length,
+    polylines: d.polylines.length,
+    linefills: d.linefills.length,
+    texts: [...d.labels.map((label) => label.text), ...cells].filter((text) => text !== ''),
+  };
 }

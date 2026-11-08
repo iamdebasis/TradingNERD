@@ -135,6 +135,24 @@ describe('the lexer', () => {
     expect(() => lex('//@version=5\ns = """a"""')).toThrow(/need \/\/@version=6/);
     expect(() => lex('s = """a\nb', 6)).toThrow(/no closing """/);
   });
+
+  it('runs a "…" string on into a wrapped line, the break and the indentation adding nothing', () => {
+    // The manual's own (Lines and boxes): a tooltip constant wrapped with two spaces, outside
+    // brackets; and its wrapped log.info() message, inside them (Time).
+    const source = [
+      'const string TIP = "and then set',
+      '  the bottom margin"',
+      'log.info(',
+      '     "a: {0}\\n',
+      '     b: {1}", 1, 2)',
+    ].join('\n');
+    const strings = lex(source).lines.flatMap((line) =>
+      line.tokens.filter((t) => t.kind === 'string').map((t) => t.value),
+    );
+    expect(strings).toEqual(['and then setthe bottom margin', 'a: {0}\nb: {1}']);
+    // A line indented by a multiple of four starts a block: the string is left open.
+    expect(() => lex('s = "open\n    x = 1')).toThrow(/no closing quote/);
+  });
 });
 
 describe('the parser', () => {

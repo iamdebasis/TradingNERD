@@ -198,6 +198,14 @@ describe('Pine user functions (Pine docs, User-defined functions)', () => {
     const body = ['spread(a, b) =>', '    d = a - b', '    d * 2', 'plot(spread(close, open))'];
     expect(series(body.join('\n'), BARS.slice(0, 2))).toEqual([0, 2]);
   });
+
+  it('runs a one-line body of statements separated by commas, its value the last', () => {
+    // The v6 manual's own: `printTable(txt) => var table t = table.new(…), table.cell(…)`.
+    expect(
+      series('f(x) => var float first = x, x - first\nplot(f(close))', BARS.slice(0, 3)),
+    ).toEqual([0, 1, 2]);
+    expect(series('g(x) => d = x * 2, [d, d + 1]\n[a, b] = g(close)\nplot(b)', ONE)).toEqual([21]);
+  });
 });
 
 describe('Pine’s compile errors, in its own words where it has them (Pine docs, Errors)', () => {
@@ -306,8 +314,8 @@ plot(close)`),
   });
 
   it('says plainly what tradingNerd doesn\u2019t run yet, without milestone codes', () => {
-    expect(error('label.new(bar_index, high, "x")\nplot(close)')).toMatch(
-      /isn't supported in tradingNerd yet: drawings/,
+    expect(error('x = ticker.renko(syminfo.tickerid, "ATR", 10)\nplot(close)')).toMatch(
+      /isn't supported in tradingNerd yet: Renko/,
     );
     expect(error('x = request.financial("NASDAQ:AAPL", "TOTAL_REVENUE", "FQ")\nplot(x)')).toMatch(
       /financial data comes in a later update/,
@@ -315,7 +323,9 @@ plot(close)`),
     expect(compileError('//@version=6\nstrategy("x")\nplot(close)').message).toMatch(
       /Strategy Tester/,
     );
-    expect(error('label.new(bar_index, high, "x")\nplot(close)')).not.toMatch(/\(P\d\)/);
+    expect(error('x = ticker.renko(syminfo.tickerid, "ATR", 10)\nplot(close)')).not.toMatch(
+      /\(P\d\)/,
+    );
   });
 
   it('points at where the error is', () => {

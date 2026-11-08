@@ -2,7 +2,7 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 8 November 2026 (Pine compatibility), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 8 November 2026 (Pine drawings), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
@@ -10,7 +10,7 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 |---|---|
 | Branches | `main` is at `684091e` (pull request #4 (https://github.com/iamdebasis/TradingNERD/pull/4) merged on 7 November: P2 and P4; #3 before it: P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
 | Merged | **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, merged on 8 November: `main` is at `6ee4bf0` |
-| Under way | **Pine like TradingView's, for any script** (8 November, the user's YES: "FIX whatever it takes to run any possible scripts like tradingview … and DELIVER"), on `claude/keen-allen-7wubfe` from `main` at `6ee4bf0`, in steps: 1. compatibility with older versions (done: §2c); 2. drawings (labels, lines, boxes, tables, polylines, linefills); 3. strategies and the Strategy Tester; 4. alerts, and Renko, Kagi, Line Break and Point & Figure data |
+| Under way | **Pine like TradingView's, for any script** (8 November, the user's YES: "FIX whatever it takes to run any possible scripts like tradingview … and DELIVER"), on `claude/keen-allen-7wubfe` from `main` at `6ee4bf0`, in steps: 1. compatibility with older versions (done: §2c); 2. drawings (done: §2d); 3. strategies and the Strategy Tester; 4. alerts, and Renko, Kagi, Line Break and Point & Figure data. Steps 1 and 2 are pull request #6 (https://github.com/iamdebasis/TradingNERD/pull/6), open |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
@@ -32,6 +32,20 @@ Your VuManChu B Divergences (v4) failed to compile: "Cannot call 'ta.valuewhen' 
 - **The corpus, grown from 271 to 854 community scripts:** fixed `fill(hline1, hline2)`, `linktoseries`, a repeated `transp`, `plot(style = dashed)` and `array.new(na)`. 723 run; of the 722 that need neither drawings nor strategies, 683 (94.6%); the rest are mostly the scripts' own mistakes. Known gaps: SPEC §11, item 122.
 
 **Left:** drawings (327 of the corpus's failures), strategies (169), TradingView's own data (no free source), the chart types Renko and the like: the next steps of this work.
+
+## 2d. Pine drawings (8 November)
+
+Step 2 of making any script run as on TradingView: **labels, lines, boxes, tables, polylines and linefills**, in the engine and on the chart (SPEC §5.22, §6.19).
+
+- **In the engine:** every drawing function of the v6 reference, with `chart.point`, their constants, methods and casts. The last 50 of each kind by default and `max_*_count` up to 500 (polylines 100), the oldest going first; one table per position; a live bar's update rolls back what it drew, as TradingView does.
+- **On the chart:** where their bars (by index or time, past the last bar too) and prices are, an overlay's on the candles' scale; tables at the pane's corners. Checked in the cloud's browser: a table, label bubbles, an extended line, a box with its text and markers below the bars. That check found that a script without plots placed no prices (the chart library places none on a series without values), fixed.
+- **What the drawing scripts found in the engine, all fixed:** screeners' requests in loops and their tuple count, a request's context missing a declaration, one-line functions of several statements, a string wrapped onto the next line, `ta.change()` and `ta.valuewhen()` types, "UTC0", `editable` from an input, v5's `bool == 1`, a `const` label (SPEC §3, 8 November).
+
+**The corpus now:** the manual's 868 of 1,069 examples run (560 before step 1), 310 of its 318 drawing examples; the community's 789 of 854 (723 before), all 65 of its drawing scripts. What's left is strategies (169 scripts), TradingView's own data, published libraries to paste in, and the scripts' own mistakes.
+
+**Checks:** typecheck and lint clean; unit tests all pass (core 350, indicators 78, Pine 342, chart 99, web 202, gateway 570); the new browser test passes in the cloud, and fails with the price fix taken out. The rest of the browser suite, `pnpm verify` and the looks against TradingView are the Mac's (§9).
+
+**Provisional** (SPEC §11, items 123 to 127): the drawings' sizes and padding, a request's tuple count, the wrapped string's join, drawings in a pane without plots, and two manual examples that break v6's own rules.
 
 ## 2. The hand-over check of 8 November (pull request #5)
 
@@ -222,7 +236,7 @@ The full list is SPEC §11; these are the ones that matter most.
 
 ## 9. Next steps, in order
 
-**1. Pull request #5:** the user merges it on GitHub (nothing else waits on it).
+**1. Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6): steps 1 and 2 of Pine for any script (§2c, §2d). The user merges it on GitHub; step 3 carries on from it.
 
 **2. On the Mac, after pulling `main`** (none of this can be done in the cloud):
 1. `pnpm install` (P1 added `monaco-editor` and `packages/pine`), then restart `pnpm dev`: the gateway and the web app are on protocol v12.
@@ -230,9 +244,9 @@ The full list is SPEC §11; these are the ones that matter most.
 3. The performance budgets with Volume and RSI: `pnpm exec playwright test perf --no-deps` (in `apps/web`).
 4. `pnpm test:live`: Binance's futures APIs, Bybit and the spot exchanges, which the cloud can't reach.
 5. A read-only check against the running app (AGENTS.md): the user's OI script on BTCUSDT 1h, its values against TradingView's at a few hours. The first daily load of `BINANCE:BTCUSDTPERP_OI` waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
-6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17).
+6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d).
 
-**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118).
+**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123).
 
 **4. M9f** (on the Mac: the download runs on its gateway, and the ruler needs macOS's `sips`):
 1. Size step 2b and tell the user how many requests it needs.
@@ -240,4 +254,4 @@ The full list is SPEC §11; these are the ones that matter most.
 3. Report the result year by year, then ask YES to switch M9f on in the charts.
 4. Update SPEC (§5.14 status, §8, §11) and this file, then ask YES to commit, and again to push and open a pull request.
 
-**5. Then the plan's next milestones** (SPEC §8), each with its own plan and YES: P3 drawings (labels, lines, boxes, tables), P5 strategies; the open items P2 and P4 left (SPEC §11, items 100 and 111); Phase 3 (Kraken's history files); and the user's list above.
+**5. Then the plan's next milestones** (SPEC §8): strategies and the Strategy Tester, then alerts and Renko, Kagi, Line Break and Point & Figure data (steps 3 and 4 of the work under way, on the user's YES of 8 November); the open items P2 and P4 left (SPEC §11, items 100 and 111); Phase 3 (Kraken's history files); and the user's list above.

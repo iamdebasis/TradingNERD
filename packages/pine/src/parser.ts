@@ -595,9 +595,16 @@ class Parser {
     if (tokens.atEnd()) {
       body = this.block(line.indent + 4, arrow);
     } else {
-      const rest = new Tokens(tokens.rest(), line);
-      const statement = this.statement(rest, line, false);
-      body = { statements: [statement], span: statement.span };
+      // One line can hold several statements, separated by commas; the last gives the result:
+      // `printTable(txt) => var table t = table.new(…), table.cell(t, 0, 0, txt)` (the v6
+      // manual, Colors). A structure keeps the rest of its line.
+      const rest = tokens.rest();
+      const first = rest[0];
+      const parts =
+        first?.kind === 'keyword' && STRUCTURES.has(first.text) ? [rest] : splitStatements(rest);
+      const statements = parts.map((part) => this.statement(new Tokens(part, line), line, false));
+      const last = statements.at(-1) as Stmt;
+      body = { statements, span: spanOf(statements[0]?.span ?? last.span, last.span) };
     }
     if (methodToken && params.length === 0) {
       throw new PineCompileError('A method needs a first parameter: the value it works on', name);

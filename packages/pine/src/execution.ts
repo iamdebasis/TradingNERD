@@ -67,6 +67,7 @@ export class Execution {
     rt.changed = changed;
     rt.realtimeFrom = realtimeFrom;
     rt.outputs = this.outputs;
+    if (program.indicator?.drawings) rt.drawings.limits = { ...program.indicator.drawings };
   }
 
   /** The runtime it runs in: its variables, and a request's captured values. */

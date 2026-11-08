@@ -62,3 +62,21 @@ plot(str.length(tf) + str.length(s) + (t > 0 ? 1 : 0) + p + str.length(n))`),
     expect(plots(source, bars)[0]?.[0]).toBe(1);
   });
 });
+
+describe('settings that take an input', () => {
+  it("lets a bool input decide whether a plot's style is editable (an input bool in the reference)", () => {
+    // Published scripts do: `plot(…, editable = i_rsi_show_bull)` (found 2026-11-08).
+    const p = program(
+      indicator(`show = input.bool(true, "Editable")
+plot(close, editable = show)
+hline(50, editable = show)`),
+    );
+    expect(p.describe([]).plots[0]?.editable).toBe(true);
+    expect(p.describe([false]).plots[0]?.editable).toBe(false);
+    expect(p.describe([false]).hlines[0]?.editable).toBe(false);
+    // A series can't decide it.
+    expect(compileError(indicator('plot(close, editable = close > open)')).message).toMatch(
+      /editable/,
+    );
+  });
+});
