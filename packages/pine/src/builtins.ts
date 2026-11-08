@@ -720,9 +720,10 @@ const CALLS: Record<string, Handler> = {
     if (x.base === 'bool' && c.version >= 6) {
       c.fail("na() doesn't take a bool in Pine v6: a bool is always true or false", x.span);
     }
+    // v5's bools can be na (v6 migration guide), held as null; v6's never are.
     const isNa =
       x.base === 'bool'
-        ? () => false
+        ? (v: Value) => v === null || v === undefined
         : isNumeric(x.base) || x.base === 'color'
           ? (v: Value) => typeof v === 'number' && Number.isNaN(v)
           : x.base === 'string'
@@ -749,7 +750,9 @@ const CALLS: Record<string, Handler> = {
     const pick = (value: Value, rt: Runtime | null, env: FoldEnv | null): Value => {
       const missing = isString
         ? value === null || value === ''
-        : typeof value === 'number' && Number.isNaN(value);
+        : base === 'bool'
+          ? value === null || value === undefined
+          : typeof value === 'number' && Number.isNaN(value);
       if (!missing) return value;
       if (rt) return r(rt);
       return replacement?.fold?.(env as FoldEnv) ?? fallback;
@@ -769,8 +772,22 @@ const CALLS: Record<string, Handler> = {
   },
   fixnan: (c, call, scope) => {
     const args = new Args(c, call, scope, ['source'], 1);
-    if (args.get('source')?.base === 'bool' && c.version >= 6) {
-      c.fail("fixnan() doesn't take a bool in Pine v6", call.span);
+    const given = args.get('source');
+    if (given?.base === 'bool') {
+      if (c.version >= 6) c.fail("fixnan() doesn't take a bool in Pine v6", call.span);
+      // v5's bools can be na: fixnan() keeps the last one that isn't (v6 migration guide).
+      const b = given.ev;
+      const na = c.boolNa;
+      const fn = c.rt.register(new FixnanFn());
+      return series(
+        'bool',
+        (rt) => {
+          const v = b(rt);
+          const n = fn.call(v === true ? 1 : v === false ? 0 : Number.NaN, rt.final);
+          return Number.isNaN(n) ? na : n === 1;
+        },
+        call.span,
+      );
     }
     const source = args.number('source') as NumEv;
     const fn = c.rt.register(new FixnanFn());

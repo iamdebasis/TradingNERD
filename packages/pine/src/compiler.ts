@@ -558,6 +558,12 @@ export class Compiler {
   readonly quals = new Map<object, Qual>();
   /** The script's Pine version: older versions keep their own rules (v6 migration guide). */
   readonly version: number;
+  /**
+   * A bool's na. In v5 and older a bool is true, false or na: na() finds it, it isn't equal to
+   * false, and a condition reads it as false (v6 migration guide, "Boolean values cannot be
+   * na"); v6 has no na bool, so it reads false.
+   */
+  readonly boolNa: Value;
   /** Every user-defined type and enum the script and its libraries declare, by key. */
   readonly types = new Map<string, TypeDef>();
   readonly enums = new Map<string, EnumDef>();
@@ -606,6 +612,7 @@ export class Compiler {
     this.strict = strict;
     this.options = options;
     this.version = versionOf(script);
+    this.boolNa = this.version <= 5 ? null : false;
     this.history = historyNames(script.statements);
     this.plan = options.context ?? null;
   }
@@ -1316,13 +1323,14 @@ export class Compiler {
   }
 
   private declaration(stmt: Extract<Stmt, { kind: 'decl' }>, scope: Scope): CompiledBlock {
-    const value = this.expr(stmt.value, scope);
+    let value = this.expr(stmt.value, scope);
     if (value.base === 'tuple')
       this.fail('A tuple needs a tuple declaration: [a, b] = …', stmt.value.span);
     if (value.base === 'void') this.fail('This expression has no value to assign', stmt.value.span);
     let base: Base = value.base;
     if (stmt.type) {
       const declared = this.resolveType(stmt.type, stmt.nameSpan);
+      value = this.boolFor(value, declared);
       if (!this.assignableTo(value.base, declared)) {
         this.fail(
           `Cannot assign a value of type '${displayType(value.base)}' to the variable "${stmt.name}" of type '${displayType(declared)}'`,
@@ -1365,7 +1373,7 @@ export class Compiler {
     if (v.qual <= INPUT) v.fold = value.fold;
     if (stmt.qualifier === 'simple' && this.version >= 6) v.simpleOnly = true;
     const slot = v.slot;
-    const cast = castTo(value, base);
+    const cast = castTo(value, base, this.boolNa);
     return {
       run: slot.mode ? (rt) => slot.push(slot.kept ? null : cast(rt)) : (rt) => slot.push(cast(rt)),
       base,
@@ -1458,7 +1466,10 @@ export class Compiler {
     if (v.isConst) this.fail(`"${name}" is const: it can't be reassigned`, target.span);
     this.noteWrite(v, true);
     if (stmt.op !== ':=') this.noteRead(v);
-    const value = this.expr(stmt.value, scope);
+    const value =
+      stmt.op === ':='
+        ? this.boolFor(this.expr(stmt.value, scope), v.base)
+        : this.expr(stmt.value, scope);
     if (v.simpleOnly && value.qual > SIMPLE) {
       this.fail(
         `"${name}" is declared simple, so it can't take a ${QUAL_NAMES[value.qual]} value`,
@@ -1476,7 +1487,7 @@ export class Compiler {
           stmt.value.span,
         );
       }
-      const cast = castTo(value, v.base);
+      const cast = castTo(value, v.base, this.boolNa);
       return {
         run: (rt) => {
           const next = cast(rt);
@@ -1520,7 +1531,10 @@ export class Compiler {
   ): CompiledBlock {
     const { def, index } = this.field(object, fieldName, stmt.target.span);
     const field = def.fields[index] as TypeDef['fields'][number];
-    const value = this.expr(stmt.value, scope);
+    const value =
+      stmt.op === ':='
+        ? this.boolFor(this.expr(stmt.value, scope), field.type)
+        : this.expr(stmt.value, scope);
     const obj = object.ev;
     let next: (rt: Runtime, o: PineObject) => Value;
     if (stmt.op === ':=') {
@@ -1530,7 +1544,7 @@ export class Compiler {
           stmt.value.span,
         );
       }
-      const cast = castTo(value, field.type);
+      const cast = castTo(value, field.type, this.boolNa);
       next = (rt) => cast(rt);
     } else {
       let current: PineObject | null = null;
@@ -1697,7 +1711,15 @@ export class Compiler {
     return {
       base,
       qual: v.qual,
-      ev: base === 'bool' ? () => slot.get() === true : () => slot.get() ?? na,
+      ev:
+        base !== 'bool'
+          ? () => slot.get() ?? na
+          : this.boolNa === null
+            ? () => {
+                const value = slot.get();
+                return value === true ? true : value === false ? false : null;
+              }
+            : () => slot.get() === true,
       fold: v.qual <= INPUT ? v.fold : undefined,
       span,
     };
@@ -1792,6 +1814,21 @@ export class Compiler {
   }
 
   /** A value where a bool is needed: v5 and older cast numbers (0 and na are false). */
+  /**
+   * A value going where a bool is required: a function's bool parameter, a bool variable or
+   * field. v5 and older cast a number there as in conditions ("when an expression or function
+   * requires a boolean value ... na, 0, or 0.0 are considered false, and any other value is
+   * considered true": v6 migration guide, Explicit bool casting); v6 keeps it an error.
+   */
+  /** A type's na in this script: a bool's is boolNa (v5 and older have one). */
+  naFor(base: Base): Value {
+    return base === 'bool' ? this.boolNa : naOf(base);
+  }
+
+  boolFor(value: Compiled, to: Base): Compiled {
+    return to === 'bool' && isNumeric(value.base) ? this.toBool(value) : value;
+  }
+
   toBool(c: Compiled): Compiled {
     if (c.base === 'bool') return c;
     if (c.base === 'na') return { ...c, base: 'bool', ev: () => false, fold: () => false };
@@ -1872,8 +1909,8 @@ export class Compiler {
         qual,
         ev: eager
           ? (rt) => {
-              const x = a(rt) as boolean;
-              const y = b(rt) as boolean;
+              const x = a(rt) === true;
+              const y = b(rt) === true;
               return x && y;
             }
           : (rt) => (a(rt) as boolean) && (b(rt) as boolean),
@@ -1886,8 +1923,8 @@ export class Compiler {
       qual,
       ev: eager
         ? (rt) => {
-            const x = a(rt) as boolean;
-            const y = b(rt) as boolean;
+            const x = a(rt) === true;
+            const y = b(rt) === true;
             return x || y;
           }
         : (rt) => (a(rt) as boolean) || (b(rt) as boolean),
@@ -2078,8 +2115,8 @@ export class Compiler {
       );
     }
     const c = cond.ev;
-    const t = castTo(then, base);
-    const o = castTo(otherwise, base);
+    const t = castTo(then, base, this.boolNa);
+    const o = castTo(otherwise, base, this.boolNa);
     const fc = cond.fold;
     const ft = then.fold;
     const fo = otherwise.fold;
@@ -2116,7 +2153,7 @@ export class Compiler {
         this.noteRead(v);
         const slot = v.slot;
         const base = v.base;
-        const na = naOf(base);
+        const na = this.naFor(base);
         return {
           base,
           qual: SERIES,
@@ -2156,7 +2193,7 @@ export class Compiler {
     if (target.literal) this.convertEdit({ span: expr.span, replace: this.text(target.span) });
     const slot = this.rt.slot(null, true, isNumericSlot(target.base));
     const ev = target.ev;
-    const na = naOf(target.base);
+    const na = this.naFor(target.base);
     return {
       base: target.base,
       qual: SERIES,
@@ -2188,7 +2225,7 @@ export class Compiler {
     const { base, items } = this.unifyBlocks(all, expr.span);
     if (used && !otherwise) this.needWhole(base, 'An if', 'an else', expr.span);
     // No block ran: na, false for bool (Pine docs, if structure).
-    const empty = base === 'tuple' ? (items ?? []).map(naOf) : naOf(base);
+    const empty = base === 'tuple' ? (items ?? []).map((b) => this.naFor(b)) : this.naFor(base);
     const evs = conds.map((cond) => cond.ev);
     const runs = bodies.map((body) => body.run);
     const otherRun = otherwise?.run ?? null;
@@ -2291,7 +2328,7 @@ export class Compiler {
     if (used && matches.every((match) => match !== null)) {
       this.needWhole(base, 'A switch', 'a default', expr.span);
     }
-    const empty = base === 'tuple' ? (items ?? []).map(naOf) : naOf(base);
+    const empty = base === 'tuple' ? (items ?? []).map((b) => this.naFor(b)) : this.naFor(base);
     const evs = matches.map((match) => match?.ev ?? null);
     const runs = bodies.map((body) => body.run);
     const count = runs.length;
@@ -2349,7 +2386,7 @@ export class Compiler {
     const s = step?.ev ?? (() => 1);
     const slot = counter.slot;
     const run = body.run;
-    const empty = naOf(body.base);
+    const empty = this.naFor(body.base);
     // v6 reads the end before every iteration; v5 and older once (v6 guide: Dynamic for loop
     // boundaries).
     const dynamicEnd = this.version >= 6;
@@ -2452,7 +2489,7 @@ export class Compiler {
     this.rt.loopDepth = this.loops;
     const run = body.run;
     const collection = target.ev;
-    const empty = naOf(body.base);
+    const empty = this.naFor(body.base);
     const elem = elemOf(base);
     // Its value is its body's on the last iteration that ran to its end, as a for loop's (Pine
     // docs, Loops): the reference's for...in example returns it from a function.
@@ -2518,7 +2555,7 @@ export class Compiler {
     this.loops--;
     this.rt.loopDepth = this.loops;
     const run = body.run;
-    const empty = naOf(body.base);
+    const empty = this.naFor(body.base);
     return {
       base: body.base,
       items: body.items,
@@ -2669,7 +2706,7 @@ export class Compiler {
         if (i < 0) this.fail(`"${def.name}" has no field "${arg.name}"`, arg.span);
       }
       const field = def.fields[i] as TypeDef['fields'][number];
-      const value = this.expr(arg.value, scope);
+      const value = this.boolFor(this.expr(arg.value, scope), field.type);
       if (!this.assignableTo(value.base, field.type)) {
         this.fail(
           `Cannot set the field "${field.name}" of type '${displayType(field.type)}' to '${displayType(value.base)}'`,
@@ -2682,19 +2719,19 @@ export class Compiler {
     this.module = def.module;
     const evs = def.fields.map((field, i) => {
       const given = values[i];
-      if (given) return castTo(given, field.type);
+      if (given) return castTo(given, field.type, this.boolNa);
       if (!field.default) {
         const na = naOf(field.type);
         return () => na;
       }
-      const fallback = this.expr(field.default, def.module.scope);
+      const fallback = this.boolFor(this.expr(field.default, def.module.scope), field.type);
       if (!this.assignableTo(fallback.base, field.type)) {
         this.fail(
           `The default of the field "${field.name}" must be '${displayType(field.type)}'`,
           field.default.span,
         );
       }
-      return castTo(fallback, field.type);
+      return castTo(fallback, field.type, this.boolNa);
     });
     this.module = outer;
     const key = def.key;
@@ -2826,10 +2863,11 @@ export class Compiler {
       bound[i] = value;
     }
     return params.map((param, i) => {
-      const value = bound[i];
+      let value = bound[i];
       if (value) {
         if (param.type) {
           const type = this.resolveType(param.type, param.span, fn.module);
+          value = this.boolFor(value, type);
           if (!this.assignableTo(value.base, type)) {
             this.fail(
               `Cannot call '${name}' with argument '${param.name}'='${this.text(value.span)}'. An argument of '${typeName(value)}' type was used but a '${displayType(type)}' is expected.`,
@@ -2885,7 +2923,7 @@ export class Compiler {
       const key = stableKey(param, expr);
       const v = this.define(fnScope, param.name, param.span, base, qual, key, null, false);
       v.fold = arg.fold;
-      return { slot: v.slot, ev: castTo(arg, base) };
+      return { slot: v.slot, ev: castTo(arg, base, this.boolNa) };
     });
     this.calling.push(id);
     // A function's body is its own: a loop around the call doesn't let it break.

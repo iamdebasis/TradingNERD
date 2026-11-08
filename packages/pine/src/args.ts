@@ -177,7 +177,11 @@ export class Args {
     };
   }
 
+  /** A bool argument; v5 and older cast a number given for it (Compiler.boolFor). */
   bool(name: string, max: Qual = SERIES): ((rt: Runtime) => boolean) | undefined {
+    const given = this.get(name);
+    if (given && isNumeric(given.base))
+      this.cache.set(this.index(name), this.c.boolFor(given, 'bool'));
     const value = this.check(name, (b) => b === 'bool' || b === 'na', qualWord(max, 'bool'), max);
     return value?.ev as ((rt: Runtime) => boolean) | undefined;
   }

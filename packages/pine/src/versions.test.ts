@@ -144,6 +144,67 @@ plot(bar_index ? 1 : 0)`).message,
     ).toMatch(/must be a bool/);
   });
 
+  it('casts numbers where a function or a bool variable needs a bool, in v4 and v5; v6 asks for one', () => {
+    // The v6 guide: v5 cast "when an expression or function requires a boolean value". Found
+    // with VuManChu B (v4), whose valuewhen() takes a price or na as its condition (2026-11-08).
+    const asNumber = first(`//@version=4
+study("Test")
+x = close > open ? close : na
+plot(valuewhen(x, close, 0) + barssince(x ? 1 : 0))`);
+    const asBool = first(`//@version=6
+indicator("Test")
+x = close > open
+plot(ta.valuewhen(x, close, 0) + ta.barssince(x))`);
+    expect(firstDifference(asNumber, asBool)).toBe(-1);
+    for (const body of [
+      'x = close > open ? 1 : 0\nplot(ta.valuewhen(x, close, 0))',
+      'x = close > open ? 1 : 0\nalertcondition(x, "a", "b")\nplot(close)',
+      'bool b = 0\nb := close > open ? 1 : 0\nplot(b ? 1 : 0)',
+      'f(bool up) => up ? 1 : 0\nplot(f(bar_index))',
+      'type T\n    bool up = 1\nt = T.new(0)\nt.up := 2\nplot(t.up ? 1 : 0)',
+    ]) {
+      expect(() => program(`//@version=5\nindicator("Test")\n${body}`)).not.toThrow();
+      expect(compileError(`//@version=6\nindicator("Test")\n${body}`).message).toMatch(
+        /bool|Cannot assign|Cannot set|default/,
+      );
+    }
+    expect(
+      first('//@version=5\nindicator("Test")\nbool b = bar_index % 2\nplot(b ? 1 : 0)').slice(0, 4),
+    ).toEqual([0, 1, 0, 1]);
+  });
+
+  it('gives v5 bools a third value, na, which na(), nz() and fixnan() see and == false doesn’t', () => {
+    // The v6 guide, "Boolean values cannot be na": in v5 "na is evaluated as false" when cast,
+    // "is not considered equal to false" with ==, and na() returns true for it.
+    const v5 = (body: string) =>
+      plots(
+        `//@version=5\nindicator("Test")\nbool b = na\nb := bar_index > 2 ? true : na\n${body}`,
+        bars,
+      ).map((p) => p.slice(0, 5));
+    expect(
+      v5(`plot(na(b) ? 1 : 0)
+plot(b == false ? 1 : 0)
+plot(nz(b) ? 1 : 0)
+plot(b and true ? 1 : 0)
+plot(na(b[1]) ? 1 : 0)
+plot(fixnan(bar_index == 1 ? true : bar_index == 3 ? false : na) ? 1 : 0)`),
+    ).toEqual([
+      [1, 1, 1, 0, 0],
+      [0, 0, 0, 0, 0],
+      [0, 0, 0, 1, 1],
+      [0, 0, 0, 1, 1],
+      [1, 1, 1, 1, 0],
+      [0, 1, 1, 0, 0],
+    ]);
+    // An if without else gives na in v5, false in v6.
+    expect(
+      first('//@version=5\nindicator("Test")\nx = if close < 0\n    true\nplot(na(x) ? 1 : 0)')[0],
+    ).toBe(1);
+    expect(
+      compileError('//@version=6\nindicator("Test")\nbool b = true\nplot(na(b) ? 1 : 0)').message,
+    ).toMatch(/na\(\) doesn't take a bool/);
+  });
+
   it('works out both sides of and/or in v5; v6 stops when the left side decides', () => {
     const body = `var a = array.new_int()
 f() =>

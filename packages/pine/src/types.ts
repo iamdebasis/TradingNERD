@@ -16,9 +16,11 @@ export const QUAL_NAMES = ['const', 'input', 'simple', 'series'] as const;
 
 /**
  * A value's type, as text (see ast.ts, TypeRef): the fundamental types; plot and hline handles;
- * the style constants' own types (plot.style_* is a plot_style, hline.style_* an hline_style,
- * plot.linestyle_* a plot_line_style, shape.* a shape_style, location.* a location_style,
- * size.* a size_style: the v6 reference); collections ("array<float>", "map<string, int>",
+ * the constants with types of their own in the v6 reference (plot.style_* a plot_style,
+ * hline.style_* an hline_style, plot.linestyle_* a plot_line_style, barmerge.*, order.*,
+ * scale.*, text.format_*, backadjustment.*, settlement_as_close.*); every other constant
+ * (shape.*, location.*, size.*, xloc.*, line.style_* and the rest) is a plain string, as the
+ * reference types them (checked 2026-11-08: 165 of its 237 constants); collections ("array<float>", "map<string, int>",
  * "matrix<float>"); drawing types; user-defined types and enums by their key (Compiler.types);
  * void, untyped na and tuples.
  */
@@ -30,29 +32,11 @@ const STRING_LIKE: ReadonlySet<string> = new Set([
   'plot_style',
   'hline_style',
   'plot_line_style',
-  'shape_style',
-  'location_style',
-  'size_style',
-  'xloc_style',
-  'yloc_style',
-  'text_align',
-  'text_wrap',
   'text_format',
-  'font_family',
-  'line_style',
-  'label_style',
-  'extend_style',
-  'position_style',
   'barmerge_gaps',
   'barmerge_lookahead',
   'order_style',
   'scale_style',
-  'currency_style',
-  'adjustment_style',
-  'dividends_style',
-  'earnings_style',
-  'splits_style',
-  'session_style',
   'backadjustment_style',
   'settlement_style',
 ]);
@@ -201,10 +185,13 @@ export function naOf(base: Base): Value {
   return null;
 }
 
-/** Converts a value to a declared type at run time: int → float stays a number; na → that type's na. */
-export function castTo(c: Compiled, base: Base): (rt: Runtime) => Value {
+/**
+ * Converts a value to a declared type at run time: int → float stays a number; na → that type's
+ * na. A bool's na is the compiler's (Compiler.boolNa): null in v5 and older, false in v6.
+ */
+export function castTo(c: Compiled, base: Base, boolNa: Value = false): (rt: Runtime) => Value {
   if (c.base === 'na') {
-    const na = naOf(base);
+    const na = base === 'bool' ? boolNa : naOf(base);
     return () => na;
   }
   return c.ev;

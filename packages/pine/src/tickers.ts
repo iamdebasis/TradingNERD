@@ -207,7 +207,8 @@ export function tickerCalls(): Record<string, Handler> {
 /** adjustment.*, backadjustment.* and settlement_as_close.* (the v6 reference). */
 export function tickerConstant(space: string, member: string, span: Span): Compiled | null {
   if (space === 'adjustment' && ['none', 'splits', 'dividends'].includes(member)) {
-    return constant('adjustment_style', member, span);
+    // A plain "const string" in the v6 reference, as are currency.*, session.* and the rest.
+    return constant('string', member, span);
   }
   if (space === 'backadjustment' && ['on', 'off', 'inherit'].includes(member)) {
     return constant('backadjustment_style', member, span);

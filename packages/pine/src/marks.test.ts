@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CANDLE_BORDER, CANDLE_WICK } from './marks.ts';
-import { closes, compileError, indicator, plots, program, runScript } from './testing.ts';
+import { closes, indicator, plots, program, runScript } from './testing.ts';
 import { COLORS, hexColor } from './values.ts';
 
 /**
@@ -87,13 +87,33 @@ plotarrow(close - open)`),
     expect(run.plotColors[1]?.[2]).toBe(COLORS.red);
   });
 
-  it('takes shape.*, location.* and size.* only where they belong', () => {
-    expect(compileError(indicator('plotshape(true, style = "circle")')).message).toMatch(/style/);
+  it('takes shape.*, location.* and size.* as the plain strings the v6 reference types them', () => {
     expect(
       program(
         indicator('plotchar(true, char = "▲", location = location.top, size = size.huge)'),
       ).describe([]).plots[0]?.mark,
     ).toMatchObject({ char: '▲', location: 'top', size: 'huge' });
+    // Kept in a string input and picked by the user, as scripts on TradingView do; the manual's
+    // own examples offer size.* in input.string()'s options (found 2026-11-08).
+    const picked = program(
+      indicator(`s = input.string(shape.circle, "Shape", options = [shape.circle, shape.cross])
+string where = location.belowbar
+z = input.string(size.small, "Size", options = [size.tiny, size.small, size.large])
+plotshape(true, style = s, location = where, size = z)`),
+    );
+    expect(picked.describe([]).plots[0]?.mark).toMatchObject({
+      shape: 'circle',
+      location: 'belowbar',
+      size: 'small',
+    });
+    expect(picked.describe(['cross', 'large']).plots[0]?.mark).toMatchObject({
+      shape: 'cross',
+      size: 'large',
+    });
+    // Text none of them has draws as the default would, with a warning.
+    const unknown = program(indicator('plotshape(true, style = "nope")'));
+    expect(unknown.describe([]).plots[0]?.mark).toMatchObject({ shape: 'xcross' });
+    expect(unknown.warnings.map((w) => w.message).join()).toMatch(/nope/);
   });
 });
 

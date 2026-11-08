@@ -40,18 +40,48 @@ export const LOCATIONS = ['abovebar', 'belowbar', 'top', 'bottom', 'absolute'] a
 /** Mark sizes (size.*). */
 export const SIZES = ['auto', 'tiny', 'small', 'normal', 'large', 'huge'] as const;
 
-/** shape.*, location.* and size.* constants by name; null when the name isn't one. */
+/**
+ * shape.*, location.* and size.* constants by name; null when the name isn't one. Each is a
+ * plain "const string" in TradingView's v6 reference, so a script can keep one in a string
+ * variable or offer them in input.string()'s options. Their text, the member's name, is ours:
+ * the reference doesn't give it (provisional, docs/SPEC.md §11).
+ */
 export function markConstant(space: string, member: string, span: Span): Compiled | null {
   if (space === 'shape' && (SHAPES as readonly string[]).includes(member)) {
-    return constant('shape_style', member, span);
+    return constant('string', member, span);
   }
   if (space === 'location' && (LOCATIONS as readonly string[]).includes(member)) {
-    return constant('location_style', member, span);
+    return constant('string', member, span);
   }
   if (space === 'size' && (SIZES as readonly string[]).includes(member)) {
-    return constant('size_style', member, span);
+    return constant('string', member, span);
   }
   return null;
+}
+
+/**
+ * A mark's style, location or size: text that must be one of its constants' values. One that
+ * isn't draws as the default would, with a warning when the script spells it out.
+ */
+function markText(
+  c: Compiler,
+  args: Args,
+  name: string,
+  allowed: readonly string[],
+  fallback: string,
+): Fold {
+  const given = args.get(name);
+  if (given?.literal && given.fold) {
+    const value = given.fold({ inputs: [] });
+    if (typeof value === 'string' && !allowed.includes(value)) {
+      c.warn(`"${value}" isn't a value '${name}' knows: it draws as "${fallback}"`, given.span);
+    }
+  }
+  const fold = args.foldedAs(name, 'string', fallback);
+  return (env) => {
+    const value = fold(env);
+    return typeof value === 'string' && allowed.includes(value) ? value : fallback;
+  };
 }
 
 /** A color argument: folded when it can't change from bar to bar, else read on each bar. */
@@ -210,14 +240,12 @@ function markCall(kind: 'shape' | 'char' | 'arrow'): Handler {
     const up = kind === 'arrow' ? colorOf(args, 'colorup', COLORS.lime as number) : null;
     const down = kind === 'arrow' ? colorOf(args, 'colordown', COLORS.red as number) : null;
     const mark: MarkDef = {
-      shape: kind === 'shape' ? args.foldedAs('style', 'shape_style', 'xcross') : () => null,
+      shape: kind === 'shape' ? markText(c, args, 'style', SHAPES, 'xcross') : () => null,
       // plotchar's default character isn't in the reference's text: ★ (provisional, §11).
       char: kind === 'char' ? args.foldedAs('char', 'string', '★') : () => null,
       location:
-        kind === 'arrow'
-          ? () => 'absolute'
-          : args.foldedAs('location', 'location_style', 'abovebar'),
-      size: kind === 'arrow' ? () => 'auto' : args.foldedAs('size', 'size_style', 'auto'),
+        kind === 'arrow' ? () => 'absolute' : markText(c, args, 'location', LOCATIONS, 'abovebar'),
+      size: kind === 'arrow' ? () => 'auto' : markText(c, args, 'size', SIZES, 'auto'),
       text: kind === 'arrow' ? '' : String(args.constant('text', '', 'string') ?? ''),
       textColor: { fold: textColor.fold, dynamic: textColor.dynamic },
       textPart: null,
