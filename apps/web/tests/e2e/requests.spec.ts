@@ -111,7 +111,7 @@ test('input.symbol is picked with Symbol Search, and the script asks for that sy
 }) => {
   await addScript(
     page,
-    '//@version=6\nindicator("Pick")\ns = input.symbol("BINANCE:ETHUSDT", "Symbol")\nplot(request.security(s, "D", close))\n',
+    '//@version=6\nindicator("Pick")\ns = input.symbol("BINANCE:ETHUSDT", "Symbol")\nn = input.int(14, "Length")\nplot(request.security(s, "D", close) + n * 0)\n',
   );
   await expect.poll(() => pointsOf(page)).toBeGreaterThan(0);
   await row(page, 'script-1').getByRole('button').first().dblclick();
@@ -127,6 +127,24 @@ test('input.symbol is picked with Symbol Search, and the script asks for that sy
   await page.keyboard.press('Enter');
   await expect(search).toHaveCount(0);
   await expect(field).toHaveText('BINANCE:LDOUSDT');
+  // It looks like the dialog's other fields, and a symbol too long for it ends in "…", whole on
+  // hover (checked in the running app, 2026-11-08: BINANCE:BTCUSDT.P_OI ran out of the field).
+  const look = (el: Element) => {
+    const css = getComputedStyle(el);
+    return [css.borderRadius, css.backgroundColor, css.borderTopColor, css.height].join(' ');
+  };
+  // Unfocused and not under the mouse, as the Length field is (both come back to the field
+  // after a pick, and a button lights its border under the mouse).
+  await field.evaluate((el) => (el as HTMLElement).blur());
+  await page.mouse.move(1, 1);
+  expect(await field.evaluate(look)).toBe(await settings.getByLabel('Length').evaluate(look));
+  expect(
+    await field.evaluate((el) => {
+      const css = getComputedStyle(el);
+      return [css.overflow, css.textOverflow, css.whiteSpace].join(' ');
+    }),
+  ).toBe('hidden ellipsis nowrap');
+  await expect(field).toHaveAttribute('title', 'BINANCE:LDOUSDT');
   await settings.getByRole('button', { name: 'Ok' }).click();
   await expect
     .poll(() => market.barRequests.some((query) => query.get('symbol') === 'BINANCE:LDOUSDT'))

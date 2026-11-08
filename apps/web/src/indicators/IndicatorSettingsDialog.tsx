@@ -393,6 +393,7 @@ function SymbolField({
         className={styles.symbolField}
         disabled={disabled}
         data-empty={value === '' || undefined}
+        title={value === '' ? undefined : value}
         onClick={() => setOpen(true)}
       >
         {value === '' ? "Chart's symbol" : value}
