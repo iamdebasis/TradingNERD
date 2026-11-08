@@ -24,6 +24,7 @@ export type {
   IndicatorValues,
   ScriptLibraries,
   ScriptLogs,
+  ScriptStrategy,
 } from './indicators/IndicatorLayer';
 export {
   type ChartIndicator,

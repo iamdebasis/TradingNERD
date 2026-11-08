@@ -39,6 +39,7 @@ const STRING_LIKE: ReadonlySet<string> = new Set([
   'scale_style',
   'backadjustment_style',
   'settlement_style',
+  'strategy_direction',
 ]);
 
 export const isStringLike = (base: Base) => STRING_LIKE.has(base);

@@ -2,7 +2,7 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 8 November 2026 (Pine drawings), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 8 November 2026 (Pine strategies and the Strategy Tester), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
@@ -10,7 +10,7 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 |---|---|
 | Branches | `main` is at `684091e` (pull request #4 (https://github.com/iamdebasis/TradingNERD/pull/4) merged on 7 November: P2 and P4; #3 before it: P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
 | Merged | **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, merged on 8 November: `main` is at `6ee4bf0` |
-| Under way | **Pine like TradingView's, for any script** (8 November, the user's YES: "FIX whatever it takes to run any possible scripts like tradingview … and DELIVER"), on `claude/keen-allen-7wubfe` from `main` at `6ee4bf0`, in steps: 1. compatibility with older versions (done: §2c); 2. drawings (done: §2d); 3. strategies and the Strategy Tester; 4. alerts, and Renko, Kagi, Line Break and Point & Figure data. Steps 1 and 2 are pull request #6 (https://github.com/iamdebasis/TradingNERD/pull/6), open |
+| Under way | **Pine like TradingView's, for any script** (8 November, the user's YES: "FIX whatever it takes to run any possible scripts like tradingview … and DELIVER"), on `claude/keen-allen-7wubfe` from `main` at `6ee4bf0`, in steps: 1. compatibility with older versions (done: §2c); 2. drawings (done: §2d); 3. strategies and the Strategy Tester (done: §2e); 4. alerts, and Renko, Kagi, Line Break and Point & Figure data. Steps 1 to 3 are pull request #6 (https://github.com/iamdebasis/TradingNERD/pull/6), open |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
@@ -32,6 +32,19 @@ Your VuManChu B Divergences (v4) failed to compile: "Cannot call 'ta.valuewhen' 
 - **The corpus, grown from 271 to 854 community scripts:** fixed `fill(hline1, hline2)`, `linktoseries`, a repeated `transp`, `plot(style = dashed)` and `array.new(na)`. 723 run; of the 722 that need neither drawings nor strategies, 683 (94.6%); the rest are mostly the scripts' own mistakes. Known gaps: SPEC §11, item 122.
 
 **Left:** drawings (327 of the corpus's failures), strategies (169), TradingView's own data (no free source), the chart types Renko and the like: the next steps of this work.
+
+## 2e. Pine strategies and the Strategy Tester (8 November)
+
+Step 3: **strategies run as on TradingView**, with its broker emulator, trades marked on the chart and the Strategy Tester (SPEC §5.23, §6.20).
+
+- **The engine:** `strategy()` with all 33 properties at the reference's defaults; `strategy.entry`, `order`, `exit` (take-profit, stop-loss, trailing stops, partial exits), `close`, `close_all`, `cancel`, `cancel_all`, `risk.*`; all 35 `strategy.*` variables and 26 trade functions. The emulator follows the manual's rules: fills from the next bar's open, the open → high → low → close path (or low first), gaps at the open, reversals, pyramiding, FIFO, OCA groups, commission, slippage, margin calls. Each rule is tested against the outcome the manual describes.
+- **On the chart:** each fill marked on the candles: blue arrows for long entries, red for short, purple for exits, with the order's name and size; a triangle at the fill price.
+- **The Strategy Tester:** below the chart, opening when a strategy is added: Overview (net profit, closed trades, percent profitable, profit factor, max drawdown, average trade and bars, the equity curve with drawdown and buy & hold), Performance Summary (All, Long, Short), List of Trades and Properties. The right toolbar's new button toggles it.
+- **Older versions:** v4/v5's `when =`, `strategy.close(id, when)`, a comment first in v5's `strategy.close_all()`, v4's bool `strategy.long`, and v4/v5 `?:` of a bool and a number.
+
+**The corpus now:** the manual's 1,023 of 1,069 examples run (868 before strategies), 155 of its 160 strategies; the community's 806 of 854 (789), 19 of its 20 strategies (SPEC §4.17).
+
+**Not built yet** (SPEC §11, item 129): the settings dialog's Properties tab; recalculating on order fills or every tick (the script runs once per bar, the default); the Bar Magnifier; another account currency; the live bar updates the strategy on each tick, where TradingView waits for its close. **Provisional** (item 128): the intrabar tie rule, quantity rounding, drawdown from highs and lows, the ratios, the markers' look.
 
 ## 2d. Pine drawings (8 November)
 
@@ -236,7 +249,7 @@ The full list is SPEC §11; these are the ones that matter most.
 
 ## 9. Next steps, in order
 
-**1. Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6): steps 1 and 2 of Pine for any script (§2c, §2d). The user merges it on GitHub; step 3 carries on from it.
+**1. Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6): steps 1 to 3 of Pine for any script (§2c, §2d, §2e). The user merges it on GitHub; step 4 carries on from it.
 
 **2. On the Mac, after pulling `main`** (none of this can be done in the cloud):
 1. `pnpm install` (P1 added `monaco-editor` and `packages/pine`), then restart `pnpm dev`: the gateway and the web app are on protocol v12.
@@ -244,9 +257,9 @@ The full list is SPEC §11; these are the ones that matter most.
 3. The performance budgets with Volume and RSI: `pnpm exec playwright test perf --no-deps` (in `apps/web`).
 4. `pnpm test:live`: Binance's futures APIs, Bybit and the spot exchanges, which the cloud can't reach.
 5. A read-only check against the running app (AGENTS.md): the user's OI script on BTCUSDT 1h, its values against TradingView's at a few hours. The first daily load of `BINANCE:BTCUSDTPERP_OI` waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
-6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d).
+6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d); a strategy's List of Trades and Performance Summary beside TradingView's Strategy Tester on the same symbol and timeframe (§2e).
 
-**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123).
+**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123); TradingView's Strategy Tester and a strategy's trade markers in the dark theme (item 128).
 
 **4. M9f** (on the Mac: the download runs on its gateway, and the ruler needs macOS's `sips`):
 1. Size step 2b and tell the user how many requests it needs.
@@ -254,4 +267,4 @@ The full list is SPEC §11; these are the ones that matter most.
 3. Report the result year by year, then ask YES to switch M9f on in the charts.
 4. Update SPEC (§5.14 status, §8, §11) and this file, then ask YES to commit, and again to push and open a pull request.
 
-**5. Then the plan's next milestones** (SPEC §8): strategies and the Strategy Tester, then alerts and Renko, Kagi, Line Break and Point & Figure data (steps 3 and 4 of the work under way, on the user's YES of 8 November); the open items P2 and P4 left (SPEC §11, items 100 and 111); Phase 3 (Kraken's history files); and the user's list above.
+**5. Then the plan's next milestones** (SPEC §8): alerts and Renko, Kagi, Line Break and Point & Figure data (step 4 of the work under way, on the user's YES of 8 November); the strategies' Properties tab and recalculation settings (SPEC §11, item 129); the open items P2 and P4 left (SPEC §11, items 100 and 111); Phase 3 (Kraken's history files); and the user's list above.

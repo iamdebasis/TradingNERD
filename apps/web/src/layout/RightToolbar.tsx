@@ -1,8 +1,8 @@
-import { ListIcon, PineIcon } from '../pine/icons';
+import { ListIcon, PineIcon, TesterIcon } from '../pine/icons';
 import styles from './RightToolbar.module.css';
 
 /** The panels the right toolbar opens. */
-export type RightPanel = 'watchlist' | 'pine';
+export type RightPanel = 'watchlist' | 'pine' | 'tester';
 
 /**
  * TradingView's right toolbar (its "widget bar"): a button per panel, the open one lit; a click
@@ -38,6 +38,16 @@ export function RightToolbar({
         onClick={() => onToggle('pine')}
       >
         <PineIcon />
+      </button>
+      <button
+        type="button"
+        className={styles.button}
+        aria-label="Strategy Tester"
+        title="Strategy Tester"
+        aria-pressed={open.includes('tester')}
+        onClick={() => onToggle('tester')}
+      >
+        <TesterIcon />
       </button>
     </nav>
   );

@@ -179,6 +179,27 @@ plot(bar_index ? 1 : 0)`).message,
     ).toMatch(/must be a bool/);
   });
 
+  it('makes a ?: of a bool and a number a bool in v4 and v5; v6 refuses it', () => {
+    // A published v4 strategy picks one of several signals, na when none.
+    expect(
+      first(`//@version=4
+study("Test")
+pick = 1
+sig = pick == 0 ? close > open : pick == 1 ? close < open : na
+plot(sig ? 1 : 0)`).slice(1, 3),
+    ).toEqual(
+      first(`//@version=6
+indicator("Test")
+plot(close < open ? 1 : 0)`).slice(1, 3),
+    );
+    expect(
+      compileError(`//@version=6
+indicator("Test")
+x = close > open ? true : 1
+plot(close)`).message,
+    ).toMatch(/same type/);
+  });
+
   it('compares a bool with a number as two bools in v5: `flag == 1` is `flag == true`', () => {
     // A published v5 script's `barcolor(vis and (test_50 == 1) ? …)` (found 2026-11-08).
     expect(

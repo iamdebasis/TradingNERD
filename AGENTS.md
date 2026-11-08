@@ -191,6 +191,6 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 
 See [docs/HANDOVER.md](docs/HANDOVER.md). As of 8 November 2026:
 - **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), and M9f's checkpoint, switched off in the charts. `main` is at `6ee4bf0`, public.
-- **Under way:** Pine like TradingView's for any script (the user's YES of 8 November): compatibility with older versions and drawings done (pull request #6); strategies, alerts and Renko-type data next.
+- **Under way:** Pine like TradingView's for any script (the user's YES of 8 November): compatibility with older versions, drawings, and strategies with the Strategy Tester done (pull request #6); alerts and Renko-type data next.
 - **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.
 - **Left for the Mac:** `pnpm verify`, `pnpm test:live` and the hand checks (HANDOVER §9).

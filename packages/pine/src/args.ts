@@ -122,6 +122,11 @@ export class Args {
     return this.bound[this.index(name)] !== undefined;
   }
 
+  /** Whether the function has this parameter at all (its version's list). */
+  knows(name: string): boolean {
+    return this.names.includes(name);
+  }
+
   raw(name: string): Arg | undefined {
     return this.bound[this.index(name)];
   }

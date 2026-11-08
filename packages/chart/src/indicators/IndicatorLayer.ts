@@ -25,6 +25,7 @@ import {
   type RequestKey,
   requestKeyText,
   type ScriptProgram,
+  type StrategyState,
 } from '@tradingnerd/pine';
 import {
   AreaSeries,
@@ -50,6 +51,7 @@ import { CrosshairPrimitive } from '../plugins/CrosshairPrimitive';
 import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
 import { type BandEdge, FillPrimitive, type FillShape } from '../plugins/FillPrimitive';
 import { type BarExtent, type MarkSet, MarksPrimitive } from '../plugins/MarksPrimitive';
+import { TradesPrimitive } from '../plugins/TradesPrimitive';
 import { type ValueLabel, ValueLabelsPrimitive } from '../plugins/ValueLabelsPrimitive';
 import type { ChartTheme } from '../theme';
 import {
@@ -146,6 +148,8 @@ class IndicatorView {
   labels: ValueLabelsPrimitive | null = null;
   /** A script's labels, lines, boxes, tables, polylines and linefills. */
   drawings: DrawingsPrimitive | null = null;
+  /** A strategy's fills, on the price pane whatever its own pane. */
+  trades: TradesPrimitive | null = null;
   /** Prices of its pane's tick labels, so its labels can hide the ones they cover. */
   tickPrices: readonly number[] = [];
   /** The libraries' revision a script was compiled with. */
@@ -199,6 +203,14 @@ class IndicatorView {
   }
 }
 
+/** A strategy on the chart, for the Strategy Tester. */
+export interface ScriptStrategy {
+  id: string;
+  title: string;
+  state: StrategyState;
+  error: string | null;
+}
+
 /** What the browser tests and the debug handle see of one indicator. */
 export interface IndicatorDebugState {
   id: string;
@@ -236,6 +248,8 @@ export interface IndicatorDebugState {
     /** How many the last frame painted: those in view, at prices on the scale. */
     painted: { labels: number; lines: number; boxes: number; tables: number };
   };
+  /** A strategy's fills, and how many the last frame marked; null for an indicator. */
+  trades: { fills: number; painted: number; closed: number; open: number } | null;
   /** What stopped a script, if anything did. */
   error: string | null;
 }
@@ -624,6 +638,17 @@ export class IndicatorLayer {
     return out;
   }
 
+  /** Each strategy on the chart, in the legend's order: its title and state (the Strategy Tester). */
+  strategies(): ScriptStrategy[] {
+    const out: ScriptStrategy[] = [];
+    for (const view of this.views) {
+      const state = view.script?.run.strategy;
+      if (!state || view.indicator.hidden) continue;
+      out.push({ id: view.indicator.id, title: view.definition.name, state, error: view.error });
+    }
+    return out;
+  }
+
   errors(): Map<string, string> {
     const errors = new Map<string, string>();
     for (const view of this.views) {
@@ -731,6 +756,14 @@ export class IndicatorLayer {
         })) ?? [],
       backgrounds: view.background?.current().map((band) => band.id) ?? [],
       valueLabels: view.labels?.current().map((label) => label.text) ?? [],
+      trades: view.script?.run.strategy
+        ? {
+            fills: view.script.run.strategy.fills.length,
+            painted: view.trades?.paintedCount() ?? 0,
+            closed: view.script.run.strategy.closed.length,
+            open: view.script.run.strategy.open.length,
+          }
+        : null,
       drawings: {
         ...drawingCounts(view.drawings?.current() ?? EMPTY_DRAWINGS),
         painted: view.drawings?.paintedCounts() ?? { labels: 0, lines: 0, boxes: 0, tables: 0 },
@@ -932,6 +965,12 @@ export class IndicatorLayer {
         view.drawings = new DrawingsPrimitive(this.font, (price) => this.drawingY(view, price));
         host.attachPrimitive(view.drawings);
       }
+      // A strategy's entries and exits are marked on the chart's own bars (the reference,
+      // strategy(): "on the main chart regardless of" overlay).
+      if (view.program?.strategy && this.priceSeries) {
+        view.trades = new TradesPrimitive(this.font, this.theme.axisText);
+        this.priceSeries.attachPrimitive(view.trades);
+      }
       // barcolor() colors the chart's bars instead (ChartController).
       if ((definition.backgrounds ?? []).some((spec) => !spec.bars)) {
         view.background = new BackgroundPrimitive();
@@ -1061,6 +1100,8 @@ export class IndicatorLayer {
     view.background = null;
     view.labels = null;
     view.crosshair = null;
+    if (view.trades) this.priceSeries?.detachPrimitive(view.trades);
+    view.trades = null;
   }
 
   /**
@@ -1331,6 +1372,7 @@ export class IndicatorLayer {
     view.fill?.update(stopped ? [] : this.fills(view));
     view.background?.update(stopped ? [] : this.backgrounds(view));
     view.labels?.update(stopped ? [] : this.valueLabels(view));
+    view.trades?.update(stopped ? [] : (view.script?.run.strategy?.fills ?? []), this.barExtent);
     view.drawings?.update(
       stopped ? EMPTY_DRAWINGS : (view.script?.run.drawings ?? EMPTY_DRAWINGS),
       {

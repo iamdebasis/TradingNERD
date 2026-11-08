@@ -1375,6 +1375,8 @@ export interface ChartState {
       /** How many the last frame painted: those in view, at prices on the scale. */
       painted: { labels: number; lines: number; boxes: number; tables: number };
     };
+    /** A strategy's fills, and how many the last frame marked; null for an indicator. */
+    trades: { fills: number; painted: number; closed: number; open: number } | null;
     /** What stopped a script, if anything did. */
     error: string | null;
   }[];

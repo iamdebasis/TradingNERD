@@ -173,3 +173,13 @@ export function TargetIcon() {
     </svg>
   );
 }
+
+/** The Strategy Tester's mark on the right toolbar: a rising curve over a baseline. */
+export function TesterIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 28 28" {...line} aria-hidden>
+      <path d="M5.5 21.5h17M6.5 18l4.5-5 3.5 3 6.5-8" />
+      <path d="M17.5 8h3.5v3.5" />
+    </svg>
+  );
+}

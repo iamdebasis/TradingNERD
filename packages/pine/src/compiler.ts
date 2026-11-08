@@ -18,6 +18,7 @@ import { type ConversionEdit, type EditSink, repeatedArg } from './edits.ts';
 import { parse } from './parser.ts';
 import type { ContextPlan, RequestSite } from './requests.ts';
 import { Runtime, type Slot } from './runtime.ts';
+import type { StrategyProps } from './strategy.ts';
 import {
   assignable,
   type Base,
@@ -221,6 +222,8 @@ export interface IndicatorDecl {
   timeframe: { input: number; gaps: number } | null;
   /** How many of each drawing it keeps on the chart (max_labels_count and the rest). */
   drawings: Record<'label' | 'line' | 'box' | 'polyline', number>;
+  /** Declared with strategy(): its properties (strategy.ts); null for indicators and libraries. */
+  strategy: StrategyProps | null;
   span: Span;
 }
 
@@ -2178,8 +2181,15 @@ export class Compiler {
 
   private ternary(expr: Extract<Expr, { kind: 'ternary' }>, scope: Scope): Compiled {
     const cond = this.condition(this.expr(expr.cond, scope));
-    const then = this.expr(expr.then, scope);
-    const otherwise = this.expr(expr.otherwise, scope);
+    let then = this.expr(expr.then, scope);
+    let otherwise = this.expr(expr.otherwise, scope);
+    // v5 and older cast a number to a bool where one is needed: a bool on one side asks for
+    // one on the other (the v6 migration guide; a published v4 strategy's selection of signals).
+    if (this.version <= 5) {
+      const number = (x: Compiled) => x.base === 'int' || x.base === 'float';
+      if (then.base === 'bool' && number(otherwise)) otherwise = this.toBool(otherwise);
+      else if (otherwise.base === 'bool' && number(then)) then = this.toBool(then);
+    }
     const base = unify(then.base, otherwise.base);
     if (!base || base === 'tuple' || base === 'void') {
       this.fail(

@@ -25,6 +25,7 @@ import { markCalls, markConstant } from './marks.ts';
 import { requestCalls } from './requestCalls.ts';
 import { canonicalTimeframe } from './requests.ts';
 import { DEFAULT_SYMBOL, type Runtime } from './runtime.ts';
+import { STRATEGY_PARAMS, strategyCalls, strategyName, strategyProps } from './strategy.ts';
 import { stringCalls } from './strings.ts';
 import {
   AtrFn,
@@ -169,10 +170,6 @@ const LATER: readonly [RegExp, string][] = [
     /^ticker\.(renko|linebreak|kagi|pointfigure)$/,
     "isn't supported in tradingNerd yet: Renko, Line Break, Kagi and Point & Figure data come with those chart types",
   ],
-  [
-    /^strategy(\.|$)/,
-    "isn't supported in tradingNerd yet: strategies come with the Strategy Tester in a later update",
-  ],
 ];
 
 /** The currency.* constants (the v6 reference). */
@@ -238,6 +235,8 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
   const dot = name.indexOf('.');
   const space = dot < 0 ? '' : name.slice(0, dot);
   const member = dot < 0 ? name : name.slice(dot + 1);
+  const traded = strategyName(c, space, member, span);
+  if (traded) return traded;
   const drawn = drawingName(c, space, member, span);
   if (drawn) return drawn;
   // The bid and ask: only on tick charts, which carry trades here, not quotes (provisional).
@@ -639,11 +638,8 @@ export function compileCall(c: Compiler, call: Call, scope: Scope): Compiled {
 const CALLS: Record<string, Handler> = {
   indicator: indicatorCall,
   library: libraryCall,
-  strategy: (c, call) =>
-    c.fail(
-      '"strategy" isn\'t supported in tradingNerd yet: strategies come with the Strategy Tester in a later update',
-      call.calleeSpan,
-    ),
+  // strategy(): indicator()'s properties, and the strategy's own (strategy.ts).
+  strategy: (c, call, scope) => indicatorCall(c, call, scope, true),
   // v4's iff(): both values are worked out on every bar, then one picked (v5 guide).
   __iff: (c, call, scope) => {
     const args = new Args(c, call, scope, ['condition', 'then', 'else'], 3);
@@ -815,6 +811,7 @@ const CALLS: Record<string, Handler> = {
   ...requestCalls(),
   ...tickerCalls(),
   ...drawingCalls(),
+  ...strategyCalls(),
   ...drawingCasts(),
 };
 
@@ -865,37 +862,40 @@ function cast(c: Compiler, call: Call, scope: Scope, to: Base): Compiled {
 
 // ---- the declaration and inputs ----
 
-function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
+function indicatorCall(c: Compiler, call: Call, scope: Scope, strategy = false): Compiled {
   if (c.indicator) c.fail('A script can only have one declaration statement', call.calleeSpan);
   const args = new Args(
     c,
     call,
     scope,
-    [
-      'title',
-      'shorttitle',
-      'overlay',
-      'format',
-      'precision',
-      'scale',
-      'max_bars_back',
-      'timeframe',
-      'timeframe_gaps',
-      'explicit_plot_zorder',
-      'max_lines_count',
-      'max_labels_count',
-      'max_boxes_count',
-      'calc_bars_count',
-      'max_polylines_count',
-      'dynamic_requests',
-      'behind_chart',
-    ],
+    strategy
+      ? STRATEGY_PARAMS
+      : [
+          'title',
+          'shorttitle',
+          'overlay',
+          'format',
+          'precision',
+          'scale',
+          'max_bars_back',
+          'timeframe',
+          'timeframe_gaps',
+          'explicit_plot_zorder',
+          'max_lines_count',
+          'max_labels_count',
+          'max_boxes_count',
+          'calc_bars_count',
+          'max_polylines_count',
+          'dynamic_requests',
+          'behind_chart',
+        ],
     1,
   );
   const title = String(args.constant('title', '', 'string') ?? '');
   // timeframe = "" runs on the chart's (the built-in RSI's code declares it so); either way the
   // settings get its two inputs (Pine docs, Inputs: Other features affecting Inputs).
-  if (args.has('timeframe')) {
+  // strategy() has no timeframe (the v6 reference).
+  if (!strategy && args.has('timeframe')) {
     const timeframe = args.constant('timeframe', '', 'string');
     if (timeframe !== '' && typeof timeframe === 'string' && !canonicalTimeframe(timeframe)) {
       c.fail(`"${timeframe}" isn't a timeframe`, args.get('timeframe')?.span as Span);
@@ -947,6 +947,7 @@ function indicatorCall(c: Compiler, call: Call, scope: Scope): Compiled {
       box: limit('max_boxes_count', 'box'),
       polyline: limit('max_polylines_count', 'polyline'),
     },
+    strategy: strategy ? strategyProps(c, args) : null,
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };
@@ -982,6 +983,7 @@ function libraryCall(c: Compiler, call: Call, scope: Scope): Compiled {
       box: DEFAULT_DRAWING_LIMIT,
       polyline: DEFAULT_DRAWING_LIMIT,
     },
+    strategy: null,
     span: call.span,
   };
   return { base: 'void', qual: CONST, ev: () => null, span: call.span };

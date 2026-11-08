@@ -21,6 +21,8 @@ import { pineStore, usePine } from '../pine/pineStore';
 import { SymbolSearchDialog } from '../search/SymbolSearchDialog';
 import { searchKey } from '../search/searchPrefs';
 import { useStockKeys } from '../stocks/stockKeys';
+import { StrategyTester } from '../strategy/StrategyTester';
+import { strategyStore, useStrategyTester } from '../strategy/strategyStore';
 import { Toolbar } from '../toolbar/Toolbar';
 import { Watchlist } from '../watchlist/Watchlist';
 import styles from './AppShell.module.css';
@@ -38,6 +40,7 @@ export const WATCHLIST_OPEN_KEY = 'tn.layout.watchlistOpen';
 const PINE_WIDTH_KEY = 'tn.layout.pineWidth';
 const PINE_HEIGHT_KEY = 'tn.layout.pineHeight';
 const LOGS_WIDTH_KEY = 'tn.layout.logsWidth';
+const TESTER_HEIGHT_KEY = 'tn.layout.testerHeight';
 
 export function AppShell({ route }: { route: ChartRoute }) {
   const gateway = useGateway();
@@ -51,6 +54,15 @@ export function AppShell({ route }: { route: ChartRoute }) {
   // The Pine Editor below the chart (Move script to bottom): its height, as chosen (provisional).
   const pineHeight = usePanelHeight(columnRef, PINE_HEIGHT_KEY, 320, 160);
   const logsWidth = usePanelWidth(workspaceRef, LOGS_WIDTH_KEY, 420, 280);
+  const tester = useStrategyTester();
+  // The Strategy Tester below the chart (provisional height); one panel at a time down there.
+  const testerHeight = usePanelHeight(columnRef, TESTER_HEIGHT_KEY, 300, 140);
+  const bottomPanel: 'tester' | 'pine' | null = tester.open
+    ? 'tester'
+    : pine.open && pine.dock === 'bottom'
+      ? 'pine'
+      : null;
+  const bottomHeight = bottomPanel === 'tester' ? testerHeight : pineHeight;
   const [watchlistOpen, setWatchlistOpen] = useState(() => readJson(WATCHLIST_OPEN_KEY) !== false);
   const pineRight = pine.open && pine.dock === 'right';
   const pineBottom = pine.open && pine.dock === 'bottom';
@@ -69,6 +81,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const lit: RightPanel[] = [
     ...(rightPanel === 'watchlist' ? (['watchlist'] as const) : []),
     ...(pine.open ? (['pine'] as const) : []),
+    ...(tester.open ? (['tester'] as const) : []),
   ];
   const [resolution, setResolution] = useState(route.resolution);
   const [symbol, setSymbol] = useState(route.symbol);
@@ -172,7 +185,9 @@ export function AppShell({ route }: { route: ChartRoute }) {
     writeJson(WATCHLIST_OPEN_KEY, open);
   };
   const togglePanel = (panel: RightPanel) => {
-    if (panel === 'pine') {
+    if (panel === 'tester') {
+      strategyStore.setOpen(!tester.open);
+    } else if (panel === 'pine') {
       // The editor docked behind Pine Logs comes forward; otherwise Pine opens or closes it.
       if (pineRight && logs.open) logsStore.close();
       else pineStore.setOpen(!pine.open);
@@ -239,7 +254,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
           <div
             ref={columnRef}
             className={styles.column}
-            style={{ '--bottom-height': `${pineHeight.width}px` } as CSSProperties}
+            style={{ '--bottom-height': `${bottomHeight.width}px` } as CSSProperties}
           >
             <main className={`${styles.panel} ${styles.chart}`} aria-label="Chart">
               <ChartPane symbol={symbol} resolution={resolution} onInfo={setChartInfo} />
@@ -254,7 +269,26 @@ export function AppShell({ route }: { route: ChartRoute }) {
                 />
               )}
             </main>
-            {pineBottom && (
+            {bottomPanel === 'tester' && (
+              <>
+                <Splitter
+                  axis="y"
+                  label="Resize Strategy Tester"
+                  width={testerHeight.width}
+                  min={testerHeight.min}
+                  max={testerHeight.max}
+                  onPreview={previewHeight}
+                  onCommit={testerHeight.commit}
+                />
+                <section
+                  className={`${styles.panel} ${styles.bottom}`}
+                  aria-label="Strategy Tester panel"
+                >
+                  <StrategyTester onClose={() => strategyStore.setOpen(false)} />
+                </section>
+              </>
+            )}
+            {pineBottom && bottomPanel === 'pine' && (
               <>
                 <Splitter
                   axis="y"

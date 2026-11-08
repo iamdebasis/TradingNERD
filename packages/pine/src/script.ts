@@ -37,6 +37,7 @@ import {
   timesOf,
 } from './requests.ts';
 import { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
+import type { StrategyProps, StrategyState } from './strategy.ts';
 import type { FoldEnv, Qual } from './types.ts';
 import type { OutputRef, Value } from './values.ts';
 import { Agreement, drawnFrom } from './warmup.ts';
@@ -457,6 +458,11 @@ export class ScriptProgram {
   /** Declared with library(). */
   get isLibrary(): boolean {
     return this.compiled.indicator.library;
+  }
+
+  /** Declared with strategy(): its properties (the Strategy Tester's Properties); else null. */
+  get strategy(): StrategyProps | null {
+    return this.compiled.indicator.strategy;
   }
 }
 
@@ -881,11 +887,19 @@ export class ScriptRun {
       this.drawings = drawn.snapshot();
       this.drawingsVersion = drawn.version;
     }
+    const broker = main.runtime.broker;
+    if (broker && broker.version !== this.strategyVersion) {
+      this.strategy = broker.state();
+      this.strategyVersion = broker.version;
+    }
   }
 
   /** Its labels, lines, boxes, tables, polylines and linefills at the last bar it ran. */
   drawings: DrawingSnapshot = EMPTY_DRAWINGS;
   private drawingsVersion = -1;
+  /** A strategy's trades, fills and figures as of its last bar (strategy.ts); null otherwise. */
+  strategy: StrategyState | null = null;
+  private strategyVersion = -1;
 
   /** Each output's agreement with each check run, over the closed bars. */
   private compare(length: number): OutputAgreements {

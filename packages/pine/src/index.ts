@@ -73,6 +73,14 @@ export {
   type Shape,
 } from './script.ts';
 export {
+  DEFAULT_STRATEGY,
+  type StrategyFigures,
+  type StrategyFill,
+  type StrategyProps,
+  type StrategyState,
+  type Trade,
+} from './strategy.ts';
+export {
   COLORS,
   colorCss,
   colorHex,

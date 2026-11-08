@@ -320,9 +320,6 @@ plot(close)`),
     expect(error('x = request.financial("NASDAQ:AAPL", "TOTAL_REVENUE", "FQ")\nplot(x)')).toMatch(
       /financial data comes in a later update/,
     );
-    expect(compileError('//@version=6\nstrategy("x")\nplot(close)').message).toMatch(
-      /Strategy Tester/,
-    );
     expect(error('x = ticker.renko(syminfo.tickerid, "ATR", 10)\nplot(close)')).not.toMatch(
       /\(P\d\)/,
     );

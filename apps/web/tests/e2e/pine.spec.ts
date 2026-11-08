@@ -383,6 +383,60 @@ test('labels, lines, boxes and tables draw on the chart, the latest kept as the 
   expect((await indicatorsOf(page))[0]?.drawings.painted.labels).toBeGreaterThan(10);
 });
 
+test('a strategy’s fills are marked on the chart and listed in the Strategy Tester', async ({
+  page,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(
+    page,
+    [
+      '//@version=6',
+      'strategy("MA Cross", overlay = true)',
+      'fast = ta.sma(close, 9)',
+      'slow = ta.sma(close, 21)',
+      'if ta.crossover(fast, slow)',
+      '    strategy.entry("Long", strategy.long)',
+      'if ta.crossunder(fast, slow)',
+      '    strategy.entry("Short", strategy.short)',
+      'plot(fast)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  // Adding a strategy opens the Strategy Tester, as on TradingView.
+  const tester = page.getByTestId('strategy-tester');
+  await expect(tester).toBeVisible();
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.trades?.fills ?? 0)
+    .toBeGreaterThan(1);
+  const trades = (await indicatorsOf(page))[0]?.trades;
+  expect(trades?.closed).toBeGreaterThan(0);
+  // Marked on the candles where they fall in view.
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.trades?.painted ?? 0)
+    .toBeGreaterThan(0);
+  await expect(tester.getByText('Net Profit', { exact: true })).toBeVisible();
+  await tester.getByRole('tab', { name: 'List of Trades' }).click();
+  await expect(tester.locator('tr[data-trade]')).toHaveCount(
+    (trades?.closed ?? 0) + (trades?.open ?? 0),
+  );
+  await tester.getByRole('tab', { name: 'Performance Summary' }).click();
+  await expect(tester.getByRole('rowheader', { name: 'Profit Factor' })).toBeVisible();
+  // Close, then the right toolbar's button brings it back.
+  await tester.getByRole('button', { name: 'Close' }).click();
+  await expect(tester).toBeHidden();
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Strategy Tester' })
+    .click();
+  await expect(page.getByTestId('strategy-tester')).toBeVisible();
+});
+
 test('a plotcandle is drawn from where its open, high, low and close have all settled', async ({
   page,
 }) => {

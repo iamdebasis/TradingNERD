@@ -8,6 +8,7 @@ import {
 import { PineRuntimeError } from './diagnostics.ts';
 import { DrawingStore } from './drawings.ts';
 import type { RequestBroker } from './requests.ts';
+import type { Broker } from './strategy.ts';
 import type { Stateful } from './ta.ts';
 import type { Value } from './values.ts';
 
@@ -298,6 +299,8 @@ export class Runtime {
   outputs: Outputs = { plots: [], plotColors: [], backgrounds: [], fillColors: [] };
   /** Its labels, lines, boxes, tables, polylines and linefills (drawings.ts). */
   readonly drawings = new DrawingStore();
+  /** A strategy's broker emulator: its orders, trades and figures (strategy.ts); null otherwise. */
+  broker: Broker | null = null;
   /** A context program's values, by bar: what its request expression gives (requests.ts). */
   captured: Value[] = [];
   /**

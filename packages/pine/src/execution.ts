@@ -2,6 +2,7 @@ import type { Bar } from '@tradingnerd/core';
 import type { CompiledProgram } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import type { LogEntry, Outputs, Runtime, ScriptSymbol } from './runtime.ts';
+import { Broker } from './strategy.ts';
 import type { Value } from './values.ts';
 
 /** A runtime error: the script stops, as Pine's do, and the chart shows the message. */
@@ -68,6 +69,10 @@ export class Execution {
     rt.realtimeFrom = realtimeFrom;
     rt.outputs = this.outputs;
     if (program.indicator?.drawings) rt.drawings.limits = { ...program.indicator.drawings };
+    // A strategy's broker emulator; it makes the script run afresh on a correction.
+    const strategy = program.indicator?.strategy;
+    rt.broker = strategy && !rt.secondary ? new Broker(strategy) : null;
+    if (rt.broker) rt.usesObjects = true;
   }
 
   /** The runtime it runs in: its variables, and a request's captured values. */
@@ -139,7 +144,10 @@ export class Execution {
     const rt = this.program.runtime;
     rt.begin(index, final);
     try {
+      // A strategy's orders fill on the bar's prices before the script runs on its close.
+      rt.broker?.openBar(rt);
       this.program.run(rt);
+      rt.broker?.closeBar(rt);
       rt.end();
     } catch (error) {
       if (!(error instanceof PineRuntimeError)) throw error;

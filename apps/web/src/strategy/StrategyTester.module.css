@@ -1,0 +1,208 @@
+/*
+ * TradingView's Strategy Tester (Pine docs: Strategies, Strategy Tester): the strategy's name and
+ * the four tabs on top, then the tab's figures, tables or equity curve. Sizes follow our Pine Logs
+ * panel and colors TradingView's palette; provisional until measured (docs/SPEC.md §11).
+ */
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.top {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--color-gutter);
+}
+
+.title,
+.picker {
+  margin-right: 12px;
+  font-weight: 600;
+}
+
+.picker {
+  padding: 4px 6px;
+  border: 1px solid var(--color-gutter);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.tab {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted, #9c9c9c);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--color-chip);
+  color: var(--color-text);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+  border-radius: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.icon:hover {
+  background: var(--color-chip);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px 12px;
+}
+
+.empty {
+  margin: 16px 0;
+  color: var(--color-text-muted, #9c9c9c);
+}
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin: 0;
+}
+
+.figure dt {
+  color: var(--color-text-muted, #9c9c9c);
+  font-size: 12px;
+}
+
+.figure dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.extra {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.up {
+  color: var(--color-up-text, #22ab94);
+}
+
+.down {
+  color: var(--color-down, #f23645);
+}
+
+.chart {
+  flex: 1;
+  width: 100%;
+  min-height: 90px;
+}
+
+.equity {
+  fill: none;
+  stroke: var(--color-up-text, #22ab94);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.hold {
+  fill: none;
+  stroke: #787b86;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.baseline {
+  stroke: var(--color-gutter);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.drawdown {
+  fill: rgba(242, 54, 69, 0.35);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-gutter);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table th[scope="row"],
+.table thead th:first-child {
+  text-align: left;
+  font-weight: 400;
+  color: var(--color-text-muted, #9c9c9c);
+}
+
+.table thead th {
+  color: var(--color-text-muted, #9c9c9c);
+  font-weight: 400;
+}
+
+.trades td {
+  vertical-align: top;
+}
+
+.sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}

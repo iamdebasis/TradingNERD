@@ -20,6 +20,7 @@ import { librariesStore, useLibraries } from '../pine/librariesStore';
 import { logsStore } from '../pine/logsStore';
 import { pineStore } from '../pine/pineStore';
 import { useStockKeys } from '../stocks/stockKeys';
+import { strategyStore } from '../strategy/strategyStore';
 import { darkTheme } from '../theme/tokens';
 import styles from './ChartPane.module.css';
 import { ChartSession, type LegendView } from './ChartSession';
@@ -112,7 +113,10 @@ export function ChartPane({
         // its requests may ask for more.
         const now = values.chart?.indicatorErrors();
         if (now) setErrors((before) => (sameErrors(before, now) ? before : now));
-        if (values.chart) logsStore.setScripts(values.chart.scriptLogs());
+        if (values.chart) {
+          logsStore.setScripts(values.chart.scriptLogs());
+          strategyStore.setStrategies(values.chart.scriptStrategies());
+        }
         sync.current();
       },
       setBook: (bid, ask) => legend.current?.setBook(bid, ask),
@@ -169,6 +173,7 @@ export function ChartPane({
       const now = chart.indicatorErrors();
       setErrors((before) => (sameErrors(before, now) ? before : now));
       logsStore.setScripts(chart.scriptLogs());
+      strategyStore.setStrategies(chart.scriptStrategies());
       sync.current();
     };
     const schedule = (kind: 'history' | 'live') => {
@@ -216,6 +221,7 @@ export function ChartPane({
     if (!chart) return;
     setErrors(chart.indicatorErrors());
     logsStore.setScripts(chart.scriptLogs());
+    strategyStore.setStrategies(chart.scriptStrategies());
     sync.current();
   }, [chart, indicators.list, values]);
 
@@ -251,6 +257,7 @@ export function ChartPane({
     values.refresh();
     setErrors(chart.indicatorErrors());
     logsStore.setScripts(chart.scriptLogs());
+    strategyStore.setStrategies(chart.scriptStrategies());
     sync.current();
   }, [chart, libraries.revision, values]);
 
