@@ -1778,6 +1778,7 @@ Reference viewport is 1634 px wide.
 115. **Open interest history against TradingView's** (§4.20): TradingView's from February 2020; ours from Binance's archive (BTCUSDT from 1 September 2020, most other coins from 1 December 2021 or their listing), OKX's days from 1 January 2024, Bybit's to be measured on the Mac. Coinalyze's daily history (a free key) or a paid source could fill the gap: your call.
 116. **A first daily chart of open interest waits for the archive:** about 2.5 minutes for BTCUSDT from the cloud; later loads come from `data/oi/`. Showing the newest days while the rest arrives is possible later.
 117. **Binance's archive against its API (on the Mac):** their 5-minute points over the same 30 days, to compare; the cloud can't reach the API.
+118. **Long names in the symbol pill (found 2026-11-08):** the pill keeps 84 px for the name and clips the rest, as the watchlist clips long symbols (§5.3). `BTCUSDT.P_OI` needs about 100 px and the formula `TOTAL2/XRPUSD` 117 px (`XRPUSDT` 67; measured in the cloud's test browser, 14 px semibold), so their ends are cut. Whether TradingView's header widens for a long name or clips it isn't documented or measured: a screenshot of TradingView with `BINANCE:BTCUSDT.P_OI` or a formula open would settle it, and item 113's screenshots would do.
 
 **Open question:** in the reference, TIA's and LDO's whole prices are red, not just the changed digits. The cause is unknown; a screenshot of it happening, or the TradingView setting behind it, would tell.
 
