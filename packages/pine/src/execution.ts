@@ -58,6 +58,9 @@ export class Execution {
       plotColors: program.plots.map((plot) => (plot.color.dynamic ? NONE : null)),
       backgrounds: program.bgcolors.map(() => NONE),
       fillColors: program.fills.map((fill) => (fill.color?.dynamic ? NONE : null)),
+      plotOffsets: new Float64Array(program.plots.length).fill(Number.NaN),
+      backgroundOffsets: new Float64Array(program.bgcolors.length).fill(Number.NaN),
+      conditions: program.alertConditions.map(() => NONE),
     };
     const rt = program.runtime;
     rt.inputs = inputs;
@@ -146,7 +149,15 @@ export class Execution {
     try {
       // A strategy's orders fill on the bar's prices before the script runs on its close.
       rt.broker?.openBar(rt);
-      this.program.run(rt);
+      // On a realtime bar a strategy runs only once it closes, unless calc_on_every_tick: "the
+      // script only executes on a realtime bar after it closes" (Pine docs, Strategies: Altering
+      // calculation behavior). Its stop and limit orders still fill on the bar's prices so far.
+      const waits =
+        rt.broker !== null &&
+        !final &&
+        index >= rt.realtimeFrom &&
+        !this.program.indicator?.strategy?.calcOnEveryTick;
+      if (!waits) this.program.run(rt);
       rt.broker?.closeBar(rt);
       rt.end();
     } catch (error) {
@@ -169,6 +180,7 @@ export class Execution {
     o.plotColors = o.plotColors.map((colors) => colors && grow(colors));
     o.backgrounds = o.backgrounds.map(grow);
     o.fillColors = o.fillColors.map((colors) => colors && grow(colors));
+    o.conditions = o.conditions.map(grow);
   }
 }
 

@@ -1,5 +1,6 @@
-import type { Bar } from '@tradingnerd/core';
+import { type Bar, parseResolution } from '@tradingnerd/core';
 import { type BarChange, isSourceName } from '@tradingnerd/indicators';
+import type { AlertConditionDef, AlertEvent } from './alerts.ts';
 import type { Script } from './ast.ts';
 import {
   DISPLAY,
@@ -46,6 +47,17 @@ export type { ScriptError };
 
 /** The newest Pine Script® version: TradingView's current one. Older ones run by their own rules. */
 export const PINE_VERSION = 6;
+
+/**
+ * Whether a chart's last bar is still forming, its realtime bar: before its close by the symbol's
+ * clock (a tick bar until the next opens). A closed market's last bar has closed, and is history.
+ */
+export function stillForming(symbol: ScriptSymbol, bar: Bar | undefined, now: number): boolean {
+  if (!bar) return false;
+  const resolution = parseResolution(symbol.timeframe);
+  if (!resolution || resolution.unit === 'tick') return true;
+  return symbol.clock.close(resolution, bar.start ?? bar.time * 1000) > now;
+}
 
 /** Compile passes at most before every variable's qualifier is known (see compileScript). */
 const MAX_PASSES = 8;
@@ -464,6 +476,16 @@ export class ScriptProgram {
   get strategy(): StrategyProps | null {
     return this.compiled.indicator.strategy;
   }
+
+  /** Its alertcondition() calls, as the Create Alert dialog lists them (alerts.ts). */
+  get alertConditions(): readonly AlertConditionDef[] {
+    return this.compiled.alertConditions;
+  }
+
+  /** Whether it has alert() calls: the dialog's "Any alert() function call". */
+  get hasAlertCalls(): boolean {
+    return this.compiled.alertCalls > 0;
+  }
 }
 
 function sanitizeInput(input: InputDef, value: unknown): Value {
@@ -576,6 +598,8 @@ export class ScriptRun {
     fillColors: [],
   };
   private fromListing = false;
+  /** Whether an alert runs it (watchAlerts). */
+  private alerting = false;
   private readonly feed: RequestFeed;
 
   constructor(
@@ -600,6 +624,49 @@ export class ScriptRun {
     return this.on ? this.chartBars.length : (this.main?.length ?? 0);
   }
 
+  /**
+   * An alert runs it (apps/web alerts): its alert() calls on realtime bars make events from now
+   * on, taken with takeAlerts(). Events of a run afresh are let go: an alert counts the calls of
+   * the updates after it starts.
+   */
+  watchAlerts(): void {
+    this.alerting = true;
+    if (this.main) this.main.runtime.alerting = true;
+  }
+
+  /** The alert() events since the last take, oldest first. */
+  takeAlerts(): AlertEvent[] {
+    const runtime = this.main?.runtime;
+    if (!runtime || runtime.alerts.length === 0) return [];
+    const taken = runtime.alerts;
+    runtime.alerts = [];
+    return taken;
+  }
+
+  /** An alertcondition()'s condition on bar `bar` (by its place); null where it hasn't run. */
+  conditionOn(index: number, bar: number): boolean | null {
+    const value = this.main?.outputs.conditions[index]?.[bar];
+    return value === undefined || Number.isNaN(value) ? null : value === 1;
+  }
+
+  /**
+   * The offsets its run worked out, by plot and by background (bgcolor() and barcolor()): the
+   * last value of each worked out as the script ran (marks.ts offsetArg); null where the
+   * description's is the one, known before the bars.
+   */
+  get offsets(): { plots: (number | null)[]; backgrounds: (number | null)[] } {
+    const outputs = this.main?.outputs;
+    const read = (list: Float64Array | undefined, count: number) =>
+      Array.from({ length: count }, (_, i) => {
+        const value = list?.[i] ?? Number.NaN;
+        return Number.isFinite(value) ? value : null;
+      });
+    return {
+      plots: read(outputs?.plotOffsets, this.description.plots.length),
+      backgrounds: read(outputs?.backgroundOffsets, this.description.backgrounds.length),
+    };
+  }
+
   /** The script's Pine Logs from its run over the chart's bars, oldest first (Pine docs, Debugging). */
   get logs(): readonly LogEntry[] {
     return this.main?.logs ?? [];
@@ -617,9 +684,11 @@ export class ScriptRun {
 
   /**
    * Runs the script afresh over every bar. When our first bar is the symbol's listing,
-   * TradingView's history starts there too, and every value is drawn without checking.
+   * TradingView's history starts there too, and every value is drawn without checking. `live`
+   * says whether the last bar is still forming (the realtime bar); a closed market's last bar is
+   * history, as on TradingView, and a strategy then calculates on it (execution.ts).
    */
-  setBars(bars: readonly Bar[], fromListing: boolean): void {
+  setBars(bars: readonly Bar[], fromListing: boolean, live = true): void {
     this.fromListing = fromListing;
     this.chartBars = bars;
     const timeframe = this.ownTimeframe();
@@ -628,7 +697,7 @@ export class ScriptRun {
       return;
     }
     this.on = null;
-    this.load(bars, fromListing, this.symbol, Math.max(0, bars.length - 1));
+    this.load(bars, fromListing, this.symbol, live ? Math.max(0, bars.length - 1) : bars.length);
   }
 
   /** Runs the script afresh over `bars`: the chart's, or its own timeframe's. */
@@ -664,7 +733,10 @@ export class ScriptRun {
       return execution;
     };
     this.main = make(0, []);
+    this.main.runtime.alerting = this.alerting;
     this.main.all(bars);
+    // A run afresh doesn't alert: its realtime bar's calls were the earlier run's.
+    this.main.runtime.alerts = [];
     this.checks =
       fromListing || bars.length < 2 || this.main.error
         ? []

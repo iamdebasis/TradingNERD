@@ -1,5 +1,10 @@
 import type { OlderCapsStatus, SymbolInfo } from '@tradingnerd/core';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertsHost } from '../alerts/AlertsHost';
+import { AlertsPanel } from '../alerts/AlertsPanel';
+import { alertSources } from '../alerts/alertSources';
+import { alertStore, useAlerts } from '../alerts/alertStore';
+import { CreateAlertDialog } from '../alerts/CreateAlertDialog';
 import { ChartPane } from '../chart/ChartPane';
 import { ChartSettingsDialog } from '../chart/ChartSettingsDialog';
 import { IntervalPrompt, promptKey } from '../chart/IntervalPrompt';
@@ -37,6 +42,8 @@ export const LAST_INTERVAL_KEY = 'tn.chart.interval';
 export const LAST_SYMBOL_KEY = 'tn.chart.symbol';
 /** Whether the watchlist panel is open (the right toolbar's Watchlist button). */
 export const WATCHLIST_OPEN_KEY = 'tn.layout.watchlistOpen';
+/** Whether the alert manager is open (the right toolbar's Alerts button): it takes the watchlist's place. */
+export const ALERTS_OPEN_KEY = 'tn.layout.alertsOpen';
 const PINE_WIDTH_KEY = 'tn.layout.pineWidth';
 const PINE_HEIGHT_KEY = 'tn.layout.pineHeight';
 const LOGS_WIDTH_KEY = 'tn.layout.logsWidth';
@@ -64,22 +71,27 @@ export function AppShell({ route }: { route: ChartRoute }) {
       : null;
   const bottomHeight = bottomPanel === 'tester' ? testerHeight : pineHeight;
   const [watchlistOpen, setWatchlistOpen] = useState(() => readJson(WATCHLIST_OPEN_KEY) !== false);
+  const [alertsOpen, setAlertsOpen] = useState(() => readJson(ALERTS_OPEN_KEY) === true);
+  const alerts = useAlerts();
   const pineRight = pine.open && pine.dock === 'right';
   const pineBottom = pine.open && pine.dock === 'bottom';
   // One panel at a time on the right: Pine Logs, else the Pine Editor docked there, else the
-  // watchlist.
+  // alert manager, else the watchlist.
   const rightPanel: RightPanel | 'logs' | null = logs.open
     ? 'logs'
     : pineRight
       ? 'pine'
-      : watchlistOpen
-        ? 'watchlist'
-        : null;
+      : alertsOpen
+        ? 'alerts'
+        : watchlistOpen
+          ? 'watchlist'
+          : null;
   const panelWidth =
     rightPanel === 'pine' ? pineWidth : rightPanel === 'logs' ? logsWidth : watchlist;
   // The toolbar lights the watchlist when it shows, and Pine wherever the editor is.
   const lit: RightPanel[] = [
     ...(rightPanel === 'watchlist' ? (['watchlist'] as const) : []),
+    ...(rightPanel === 'alerts' ? (['alerts'] as const) : []),
     ...(pine.open ? (['pine'] as const) : []),
     ...(tester.open ? (['tester'] as const) : []),
   ];
@@ -160,6 +172,12 @@ export function AppShell({ route }: { route: ChartRoute }) {
         setIndicatorsOpen(true);
         return;
       }
+      // TradingView's Create alert: Alt+A (the key's place, as Alt changes the letter on a Mac).
+      if (event.altKey && event.code === 'KeyA' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        alertStore.openDialog();
+        return;
+      }
       const digits = promptKey(event);
       const letter = searchKey(event);
       if (digits === null && letter === null) return;
@@ -184,8 +202,20 @@ export function AppShell({ route }: { route: ChartRoute }) {
     setWatchlistOpen(open);
     writeJson(WATCHLIST_OPEN_KEY, open);
   };
+  const showAlerts = (open: boolean) => {
+    setAlertsOpen(open);
+    writeJson(ALERTS_OPEN_KEY, open);
+  };
   const togglePanel = (panel: RightPanel) => {
-    if (panel === 'tester') {
+    if (panel === 'alerts') {
+      if (rightPanel === 'alerts') showAlerts(false);
+      else {
+        // The alert manager takes the right from Pine Logs and from the editor docked there.
+        logsStore.close();
+        if (pineRight) pineStore.setOpen(false);
+        showAlerts(true);
+      }
+    } else if (panel === 'tester') {
       strategyStore.setOpen(!tester.open);
     } else if (panel === 'pine') {
       // The editor docked behind Pine Logs comes forward; otherwise Pine opens or closes it.
@@ -194,9 +224,10 @@ export function AppShell({ route }: { route: ChartRoute }) {
     } else if (rightPanel === 'watchlist') {
       showWatchlist(false);
     } else {
-      // The watchlist takes the right from Pine Logs and from the editor docked there.
+      // The watchlist takes the right from Pine Logs, the editor docked there and the alerts.
       logsStore.close();
       if (pineRight) pineStore.setOpen(false);
+      showAlerts(false);
       showWatchlist(true);
     }
   };
@@ -222,7 +253,19 @@ export function AppShell({ route }: { route: ChartRoute }) {
         onSettings={() => setSettingsOpen(true)}
         onIndicators={() => setIndicatorsOpen(true)}
         onAddIndicator={(kind) => indicatorStore.add(kind)}
+        onAlert={() => alertStore.openDialog()}
       />
+      <AlertsHost />
+      {alerts.dialog && (
+        <CreateAlertDialog
+          key={alerts.dialog.editing ?? 'new'}
+          symbol={symbol}
+          interval={resolution}
+          sources={alertSources(indicatorStore.get().list, librariesStore.compileOptions())}
+          editing={alerts.dialog.editing ? (alertStore.find(alerts.dialog.editing) ?? null) : null}
+          onClose={() => alertStore.closeDialog()}
+        />
+      )}
       {indicatorsOpen && (
         <IndicatorsDialog
           onAdd={(kind) => indicatorStore.add(kind)}
@@ -330,6 +373,15 @@ export function AppShell({ route }: { route: ChartRoute }) {
           {rightPanel === 'pine' && (
             <aside className={`${styles.panel} ${styles.side}`} aria-label="Pine Editor panel">
               <PineEditor onClose={() => pineStore.setOpen(false)} />
+            </aside>
+          )}
+          {rightPanel === 'alerts' && (
+            <aside className={`${styles.panel} ${styles.side}`} aria-label="Alerts panel">
+              <AlertsPanel
+                errors={alerts.errors}
+                onCreate={() => alertStore.openDialog()}
+                onClose={() => showAlerts(false)}
+              />
             </aside>
           )}
           {rightPanel === 'logs' && (

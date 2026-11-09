@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { compileScript, DEFAULT_SYMBOL } from './index.ts';
 import { CANDLE_BORDER, CANDLE_WICK } from './marks.ts';
 import { closes, indicator, plots, program, runScript } from './testing.ts';
 import { COLORS, hexColor } from './values.ts';
@@ -232,5 +233,46 @@ describe('barcolor', () => {
   it('keeps bgcolor() a background', () => {
     const [background] = program(indicator('bgcolor(color.red)')).describe([]).backgrounds;
     expect(background?.bars).toBe(false);
+  });
+});
+
+describe('offsets worked out as the script runs (the v6 reference: offset is "simple int")', () => {
+  const hourly = { ...DEFAULT_SYMBOL, timeframe: '60' };
+
+  it('takes a simple offset from the run: one from the chart’s timeframe, as v3’s Ichimoku has', () => {
+    const source = `//@version=4
+study("Shifted", overlay = true)
+per(v) => round(v * (timeframe.isintraday ? 2 : 1))
+shift = per(13)
+plot(close, offset = shift)
+plot(close, offset = -shift)
+bgcolor(color.red, offset = shift)`;
+    const daily = runScript(source, bars);
+    expect(daily.error).toBeNull();
+    expect(daily.offsets).toEqual({ plots: [13, -13], backgrounds: [13] });
+    const intraday = runScript(source, bars, [], hourly);
+    expect(intraday.offsets.plots).toEqual([26, -26]);
+    // Known before the bars, an offset stays the description's.
+    const plain = runScript(indicator('plot(close, offset = 2)'), bars);
+    expect(plain.offsets.plots).toEqual([null]);
+    expect(plain.description.plots[0]?.offset).toBe(2);
+  });
+
+  it('in v5, uses a series offset’s last value on the whole chart, and warns', () => {
+    // The v6 migration guide's example: bar_index / 2 at the last bar.
+    const source = `//@version=5
+indicator("\`offset\` parameter demo", overlay = true)
+int seriesOffset = bar_index / 2
+plot(math.max(close, open), "", color.orange, 4, plot.style_stepline, offset = seriesOffset)`;
+    const result = compileScript(source);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.warnings[0]?.message).toMatch(/uses only its last value/);
+    // Five bars: the last bar_index is 4.
+    expect(runScript(source, bars).offsets.plots).toEqual([2]);
+  });
+
+  it('refuses a series offset in v6 (the v6 migration guide: No series offset)', () => {
+    const result = compileScript(indicator('plot(close, offset = bar_index)'));
+    expect(result.ok).toBe(false);
   });
 });

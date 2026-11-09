@@ -726,13 +726,145 @@ plot(c)`),
     expect(plotOf(r, 0)[0]).toBe(100 - 0.25);
     expect(plotOf(r, 0)[1]).toBe((100 - 0.25 + (100 - 0.125)) / 2);
   });
+});
 
-  it('says plainly that Renko and the other chart types come later', () => {
-    const result = compileScript(
-      v6('plot(request.security(ticker.renko(syminfo.tickerid, "ATR", 10), "D", close))'),
+describe('Non-standard charts data (Pine docs): Renko, Line Break, Kagi, Point & Figure', () => {
+  /** Up from 100 to 120, down to 100, up to 110: the last bar live. */
+  const ZIGZAG = [
+    ...Array.from({ length: 21 }, (_, i) => 100 + i),
+    ...Array.from({ length: 20 }, (_, i) => 119 - i),
+    ...Array.from({ length: 10 }, (_, i) => 101 + i),
+  ].map((close, i) => bar(T0 + i * HOUR, close));
+  const zigzagFeed = (bars: readonly Bar[] = ZIGZAG, version = 1) =>
+    feedOf({ 'BINANCE:BTCUSDT@60': context(CHART, bars, '60', { version }) });
+  const zig = (code: string) => run(v6(code), zigzagFeed(), ZIGZAG);
+
+  it('writes the type and its settings into the ticker id, which ticker.inherit keeps', () => {
+    const renko =
+      '={"inputs":{"param":10,"source":"Close","style":"ATR","wicks":false},"symbol":"BINANCE:BTCUSDT","type":"renko"}';
+    const inherited = renko.replace('BINANCE:BTCUSDT', 'COINBASE:ETHUSD');
+    const r = zig(`id = ticker.renko(syminfo.tickerid, "ATR", 10)
+plot(id == '${renko}' ? 1 : 0)
+plot(ticker.standard(id) == "BINANCE:BTCUSDT" ? 1 : 0)
+plot(ticker.inherit(id, "COINBASE:ETHUSD") == '${inherited}' ? 1 : 0)
+plot(ticker.linebreak(syminfo.tickerid, 3) == '={"inputs":{"lines":3},"symbol":"BINANCE:BTCUSDT","type":"linebreak"}' ? 1 : 0)`);
+    expect(r.error).toBeNull();
+    expect([0, 1, 2, 3].map((p) => plotOf(r, p)[0])).toEqual([1, 1, 1, 1]);
+  });
+
+  it("gives Renko's bricks where they formed, two boxes back to turn", () => {
+    const r =
+      zig(`[o, c] = request.security(ticker.renko(syminfo.tickerid, "Traditional", 5), timeframe.period, [open, close])
+plot(o)
+plot(c)`);
+    expect(r.error).toBeNull();
+    const c = plotOf(r, 1);
+    // Bricks at 105, 110, 115 and 120; down at 110 (two boxes under 120), 105 and 100; up at
+    // 110 on the live bar (two boxes over 100).
+    expect(c.slice(0, 5).every(Number.isNaN)).toBe(true);
+    expect([c[5], c[19], c[20], c[29], c[30], c[39], c[40], c[49], c[50]]).toEqual([
+      105, 115, 120, 120, 110, 105, 100, 100, 110,
+    ]);
+    expect(plotOf(r, 0)[30]).toBe(115);
+  });
+
+  it("gives Line Break's lines, turning past the last three's extreme", () => {
+    const r = zig(
+      'plot(request.security(ticker.linebreak(syminfo.tickerid, 3), timeframe.period, close))',
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.errors[0]?.message).toMatch(/come with those chart types/);
+    const c = plotOf(r, 0);
+    // 119 to 117 stay inside the last three lines (117 to 120); 116 turns. Back up, 104 passes
+    // the last three's high, 103.
+    expect([c[20], c[23], c[24], c[40], c[43], c[44], c[50]]).toEqual([
+      120, 120, 116, 100, 100, 104, 110,
+    ]);
+  });
+
+  it("gives Kagi's lines once they stop growing, so no bar shows a later price", () => {
+    const r = zig(
+      'plot(request.security(ticker.kagi(syminfo.tickerid, 5), timeframe.period, close))',
+    );
+    const c = plotOf(r, 0);
+    expect(c.slice(0, 20).every(Number.isNaN)).toBe(true);
+    expect([c[20], c[39], c[40], c[49], c[50]]).toEqual([120, 120, 100, 100, 110]);
+  });
+
+  it("gives Point & Figure's columns as the manual's example plots them (gaps_on)", () => {
+    const r =
+      zig(`[o, c] = request.security(ticker.pointfigure(syminfo.tickerid, "close", "Traditional", 1, 3), timeframe.period, [open, close], barmerge.gaps_on)
+plot(o)
+plot(c)`);
+    expect(r.error).toBeNull();
+    const o = plotOf(r, 0);
+    const c = plotOf(r, 1);
+    // X's from 101 to 120, O's from 119 to 100: each shown where it stopped growing.
+    expect([o[20], c[20], o[40], c[40]]).toEqual([101, 120, 119, 100]);
+    expect([c[19], c[21], c[39]].every(Number.isNaN)).toBe(true);
+  });
+
+  it('takes the v4 names (renko(), security())', () => {
+    const result = compileScript(`//@version=4
+study("Renko v4")
+plot(security(renko(syminfo.tickerid, "Traditional", 5), timeframe.period, close))`);
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults(), CHART, zigzagFeed());
+    r.setBars(ZIGZAG, true);
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[30]).toBe(110);
+  });
+
+  it('stops on settings that make no bars, naming what is wrong', () => {
+    const r = zig(
+      'plot(request.security(ticker.renko(syminfo.tickerid, "Fixed", 5), timeframe.period, close))',
+    );
+    expect(r.error?.message).toMatch(/Invalid Renko style "Fixed"/);
+  });
+
+  it('follows a brick the live bar makes, and starts afresh when it goes again', () => {
+    let current = zigzagFeed();
+    const feed: RequestFeed = { data: (key) => current.data(key) };
+    const result = compileScript(
+      v6(`c = request.security(ticker.renko(syminfo.tickerid, "Traditional", 5), timeframe.period, close)
+var n = 0
+n += 1
+plot(c)
+plot(n)`),
+    );
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults(), CHART, feed);
+    r.setBars(ZIGZAG, true);
+    expect(plotOf(r, 0)[50]).toBe(110);
+    // The live bar falls back to 108: its brick goes, and the bricks before it show.
+    const lower = [...ZIGZAG.slice(0, -1), bar(ZIGZAG[50]?.time as number, 108)];
+    current = zigzagFeed(lower, 2);
+    r.update(lower, 'tick', 50);
+    expect(plotOf(r, 0)[50]).toBe(100);
+    // Back up to 111: the brick again.
+    const higher = [...ZIGZAG.slice(0, -1), bar(ZIGZAG[50]?.time as number, 111)];
+    current = zigzagFeed(higher, 3);
+    r.update(higher, 'tick', 50);
+    expect(plotOf(r, 0)[50]).toBe(110);
+  });
+
+  it('starts afresh when the live bar’s bricks turn the other way, as many as before', () => {
+    const code = v6(
+      'plot(request.security(ticker.renko(syminfo.tickerid, "Traditional", 5), timeframe.period, ta.cum(close)))',
+    );
+    const live = (close: number) => [
+      ...ZIGZAG.slice(0, -1),
+      bar(ZIGZAG[50]?.time as number, close),
+    ];
+    let current = zigzagFeed(live(115));
+    const feed: RequestFeed = { data: (key) => current.data(key) };
+    const result = compileScript(code);
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults(), CHART, feed);
+    r.setBars(live(115), true);
+    // Two bricks up on the live bar (to 110 and 115), then two down instead (to 95 and 90).
+    current = zigzagFeed(live(90), 2);
+    r.update(live(90), 'tick', 50);
+    const fresh = run(code, zigzagFeed(live(90)), live(90));
+    expect(plotOf(r, 0)[50]).toBe(plotOf(fresh, 0)[50]);
   });
 });
 

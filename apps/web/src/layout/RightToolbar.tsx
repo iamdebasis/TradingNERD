@@ -1,13 +1,15 @@
+import { AlarmIcon } from '../alerts/icons';
 import { ListIcon, PineIcon, TesterIcon } from '../pine/icons';
 import styles from './RightToolbar.module.css';
 
 /** The panels the right toolbar opens. */
-export type RightPanel = 'watchlist' | 'pine' | 'tester';
+export type RightPanel = 'watchlist' | 'alerts' | 'pine' | 'tester';
 
 /**
  * TradingView's right toolbar (its "widget bar"): a button per panel, the open one lit; a click
- * on the lit one closes its panel. We have the Watchlist and the Pine Editor (docs/SPEC.md §5.16;
- * TradingView puts Pine there since August 2025). Its look is provisional until measured (§11).
+ * on the lit one closes its panel. We have the Watchlist, Alerts (its alert manager), the Pine
+ * Editor (docs/SPEC.md §5.16; TradingView puts Pine there since August 2025) and the Strategy
+ * Tester. Its look is provisional until measured (§11).
  */
 export function RightToolbar({
   open,
@@ -28,6 +30,16 @@ export function RightToolbar({
         onClick={() => onToggle('watchlist')}
       >
         <ListIcon />
+      </button>
+      <button
+        type="button"
+        className={styles.button}
+        aria-label="Alerts"
+        title="Alerts"
+        aria-pressed={open.includes('alerts')}
+        onClick={() => onToggle('alerts')}
+      >
+        <AlarmIcon />
       </button>
       <button
         type="button"

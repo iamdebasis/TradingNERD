@@ -70,7 +70,7 @@ import {
   withLevels,
   withOpacity,
 } from './model';
-import { type ScriptContext, ScriptLayerRun, scriptDefinition } from './script';
+import { type RunOffsets, type ScriptContext, ScriptLayerRun, scriptDefinition } from './script';
 import { builtinTimeframe, TimeframedRun } from './timeframed';
 
 /** The overlay scale Volume and its MA share at the bottom of the price pane. */
@@ -128,7 +128,10 @@ interface DrawnPlot {
 /** One indicator's state on the chart: its run and what draws it. */
 class IndicatorView {
   indicator: ChartIndicator;
-  readonly definition: IndicatorDefinition;
+  /** A script's is made again when its run works out other offsets (takeOffsets). */
+  definition: IndicatorDefinition;
+  /** Its run worked out offsets its drawn series don't have: it's built again. */
+  offsetsMoved = false;
   /** A script's compiled code; null for a built-in. */
   readonly program: ScriptProgram | null;
   run: LayerRun;
@@ -383,7 +386,10 @@ export class IndicatorLayer {
       // A script that stops compiling (a library removed) stays where it was.
       const view = this.createView(indicator, old?.definition.placement);
       // A hidden indicator isn't computed: showing it again builds it afresh.
-      if (this.bars.length > 0 && !indicator.hidden && !view.compileError) this.runBars(view);
+      if (this.bars.length > 0 && !indicator.hidden && !view.compileError) {
+        this.runBars(view);
+        this.takeOffsets(view);
+      }
       if (old) {
         // Into the old one's pane, so the pane keeps its place and height; then the old one goes.
         // A script now drawn elsewhere (overlay changed) gets the pane its placement wants.
@@ -418,13 +424,35 @@ export class IndicatorLayer {
     }
   }
 
-  /** A script that imports, compiled with libraries that have changed since. */
+  /**
+   * A script that imports, compiled with libraries that have changed since; or one whose run
+   * worked out offsets its series don't have.
+   */
   private stale(view: IndicatorView): boolean {
+    if (view.offsetsMoved) return true;
     return (
       view.indicator.kind === 'script' &&
       view.librariesRevision !== this.libraries.revision &&
       IMPORTS.test(view.indicator.script?.source ?? '')
     );
+  }
+
+  /**
+   * A script whose run worked out an offset as it ran (a "simple int" from the chart's timeframe,
+   * or v5's series, its last value): its definition takes the run's, before it's built. Whether
+   * they differ from those it has.
+   */
+  private takeOffsets(view: IndicatorView): boolean {
+    const script = view.script;
+    if (!script || !view.program || !this.offsetsDiffer(view)) return false;
+    const offsets: RunOffsets = script.run.offsets;
+    view.definition = scriptDefinition(
+      view.program,
+      view.indicator.settings.inputs,
+      this.context,
+      offsets,
+    );
+    return true;
   }
 
   /** New bars throughout: every run computed afresh, as Pine reloads a script. */
@@ -437,10 +465,29 @@ export class IndicatorLayer {
       if (view.run.symbol !== this.symbol)
         view.run = this.makeRun(view.indicator, view.definition, view.program);
       this.runBars(view);
+      // Offsets its run worked out afresh that its series don't have: it's built again below.
+      if (view.script && this.offsetsDiffer(view)) {
+        view.offsetsMoved = true;
+        continue;
+      }
       this.refreshStarts(view);
       this.push(view);
     }
     this.barColorChanges = 'all';
+    if (this.views.some((view) => view.offsetsMoved)) {
+      this.set(this.views.map((view) => view.indicator));
+    }
+  }
+
+  /** Whether a script's run worked out offsets other than its definition's. */
+  private offsetsDiffer(view: IndicatorView): boolean {
+    const offsets = view.script?.run.offsets;
+    if (!offsets) return false;
+    const { plots, backgrounds } = view.definition;
+    return (
+      offsets.plots.some((o, i) => o !== null && o !== (plots[i]?.look?.offset ?? 0)) ||
+      offsets.backgrounds.some((o, i) => o !== null && o !== (backgrounds?.[i]?.offset ?? 0))
+    );
   }
 
   /** A live change to the bars at `index` (see IndicatorRun.update). */

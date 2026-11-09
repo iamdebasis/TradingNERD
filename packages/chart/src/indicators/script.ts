@@ -28,6 +28,7 @@ import {
   type ScriptProgram,
   ScriptRun,
   type ScriptSymbol,
+  stillForming,
   type Value,
 } from '@tradingnerd/pine';
 
@@ -212,19 +213,40 @@ function valueFormat(d: ScriptDescription, priceDecimals: number): ValueFormat {
   }
 }
 
+/** The offsets a script's run worked out (ScriptRun.offsets), by plot and by background. */
+export interface RunOffsets {
+  readonly plots: readonly (number | null)[];
+  readonly backgrounds: readonly (number | null)[];
+}
+
 /**
  * A compiled script as the chart, the legend and the settings dialog read a built-in: its inputs
  * by place ("in_0"), its plots, hlines, fills and backgrounds by kind and place ("plot_0"), as
  * these input values make them. Its settings keep only the looks the Style tab changed, so the
- * rest follows the code (an input's color, say).
+ * rest follows the code (an input's color, say). `offsets`: those its run worked out, which
+ * replace the description's (an offset from the chart's timeframe, known only as it runs).
  */
 export function scriptDefinition(
   program: ScriptProgram,
   inputs: Inputs,
   context: ScriptContext,
+  offsets?: RunOffsets,
 ): IndicatorDefinition {
   const values = scriptInputs(program, inputs);
-  const d = program.describe(values);
+  const described = program.describe(values);
+  const d = offsets
+    ? {
+        ...described,
+        plots: described.plots.map((plot, i) => ({
+          ...plot,
+          offset: offsets.plots[i] ?? plot.offset,
+        })),
+        backgrounds: described.backgrounds.map((background, i) => ({
+          ...background,
+          offset: offsets.backgrounds[i] ?? background.offset,
+        })),
+      }
+    : described;
   const enabled = (index: number) => (current: Inputs) =>
     program.describe(scriptInputs(program, current)).inputs[index]?.active ?? true;
   const name = d.shorttitle || d.title;
@@ -457,6 +479,7 @@ export class ScriptLayerRun {
   /** Columns colored by direction are a built-in's (Volume's): a script colors its own. */
   readonly growing: readonly boolean[] = [];
   private fromListing = false;
+  private readonly scriptSymbol: ScriptSymbol;
 
   constructor(
     program: ScriptProgram,
@@ -467,6 +490,7 @@ export class ScriptLayerRun {
   ) {
     this.run = new ScriptRun(program, scriptInputs(program, inputs), context.symbol, feed);
     this.symbol = symbol;
+    this.scriptSymbol = context.symbol;
   }
 
   /** Whether its requests' data hasn't all loaded yet: it draws nothing meanwhile. */
@@ -495,8 +519,13 @@ export class ScriptLayerRun {
     this.fromListing = fromListing;
   }
 
+  /** A run afresh: the last bar is the realtime one only while it's still forming. */
   setBars(bars: readonly Bar[]): void {
-    this.run.setBars(bars, this.fromListing);
+    this.run.setBars(
+      bars,
+      this.fromListing,
+      stillForming(this.scriptSymbol, bars.at(-1), Date.now()),
+    );
   }
 
   update(bars: readonly Bar[], change: BarChange, index: number): number[] | 'all' {

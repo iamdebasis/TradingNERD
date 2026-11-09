@@ -1,5 +1,6 @@
 import type { Bar } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
+import { compileScript, DEFAULT_SYMBOL, ScriptRun, stillForming } from './index.ts';
 import type { StrategyState } from './strategy.ts';
 import { compileError, runScript } from './testing.ts';
 
@@ -335,7 +336,8 @@ plot(strategy.position_size)
 plot(strategy.closedtrades)
 plot(strategy.netprofit)
 plot(strategy.closedtrades > 0 ? strategy.closedtrades.exit_price(strategy.closedtrades - 1) : na)`),
-      flat(9),
+      // A tenth bar is the live one: the strategy runs on it once it closes.
+      flat(10),
     );
     expect(r.error).toBeNull();
     const at = (p: number) => Array.from(r.values[p] ?? []).slice(0, 9);
@@ -360,7 +362,8 @@ strategy("Old")
 strategy.entry("L", strategy.long, when = bar_index == 0)
 strategy.close("L", bar_index == 2)
 plot(strategy.position_size)`,
-      flat(5),
+      // A sixth bar is the live one.
+      flat(6),
     );
     expect(r.error).toBeNull();
     expect(Array.from(r.values[0] ?? []).slice(0, 5)).toEqual([0, 1, 1, 0, 0]);
@@ -392,5 +395,85 @@ plot(strategy.position_size)`,
     r.update(ticked, 'tick', 5);
     r.update(ticked, 'tick', 5);
     expect(r.strategy?.fills).toHaveLength(1);
+  });
+});
+
+describe('the realtime bar (the manual: Altering calculation behavior)', () => {
+  /** Bar 5 is live; a sixth opens after it. */
+  const bars = flat(6);
+  const next = [
+    ...bars,
+    ...ohlc([[101, 102, 100, 101]]).map((b) => ({ ...b, time: T0 + 6 * DAY })),
+  ];
+
+  it('runs a strategy on a realtime bar only once it closes', () => {
+    const r = runScript(strategy('plot(close)'), bars);
+    expect(r.error).toBeNull();
+    const plot = () => Array.from(r.values[0] as Float64Array).slice(0, r.length);
+    // "the script only executes on a realtime bar after it closes".
+    expect(plot()[4]).toBe(101);
+    expect(plot()[5]).toBeNaN();
+    r.update(next, 'new', 6);
+    expect(plot()[5]).toBe(102);
+    expect(plot()[6]).toBeNaN();
+  });
+
+  it('runs on every tick with calc_on_every_tick, as an indicator does', () => {
+    const r = runScript(
+      strategy('plot(close)', 'strategy("Test", overlay = true, calc_on_every_tick = true)'),
+      bars,
+    );
+    expect((r.values[0] as Float64Array)[5]).toBe(102);
+  });
+
+  it('fills a stop order on a live tick while the script waits for the close', () => {
+    const r = runScript(
+      strategy(
+        'if bar_index == 4\n    strategy.entry("L", strategy.long, stop = 110)\nplot(strategy.position_size)',
+      ),
+      bars,
+    );
+    expect(r.strategy?.fills).toHaveLength(0);
+    // The live bar reaches 115: the stop fills at 110, though the script hasn't run on it.
+    const ticked = bars.map((b, i) => (i === 5 ? { ...b, high: 115, close: 114 } : b));
+    r.update(ticked, 'tick', 5);
+    expect(r.strategy?.fills.map((f) => [f.bar, f.qty, f.price])).toEqual([[5, 1, 110]]);
+    expect((r.values[0] as Float64Array)[5]).toBeNaN();
+    // Once it closes, the script runs on it and sees the position.
+    r.update([...ticked, ...next.slice(6)], 'new', 6);
+    expect((r.values[0] as Float64Array)[5]).toBe(1);
+  });
+
+  it('calculates on a closed market’s last bar: it is history', () => {
+    const result = compileScript(strategy('plot(close)'));
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults());
+    r.setBars(bars, true, false);
+    expect((r.values[0] as Float64Array)[5]).toBe(102);
+  });
+
+  it('tells a forming bar from one whose time is past by the symbol’s clock', () => {
+    const symbol = { ...DEFAULT_SYMBOL, timeframe: '1D' };
+    const bar = bars[5] as Bar;
+    const opens = bar.time * 1000;
+    expect(stillForming(symbol, bar, opens + 3_600_000)).toBe(true);
+    expect(stillForming(symbol, bar, opens + 86_400_000)).toBe(false);
+    expect(stillForming({ ...symbol, timeframe: '1T' }, bar, opens + 86_400_000 * 9)).toBe(true);
+  });
+});
+
+describe('order fill alerts’ details (the manual: Alerts, Order fill events)', () => {
+  it('keeps each fill’s order id, comment and alert_message', () => {
+    const s = run(
+      `if bar_index == 1
+    strategy.entry("Long", strategy.long, alert_message = "Bought at " + str.tostring(close))
+if bar_index == 3
+    strategy.close("Long", comment = "Done", alert_message = "Sold")`,
+      flat(6),
+    );
+    expect(s.fills.map((f) => [f.id, f.comment, f.alertMessage, f.qty])).toEqual([
+      ['Long', '', 'Bought at 101', 1],
+      ['Long', 'Done', 'Sold', -1],
+    ]);
   });
 });

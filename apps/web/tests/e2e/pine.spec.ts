@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { RSI_PINE } from '@tradingnerd/indicators';
-import { chartState, expect, NOW, openChart, test } from './fixtures';
+import { chartState, expect, LAST_DAY, NOW, openChart, test } from './fixtures';
 
 /**
  * The Pine Editor (docs/SPEC.md §5.16, milestone P1): the right toolbar, a built-in's code
@@ -337,6 +337,39 @@ test('plotshape, plotarrow, plotcandle and barcolor draw as TradingView draws th
   await settings.getByRole('checkbox', { name: 'Bar color', exact: true }).uncheck();
   await expect.poll(async () => (await chartState(page)).barColors).toEqual([]);
   await settings.getByRole('button', { name: 'Ok' }).click();
+});
+
+test('an offset worked out as the script runs shifts its plot, and follows the timeframe', async ({
+  page,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  // A v3 Ichimoku's way: the displacement from the chart's timeframe, a "simple int".
+  await setCode(
+    page,
+    [
+      '//@version=4',
+      'study("Shifted", overlay = true)',
+      'shift = timeframe.isintraday ? 26 : 13',
+      'plot(close, offset = shift)',
+      'plot(close)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  // Values shifted past the last bar aren't drawn: the shifted plot has `shift` fewer points.
+  const gap = async () => {
+    const plots = (await indicatorsOf(page))[0]?.plots ?? [];
+    return (plots[1]?.points ?? 0) - (plots[0]?.points ?? 0);
+  };
+  await expect.poll(gap).toBe(13);
+  await page.getByRole('banner').getByRole('button', { name: '1h', exact: true }).click();
+  await expect.poll(async () => (await chartState(page)).lastBar?.time).not.toBe(LAST_DAY);
+  await expect.poll(gap).toBe(26);
 });
 
 test('labels, lines, boxes and tables draw on the chart, the latest kept as the bars update', async ({

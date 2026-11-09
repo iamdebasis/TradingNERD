@@ -1,4 +1,13 @@
 export {
+  type AlertConditionDef,
+  type AlertEvent,
+  type AlertFreq,
+  fillPlaceholders,
+  type PlaceholderContext,
+  placeholderNumber,
+  placeholderTime,
+} from './alerts.ts';
+export {
   DISPLAY,
   FORMATS,
   LINE_STYLES,
@@ -71,6 +80,7 @@ export {
   ScriptProgram,
   ScriptRun,
   type Shape,
+  stillForming,
 } from './script.ts';
 export {
   DEFAULT_STRATEGY,

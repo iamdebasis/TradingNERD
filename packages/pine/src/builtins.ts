@@ -12,7 +12,7 @@ import {
 } from './args.ts';
 import type { Arg } from './ast.ts';
 import { collectionCalls } from './collections.ts';
-import type { Compiler, EnumDef, Scope } from './compiler.ts';
+import type { Compiler, EnumDef, PlotDef, Scope } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import {
   DEFAULT_DRAWING_LIMIT,
@@ -21,7 +21,7 @@ import {
   drawingName,
   MAX_DRAWING_LIMIT,
 } from './drawings.ts';
-import { markCalls, markConstant } from './marks.ts';
+import { backgroundWrite, markCalls, markConstant, offsetDefs } from './marks.ts';
 import { requestCalls } from './requestCalls.ts';
 import { canonicalTimeframe } from './requests.ts';
 import { DEFAULT_SYMBOL, type Runtime } from './runtime.ts';
@@ -165,10 +165,6 @@ const LATER: readonly [RegExp, string][] = [
   [
     /^request\.(seed|quandl|footprint)$/,
     "isn't supported in tradingNerd yet: this data comes from TradingView's own feeds",
-  ],
-  [
-    /^ticker\.(renko|linebreak|kagi|pointfigure)$/,
-    "isn't supported in tradingNerd yet: Renko, Line Break, Kagi and Point & Figure data come with those chart types",
   ],
 ];
 
@@ -696,11 +692,28 @@ const CALLS: Record<string, Handler> = {
   hline: hlineCall,
   fill: fillCall,
   bgcolor: bgcolorCall,
+  // An alertcondition() lists its title and message for the Create Alert dialog, and keeps its
+  // condition on each bar for the alerts made on it (alerts.ts; Pine docs, Alerts).
   alertcondition: (c, call, scope) => {
     c.otherOutputs++;
     const args = new Args(c, call, scope, ['condition', 'title', 'message'], 1);
-    args.bool('condition');
-    return { base: 'void', qual: CONST, ev: () => null, span: call.span };
+    const condition = args.bool('condition') as (rt: Runtime) => boolean;
+    const title = args.constant('title', 'Alert', 'string');
+    const message = args.constant('message', '', 'string');
+    const index = c.alertConditions.length;
+    c.alertConditions.push({
+      title: typeof title === 'string' && title !== '' ? title : 'Alert',
+      message: typeof message === 'string' ? message : '',
+    });
+    return {
+      base: 'void',
+      qual: CONST,
+      ev: (rt) => {
+        (rt.outputs.conditions[index] as Float64Array)[rt.index] = condition(rt) ? 1 : 0;
+        return null;
+      },
+      span: call.span,
+    };
   },
   max_bars_back: (_c, call) => ({ base: 'void', qual: CONST, ev: () => null, span: call.span }),
   'runtime.error': (c, call, scope) => {
@@ -1394,7 +1407,7 @@ function plotCall(c: Compiler, call: Call, scope: Scope): Compiled {
     linestyle: args.foldedAs('linestyle', 'plot_line_style', 'solid'),
     trackprice: args.foldedAs('trackprice', 'bool', false),
     histbase: args.foldedAs('histbase', 'float', 0),
-    offset: args.foldedAs('offset', 'int', 0),
+    ...offsetDefs(c, args),
     join: args.foldedAs('join', 'bool', false),
     editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
@@ -1405,19 +1418,26 @@ function plotCall(c: Compiler, call: Call, scope: Scope): Compiled {
   });
   const ref: OutputRef = { output: 'plot', index };
   const colorEv = color.ev;
+  const write: Ev = colorEv
+    ? (rt) => {
+        (rt.outputs.plots[index] as Float64Array)[rt.index] = value(rt);
+        (rt.outputs.plotColors[index] as Float64Array)[rt.index] = colorEv(rt) as number;
+        return ref;
+      }
+    : (rt) => {
+        (rt.outputs.plots[index] as Float64Array)[rt.index] = value(rt);
+        return ref;
+      };
+  const offsetAt = (c.plots[index] as PlotDef).offsetAt;
   return {
     base: 'plot',
     qual: CONST,
-    ev: colorEv
+    ev: offsetAt
       ? (rt) => {
-          (rt.outputs.plots[index] as Float64Array)[rt.index] = value(rt);
-          (rt.outputs.plotColors[index] as Float64Array)[rt.index] = colorEv(rt) as number;
-          return ref;
+          rt.outputs.plotOffsets[index] = offsetAt(rt);
+          return write(rt);
         }
-      : (rt) => {
-          (rt.outputs.plots[index] as Float64Array)[rt.index] = value(rt);
-          return ref;
-        },
+      : write,
     fold: () => ref,
     span: call.span,
   };
@@ -1577,23 +1597,14 @@ function bgcolorCall(c: Compiler, call: Call, scope: Scope): Compiled {
     index,
     bars: false,
     color: { fold: dynamic ? () => Number.NaN : args.folded('color', Number.NaN), dynamic },
-    offset: args.foldedAs('offset', 'int', 0),
+    ...offsetDefs(c, args),
     editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     title: constTitle(args),
     display: args.foldedAs('display', 'int', DISPLAY.all),
     span: call.span,
   });
-  const ev = color.ev;
-  return {
-    base: 'void',
-    qual: CONST,
-    ev: (rt) => {
-      (rt.outputs.backgrounds[index] as Float64Array)[rt.index] = ev(rt) as number;
-      return null;
-    },
-    span: call.span,
-  };
+  return backgroundWrite(c, index, color.ev, call.span);
 }
 
 // ---- math.* ----

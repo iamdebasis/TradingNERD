@@ -1,3 +1,4 @@
+import type { AlertConditionDef } from './alerts.ts';
 import type { Arg, Block, Expr, Param, Script, Stmt, TypeRef } from './ast.ts';
 import { versionOf } from './ast.ts';
 import {
@@ -148,6 +149,8 @@ export interface PlotDef {
   trackprice: Fold;
   histbase: Fold;
   offset: Fold;
+  /** An offset worked out as the script runs (builtins.ts offsetArg); null when `offset` has it. */
+  offsetAt?: ((rt: Runtime) => number) | null;
   join: Fold;
   /** "input bool" in the v6 reference: published scripts pass a bool input. */
   editable: Fold;
@@ -191,6 +194,8 @@ export interface BgcolorDef {
   bars: boolean;
   color: StyleArg;
   offset: Fold;
+  /** As PlotDef's. */
+  offsetAt?: ((rt: Runtime) => number) | null;
   editable: Fold;
   showLast: Fold;
   title: string;
@@ -388,6 +393,9 @@ export interface CompiledProgram {
   logging: boolean;
   /** Its request.*() calls (requests.ts). */
   requests: RequestSite[];
+  /** Its alertcondition() calls, and how many alert() calls it has (alerts.ts). */
+  alertConditions: AlertConditionDef[];
+  alertCalls: number;
 }
 
 /** What one statement reads and writes: a request copies the statements its expression needs. */
@@ -587,6 +595,9 @@ export class Compiler {
    * these runs, as TradingView's manual's log-only examples do (Debugging; Time, Figure 295).
    */
   otherOutputs = 0;
+  /** Its alertcondition() calls, in order, and its alert() calls counted (alerts.ts). */
+  readonly alertConditions: AlertConditionDef[] = [];
+  alertCalls = 0;
   /** Calls log.info(), log.warning() or log.error() somewhere (the Pine Logs pane lists it). */
   logging = false;
   indicator: IndicatorDecl | null = null;
@@ -741,6 +752,8 @@ export class Compiler {
       quals: this.quals,
       logging: this.logging,
       requests: this.requests,
+      alertConditions: this.alertConditions,
+      alertCalls: this.alertCalls,
     };
   }
 

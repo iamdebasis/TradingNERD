@@ -314,15 +314,13 @@ plot(close)`),
   });
 
   it('says plainly what tradingNerd doesn\u2019t run yet, without milestone codes', () => {
-    expect(error('x = ticker.renko(syminfo.tickerid, "ATR", 10)\nplot(close)')).toMatch(
-      /isn't supported in tradingNerd yet: Renko/,
-    );
+    const seed =
+      'x = request.seed("seed_crypto_santiment", "BTC_SENTIMENT_POSITIVE", close)\nplot(x)';
+    expect(error(seed)).toMatch(/isn't supported in tradingNerd yet: this data comes from/);
     expect(error('x = request.financial("NASDAQ:AAPL", "TOTAL_REVENUE", "FQ")\nplot(x)')).toMatch(
       /financial data comes in a later update/,
     );
-    expect(error('x = ticker.renko(syminfo.tickerid, "ATR", 10)\nplot(close)')).not.toMatch(
-      /\(P\d\)/,
-    );
+    expect(error(seed)).not.toMatch(/\(P\d\)/);
   });
 
   it('points at where the error is', () => {

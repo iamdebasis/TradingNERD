@@ -1,7 +1,7 @@
-import { Args, type Call, constant, type Fold, type Handler, type NumEv } from './args.ts';
+import { Args, type Call, constant, type Ev, type Fold, type Handler, type NumEv } from './args.ts';
 import type { Compiler, MarkDef, PlotDef } from './compiler.ts';
 import type { Span } from './diagnostics.ts';
-import { CONST, type Compiled, INPUT, isNumeric } from './types.ts';
+import { CONST, type Compiled, INPUT, isNumeric, SIMPLE } from './types.ts';
 import { COLORS, hexColor } from './values.ts';
 
 /**
@@ -96,6 +96,56 @@ const constTitle = (args: Args) => String(args.constant('title', '', 'string') ?
 /** `editable`: an input bool, as the v6 reference types it (a published script passes one). */
 const editableOf = (args: Args): Fold => args.foldedAs('editable', 'bool', true);
 
+/**
+ * An output's `offset`, a "simple int" in the v6 reference: one the inputs give is known before
+ * the bars; one worked out as the script runs (from the chart's timeframe, say) is recorded on
+ * each bar and the chart takes its value (ScriptRun.offsets). v5 and older also take a series and
+ * use "only the last calculated offset … on the whole chart", with a warning (Pine docs, v6
+ * migration guide: No series offset); v6 refuses one.
+ */
+export function offsetArg(c: Compiler, args: Args): { fold: Fold; at: NumEv | null } {
+  const value = args.get('offset');
+  if (!value || value.fold !== undefined) {
+    return { fold: args.foldedAs('offset', 'int', 0), at: null };
+  }
+  const numeric =
+    value.base === 'int' || value.base === 'na' || (c.version <= 5 && value.base === 'float');
+  c.needType(value, numeric, args.fn, 'offset', 'simple int');
+  if (value.qual > SIMPLE) {
+    if (c.version >= 6) c.needQual(value, SIMPLE, args.fn, 'offset', 'int');
+    else {
+      c.warn(
+        `A series 'offset' in '${args.fn}' uses only its last value, on the whole chart (Pine v6 refuses it)`,
+        value.span,
+      );
+    }
+  }
+  const ev = value.ev as NumEv;
+  // An int with a fraction takes its floor, as int parameters do (args.ts).
+  return { fold: () => 0, at: (rt) => Math.floor(ev(rt)) };
+}
+
+/** offsetArg as an output's definition has it. */
+export function offsetDefs(c: Compiler, args: Args): { offset: Fold; offsetAt: NumEv | null } {
+  const { fold, at } = offsetArg(c, args);
+  return { offset: fold, offsetAt: at };
+}
+
+/** A bgcolor()'s or barcolor()'s run: its color on the bar, and its offset when it's worked out. */
+export function backgroundWrite(c: Compiler, index: number, ev: Ev, span: Span): Compiled {
+  const offsetAt = c.bgcolors[index]?.offsetAt ?? null;
+  return {
+    base: 'void',
+    qual: CONST,
+    ev: (rt) => {
+      if (offsetAt) rt.outputs.backgroundOffsets[index] = offsetAt(rt);
+      (rt.outputs.backgrounds[index] as Float64Array)[rt.index] = ev(rt) as number;
+      return null;
+    },
+    span,
+  };
+}
+
 /** A plot entry's fields that marks and bars don't use, at plot()'s defaults. */
 function plotLike(
   c: Compiler,
@@ -112,7 +162,7 @@ function plotLike(
     linestyle: () => 'solid',
     trackprice: () => false,
     histbase: () => 0,
-    offset: names.includes('offset') ? args.foldedAs('offset', 'int', 0) : () => 0,
+    ...(names.includes('offset') ? offsetDefs(c, args) : { offset: () => 0, offsetAt: null }),
     join: () => false,
     editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
@@ -440,23 +490,14 @@ const barcolorCall: Handler = (c, call, scope) => {
     index,
     bars: true,
     color: { fold: dynamic ? () => Number.NaN : args.folded('color', Number.NaN), dynamic },
-    offset: args.foldedAs('offset', 'int', 0),
+    ...offsetDefs(c, args),
     editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     title: constTitle(args),
     display: args.foldedAs('display', 'int', 31),
     span: call.span,
   });
-  const ev = color.ev;
-  return {
-    base: 'void',
-    qual: CONST,
-    ev: (rt) => {
-      (rt.outputs.backgrounds[index] as Float64Array)[rt.index] = ev(rt) as number;
-      return null;
-    },
-    span: call.span,
-  };
+  return backgroundWrite(c, index, color.ev, call.span);
 };
 
 export function markCalls(): Record<string, Handler> {

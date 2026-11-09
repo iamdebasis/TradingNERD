@@ -1,6 +1,7 @@
 import { symbolName } from '@tradingnerd/core';
 import type { IndicatorKind } from '@tradingnerd/indicators';
 import { useRef, useState } from 'react';
+import { AlarmAddIcon } from '../alerts/icons';
 import { GesturesPopup } from '../gestures/GesturesPopup';
 import { isChanged, useGestureSettings } from '../gestures/gestureSettings';
 import { IndicatorsButton } from '../indicators/IndicatorsButton';
@@ -32,13 +33,15 @@ export interface ToolbarProps {
   onIndicators(): void;
   /** A favorite indicator was picked from the ⌄ beside it. */
   onAddIndicator(kind: IndicatorKind): void;
+  /** The Alert button was pressed: open the Create Alert dialog. */
+  onAlert(): void;
 }
 
 /**
  * TradingView's top bar, v1 slice: the symbol pill, the favorite intervals and the interval
  * menu (docs/reference/02-toolbar.png and 03-interval-menu.png), the Indicators button and its
- * favorites ⌄ (01-chart-layout.png), then our own Gestures button, and at the right
- * TradingView's Settings button, which opens Chart settings.
+ * favorites ⌄ (01-chart-layout.png), TradingView's Alert button, then our own Gestures button,
+ * and at the right TradingView's Settings button, which opens Chart settings.
  */
 export function Toolbar({
   symbol,
@@ -48,6 +51,7 @@ export function Toolbar({
   onSettings,
   onIndicators,
   onAddIndicator,
+  onAlert,
 }: ToolbarProps) {
   const [prefs, setPrefs] = useIntervalPrefs();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -103,6 +107,11 @@ export function Toolbar({
       </fieldset>
       <span className={styles.separator} />
       <IndicatorsButton onOpen={onIndicators} onAdd={onAddIndicator} />
+      <span className={styles.separator} />
+      <button type="button" className={styles.tool} title="Create alert (Alt+A)" onClick={onAlert}>
+        <AlarmAddIcon />
+        Alert
+      </button>
       <span className={styles.separator} />
       <button
         ref={gesturesButton}

@@ -197,9 +197,27 @@ export interface StrategyFill {
   name: string;
   /** The position after the fill. */
   position: number;
+  /** The order's id and comment, and its alert_message (order fill alerts' placeholders). */
+  id: string;
+  comment: string;
+  alertMessage: string;
+}
+
+/** What filled: an order's id, comment and alert_message, as its fill keeps them. */
+interface FillOrigin {
+  id: string;
+  comment: string;
+  alertMessage: string;
 }
 
 type OcaType = 'none' | 'cancel' | 'reduce';
+
+/** An order's id, comment and alert_message, as its fills keep them. */
+const originOf = (order: { id: string; comment: string; alertMessage: string }): FillOrigin => ({
+  id: order.id === '__close_all__' ? 'Close position order' : order.id,
+  comment: order.comment,
+  alertMessage: order.alertMessage,
+});
 
 /** An order from strategy.entry(), strategy.order(), strategy.close() or strategy.close_all(). */
 interface Order {
@@ -218,6 +236,8 @@ interface Order {
   ocaName: string;
   ocaType: OcaType;
   comment: string;
+  /** Its alert_message: an order fill alert's {{strategy.order.alert_message}}. */
+  alertMessage: string;
   placedBar: number;
   /** strategy.close(…, immediately = true): fills on the tick it's placed. */
   immediately: boolean;
@@ -241,6 +261,11 @@ interface ExitRule {
   commentProfit: string;
   commentLoss: string;
   commentTrailing: string;
+  /** alert_message, and the take-profit's, stop-loss's and trailing stop's own (v5+). */
+  alertMessage: string;
+  alertProfit: string;
+  alertLoss: string;
+  alertTrailing: string;
   placedBar: number;
   /** Order of first placement: earlier calls reserve their part of a trade first. */
   order: number;
@@ -660,15 +685,19 @@ export class Broker {
           sl = trail;
           trailing = true;
         }
-        const fill = (price: number, comment: string) =>
-          this.fillExit(rt, rule, trade, bracket as Bracket, price, comment);
+        const fill = (price: number, comment: string, alert: string) =>
+          this.fillExit(rt, rule, trade, bracket as Bracket, price, comment, alert);
         if (isNum(tp)) {
           // A take-profit is a limit order: at its price or better.
           out.push({
             price: tp,
             dir: side > 0 ? 1 : -1,
             run: (price) =>
-              fill(side > 0 ? Math.max(tp, price) : Math.min(tp, price), rule.commentProfit),
+              fill(
+                side > 0 ? Math.max(tp, price) : Math.min(tp, price),
+                rule.commentProfit,
+                rule.alertProfit,
+              ),
           });
         }
         if (isNum(sl)) {
@@ -679,6 +708,7 @@ export class Broker {
               fill(
                 price - side * this.props.slippage * tick,
                 trailing ? rule.commentTrailing : rule.commentLoss,
+                trailing ? rule.alertTrailing : rule.alertLoss,
               ),
           });
         }
@@ -758,6 +788,7 @@ export class Broker {
     bracket: Bracket,
     price: number,
     comment: string,
+    alert: string,
   ): void {
     const qty = Math.min(bracket.remaining, Math.abs(trade.size), Math.abs(this.position));
     if (qty <= 0) return;
@@ -771,7 +802,11 @@ export class Broker {
       }
     }
     const name = comment || rule.comment || rule.id;
-    this.reduce(rt, qty, trade, rule.id, name, price, true);
+    this.reduce(rt, qty, trade, rule.id, name, price, true, false, {
+      id: rule.id,
+      comment: comment || rule.comment,
+      alertMessage: alert || rule.alertMessage,
+    });
   }
 
   // ---- fills ----
@@ -784,10 +819,13 @@ export class Broker {
     if (order.kind === 'close' || order.kind === 'close_all') {
       const side = this.position > 0 ? -1 : 1;
       const price = raw + side * this.props.slippage * tick;
+      const origin = originOf(order);
       if (order.kind === 'close_all') {
         const all = Math.abs(this.position);
-        if (all > 0)
-          this.reduce(rt, all, null, '', order.comment || 'Close position order', price, false);
+        if (all > 0) {
+          const name = order.comment || 'Close position order';
+          this.reduce(rt, all, null, '', name, price, false, false, origin);
+        }
         return;
       }
       const ofId = this.open.filter((t) => t.entryId === order.id);
@@ -796,7 +834,7 @@ export class Broker {
       const qty = isNum(order.qty) ? Math.min(order.qty, total) : (total * order.qtyPercent) / 100;
       if (qty <= 0) return;
       const name = order.comment || `Close entry(s) order ${order.id}`;
-      this.reduce(rt, qty, ofId[0] ?? null, '', name, price, false);
+      this.reduce(rt, qty, ofId[0] ?? null, '', name, price, false, false, origin);
       return;
     }
     this.fillEntry(rt, order, raw + order.side * this.props.slippage * tick);
@@ -816,11 +854,12 @@ export class Broker {
     if (!(qty > 0)) return;
     const position = this.position;
     const name = order.comment || order.id;
+    const origin = originOf(order);
     if (order.kind === 'entry') {
       // strategy.risk.allow_entry_in(): an entry the other way only closes the position.
       if (this.allowed !== 'all' && (this.allowed === 'long') !== (side === 1)) {
         if (position * side < 0)
-          this.reduce(rt, Math.abs(position), null, order.id, name, price, false);
+          this.reduce(rt, Math.abs(position), null, order.id, name, price, false, false, origin);
         this.oca(order, qty);
         return;
       }
@@ -839,11 +878,11 @@ export class Broker {
         const all = Math.abs(position);
         this.reduce(rt, all, null, order.id, name, price, false, true);
         this.openTrade(rt, order, side, qty, price);
-        this.addFill(rt, price, side * (qty + all), true, name);
+        this.addFill(rt, price, side * (qty + all), true, name, origin);
         return;
       }
       this.openTrade(rt, order, side, qty, price);
-      this.addFill(rt, price, side * qty, true, name);
+      this.addFill(rt, price, side * qty, true, name, origin);
       return;
     }
     // strategy.order(): the position becomes its sum with the order (no reversal, no pyramiding).
@@ -855,7 +894,7 @@ export class Broker {
       rest -= closing;
     }
     if (rest > 1e-12) this.openTrade(rt, order, side, rest, price);
-    this.addFill(rt, price, side * qty, rest > 1e-12, name);
+    this.addFill(rt, price, side * qty, rest > 1e-12, name, origin);
   }
 
   /** OCA groups: a fill cancels or reduces the other orders of its group (the manual). */
@@ -917,6 +956,7 @@ export class Broker {
     price: number,
     mark: boolean,
     partOfEntry = false,
+    origin: FillOrigin = { id: exitId || name, comment: name, alertMessage: '' },
   ): void {
     const commission = this.commissionOf(qty, price);
     const sold = this.position > 0 ? -1 : 1;
@@ -957,7 +997,7 @@ export class Broker {
       this.exits.clear();
       this.brackets.clear();
     }
-    if (!partOfEntry || mark) this.addFill(rt, price, sold * qty, false, name);
+    if (!partOfEntry || mark) this.addFill(rt, price, sold * qty, false, name, origin);
   }
 
   private tradeClosed(trade: Trade): void {
@@ -975,7 +1015,14 @@ export class Broker {
     this.equityByTrade.push(this.props.initialCapital + f.netProfit);
   }
 
-  private addFill(rt: Runtime, price: number, qty: number, entry: boolean, name: string): void {
+  private addFill(
+    rt: Runtime,
+    price: number,
+    qty: number,
+    entry: boolean,
+    name: string,
+    origin: FillOrigin,
+  ): void {
     this.fills.push({
       bar: rt.index,
       time: this.time,
@@ -984,6 +1031,9 @@ export class Broker {
       entry,
       name,
       position: this.position,
+      id: origin.id,
+      comment: origin.comment,
+      alertMessage: origin.alertMessage,
     });
   }
 
@@ -1398,12 +1448,13 @@ const orderCall =
     const ocaType = ocaTypeArg(args);
     const comment = textArg(args, 'comment');
     const when = whenArg(args);
-    args.get('alert_message');
+    const alertMessage = textArg(args, 'alert_message');
     args.get('disable_alert');
     return voidCall(call.span, (rt, broker) => {
       if (!when(rt)) return;
       const q = qty(rt);
       broker.place(rt, {
+        alertMessage: alertMessage(rt),
         id: id(rt),
         kind,
         side: side(rt),
@@ -1444,15 +1495,13 @@ const exitCall: Handler = (c, call, scope) => {
   const commentLoss = textArg(args, 'comment_loss');
   const commentTrailing = textArg(args, 'comment_trailing');
   const when = whenArg(args);
-  for (const name of [
+  const [alertMessage, alertProfit, alertLoss, alertTrailing] = [
     'alert_message',
     'alert_profit',
     'alert_loss',
     'alert_trailing',
-    'disable_alert',
-  ]) {
-    args.get(name);
-  }
+  ].map((name) => (args.knows(name) ? textArg(args, name) : () => ''));
+  args.get('disable_alert');
   return voidCall(call.span, (rt, broker) => {
     if (!when(rt)) return;
     const q = qty(rt);
@@ -1474,6 +1523,10 @@ const exitCall: Handler = (c, call, scope) => {
       commentProfit: commentProfit(rt),
       commentLoss: commentLoss(rt),
       commentTrailing: commentTrailing(rt),
+      alertMessage: (alertMessage as Ev<string>)(rt),
+      alertProfit: (alertProfit as Ev<string>)(rt),
+      alertLoss: (alertLoss as Ev<string>)(rt),
+      alertTrailing: (alertTrailing as Ev<string>)(rt),
     });
   });
 };
@@ -1506,13 +1559,14 @@ const closeCall: Handler = (c, call, scope) => {
   const qtyPercent = numArg(args, 'qty_percent');
   const immediately = args.has('immediately') ? args.bool('immediately') : undefined;
   const when = whenArg(args);
-  args.get('alert_message');
+  const alertMessage = textArg(args, 'alert_message');
   args.get('disable_alert');
   return voidCall(call.span, (rt, broker) => {
     if (!when(rt)) return;
     const q = qty(rt);
     const pct = qtyPercent(rt);
     broker.place(rt, {
+      alertMessage: alertMessage(rt),
       id: id(rt),
       kind: 'close',
       side: 1,
@@ -1541,11 +1595,12 @@ const closeAllCall: Handler = (c, call, scope) => {
   const comment = textArg(args, 'comment');
   const immediately = args.has('immediately') ? args.bool('immediately') : undefined;
   const when = whenArg(args);
-  args.get('alert_message');
+  const alertMessage = textArg(args, 'alert_message');
   args.get('disable_alert');
   return voidCall(call.span, (rt, broker) => {
     if (!when(rt) || broker.position === 0) return;
     broker.place(rt, {
+      alertMessage: alertMessage(rt),
       id: '__close_all__',
       kind: 'close_all',
       side: 1,
