@@ -1,11 +1,17 @@
+import { isSessionHours } from '@tradingnerd/core';
 import { useSyncExternalStore } from 'react';
 import { readJson, writeJson } from '../lib/storage';
 import {
   type AlertCondition,
   type AlertDef,
   type AlertLogEntry,
+  type AlertScript,
+  type AlertStatus,
   type AlertTrigger,
   alertTitle,
+  isPriceAlert,
+  isPriceOperator,
+  type PriceCondition,
 } from './alertModel';
 
 /** Where the alerts and their log are kept: this browser's storage, as the app's own settings. */
@@ -46,17 +52,51 @@ export type NewAlert = Omit<AlertDef, 'id' | 'status' | 'created'>;
 
 const TRIGGERS: readonly AlertTrigger[] = ['once', 'bar', 'close', 'minute'];
 
+/** A price alert's condition read back: a known operator and a finite value. */
+function readPriceCondition(raw: Partial<PriceCondition>): PriceCondition | null {
+  if (!isPriceOperator(raw.operator)) return null;
+  if (typeof raw.value !== 'number' || !Number.isFinite(raw.value)) return null;
+  const precision =
+    typeof raw.precision === 'number' && Number.isInteger(raw.precision)
+      ? Math.min(10, Math.max(0, raw.precision))
+      : 2;
+  return { kind: 'price', operator: raw.operator, value: raw.value, precision };
+}
+
 /** An alert read back from storage: only well-formed ones are kept. */
 function readAlert(raw: unknown): AlertDef | null {
   if (!raw || typeof raw !== 'object') return null;
   const a = raw as Partial<AlertDef>;
-  const script = a.script as Partial<AlertDef['script']> | undefined;
+  const script = a.script as Partial<AlertScript> | null | undefined;
   const condition = a.condition as Partial<AlertCondition> | undefined;
   const kinds = ['calls', 'fills-calls', 'fills', 'calls-only', 'condition'];
+  if (typeof a.id !== 'string' || typeof a.symbol !== 'string' || typeof a.interval !== 'string') {
+    return null;
+  }
+  const common = {
+    id: a.id,
+    name: typeof a.name === 'string' ? a.name : '',
+    symbol: a.symbol,
+    interval: a.interval,
+    message: typeof a.message === 'string' ? a.message : '',
+    popup: a.popup !== false,
+    sound: a.sound !== false,
+    status:
+      a.status === 'stopped' || a.status === 'triggered' ? a.status : ('active' as AlertStatus),
+    created: typeof a.created === 'number' ? a.created : 0,
+  };
+  if (condition?.kind === 'price') {
+    const price = readPriceCondition(condition as Partial<PriceCondition>);
+    if (!price) return null;
+    return {
+      ...common,
+      script: null,
+      condition: price,
+      trigger: a.trigger === 'every' ? 'every' : 'once',
+      ...(isSessionHours(a.session) ? { session: a.session } : {}),
+    };
+  }
   if (
-    typeof a.id !== 'string' ||
-    typeof a.symbol !== 'string' ||
-    typeof a.interval !== 'string' ||
     !script ||
     typeof script.source !== 'string' ||
     !condition ||
@@ -65,10 +105,7 @@ function readAlert(raw: unknown): AlertDef | null {
     return null;
   }
   return {
-    id: a.id,
-    name: typeof a.name === 'string' ? a.name : '',
-    symbol: a.symbol,
-    interval: a.interval,
+    ...common,
     script: {
       title: typeof script.title === 'string' ? script.title : 'Script',
       source: script.source,
@@ -76,11 +113,6 @@ function readAlert(raw: unknown): AlertDef | null {
     },
     condition: condition as AlertCondition,
     trigger: TRIGGERS.includes(a.trigger as AlertTrigger) ? (a.trigger as AlertTrigger) : 'bar',
-    message: typeof a.message === 'string' ? a.message : '',
-    popup: a.popup !== false,
-    sound: a.sound !== false,
-    status: a.status === 'stopped' || a.status === 'triggered' ? a.status : 'active',
-    created: typeof a.created === 'number' ? a.created : 0,
   };
 }
 
@@ -177,16 +209,18 @@ export class AlertStore {
 
   /**
    * An alert triggered: a log entry, a pop-up when it asks for one, and "Only once" stops it
-   * ("Stopped — Triggered"). Returns the log entry.
+   * ("Stopped — Triggered"). Returns the log entry; a price alert's has no timeframe, as it
+   * triggers regardless of the interval.
    */
   fire(alert: AlertDef, message: string, time: number): AlertLogEntry {
     const title = alertTitle(alert);
+    const price = isPriceAlert(alert);
     const entry: AlertLogEntry = {
       id: newId('log'),
       alert: alert.id,
       name: title,
       symbol: alert.symbol,
-      interval: alert.interval,
+      interval: price ? '' : alert.interval,
       message,
       time,
     };
@@ -197,7 +231,8 @@ export class AlertStore {
           { id: entry.id, alert: alert.id, title, symbol: alert.symbol, message, time },
         ].slice(-TOAST_LIMIT)
       : this.value.toasts;
-    const once = alert.condition.kind === 'condition' && alert.trigger === 'once';
+    // alert() calls and order fills set no trigger of their own here.
+    const once = (alert.condition.kind === 'condition' || price) && alert.trigger === 'once';
     const alerts = once
       ? this.value.alerts.map((a) =>
           a.id === alert.id ? { ...a, status: 'triggered' as const } : a,

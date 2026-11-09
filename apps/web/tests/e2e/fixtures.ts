@@ -635,6 +635,11 @@ export interface MockMarket {
   streams(channel: 'bars' | 'book' | 'quotes'): number;
   /** A bar on the chart's stream and every other stream of its symbol and timeframe. */
   sendBar(bar: Bar, historical?: boolean): Promise<void>;
+  /**
+   * A bar on every stream of one symbol and timeframe, once the page has one (a price alert's
+   * 1-minute stream).
+   */
+  sendBarOn(symbol: string, resolution: string, bar: Bar): Promise<void>;
   sendBook(bid: number, ask: number): Promise<void>;
   /** Reports the chart's bars subscription as reconnecting or live, as during an exchange outage. */
   sendBarsState(state: 'live' | 'reconnecting'): Promise<void>;
@@ -1221,6 +1226,18 @@ class MockGateway implements MockMarket {
       if (sub.channel !== 'bars' || sub.symbol !== first?.symbol) continue;
       if (sub.resolution !== first.resolution) continue;
       this.socket?.send(JSON.stringify({ type: 'bar', id: other, bar, historical }));
+    }
+  }
+
+  async sendBarOn(symbol: string, resolution: string, bar: Bar): Promise<void> {
+    const streams = () =>
+      [...this.subscriptions].filter(
+        ([, sub]) =>
+          sub.channel === 'bars' && sub.symbol === symbol && sub.resolution === resolution,
+      );
+    await expect.poll(() => streams().length).toBeGreaterThan(0);
+    for (const [id] of streams()) {
+      this.socket?.send(JSON.stringify({ type: 'bar', id, bar, historical: false }));
     }
   }
 
