@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { RSI_PINE } from '@tradingnerd/indicators';
-import { chartState, expect, NOW, openChart, test } from './fixtures';
+import { chartState, expect, LAST_DAY, NOW, openChart, test } from './fixtures';
 
 /**
  * The Pine Editor (docs/SPEC.md §5.16, milestone P1): the right toolbar, a built-in's code
@@ -337,6 +337,137 @@ test('plotshape, plotarrow, plotcandle and barcolor draw as TradingView draws th
   await settings.getByRole('checkbox', { name: 'Bar color', exact: true }).uncheck();
   await expect.poll(async () => (await chartState(page)).barColors).toEqual([]);
   await settings.getByRole('button', { name: 'Ok' }).click();
+});
+
+test('an offset worked out as the script runs shifts its plot, and follows the timeframe', async ({
+  page,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  // A v3 Ichimoku's way: the displacement from the chart's timeframe, a "simple int".
+  await setCode(
+    page,
+    [
+      '//@version=4',
+      'study("Shifted", overlay = true)',
+      'shift = timeframe.isintraday ? 26 : 13',
+      'plot(close, offset = shift)',
+      'plot(close)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  // Values shifted past the last bar aren't drawn: the shifted plot has `shift` fewer points.
+  const gap = async () => {
+    const plots = (await indicatorsOf(page))[0]?.plots ?? [];
+    return (plots[1]?.points ?? 0) - (plots[0]?.points ?? 0);
+  };
+  await expect.poll(gap).toBe(13);
+  await page.getByRole('banner').getByRole('button', { name: '1h', exact: true }).click();
+  await expect.poll(async () => (await chartState(page)).lastBar?.time).not.toBe(LAST_DAY);
+  await expect.poll(gap).toBe(26);
+});
+
+test('labels, lines, boxes and tables draw on the chart, the latest kept as the bars update', async ({
+  page,
+  market,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(
+    page,
+    [
+      '//@version=6',
+      'indicator("Drawings", overlay = true)',
+      'var table t = table.new(position.top_right, 2, 1, bgcolor = color.new(color.navy, 20))',
+      'if barstate.islast',
+      '    table.cell(t, 0, 0, "Close", text_color = color.white)',
+      '    table.cell(t, 1, 0, str.tostring(close), text_color = color.white)',
+      '    label.new(bar_index, high, "Last")',
+      '    line.new(bar_index - 20, low, bar_index, high, extend = extend.right, color = color.orange)',
+      '    box.new(bar_index - 10, high, bar_index - 5, low, bgcolor = color.new(color.teal, 80))',
+      'l = label.new(bar_index, low, "every bar", yloc = yloc.belowbar, style = label.style_none)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.drawings.tables).toBe(1);
+  const [view] = await indicatorsOf(page);
+  expect(view?.error).toBeNull();
+  // One label per bar, the last 50 kept (Pine docs, Limitations), and the last bar's own.
+  expect(view?.drawings).toMatchObject({ labels: 50, lines: 1, boxes: 1, tables: 1 });
+  const last = market.bars.at(-1) as (typeof market.bars)[number];
+  expect(view?.drawings.texts).toEqual(
+    expect.arrayContaining(['Last', 'Close', String(Number(last.close.toFixed(4)))]),
+  );
+  // Painted, not only kept: at their bars and prices on the candles' scale. A script with no
+  // plot draws on a series without values, which places no price on its own.
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.drawings.painted)
+    .toMatchObject({ lines: 1, boxes: 1, tables: 1 });
+  expect((await indicatorsOf(page))[0]?.drawings.painted.labels).toBeGreaterThan(10);
+});
+
+test('a strategy’s fills are marked on the chart and listed in the Strategy Tester', async ({
+  page,
+}) => {
+  await openChart(page);
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Pine Editor' })
+    .click();
+  await expect(editor(page).locator('.monaco-editor')).toBeVisible();
+  await setCode(
+    page,
+    [
+      '//@version=6',
+      'strategy("MA Cross", overlay = true)',
+      'fast = ta.sma(close, 9)',
+      'slow = ta.sma(close, 21)',
+      'if ta.crossover(fast, slow)',
+      '    strategy.entry("Long", strategy.long)',
+      'if ta.crossunder(fast, slow)',
+      '    strategy.entry("Short", strategy.short)',
+      'plot(fast)',
+      '',
+    ].join('\n'),
+  );
+  await editor(page).getByRole('button', { name: 'Add to chart' }).click();
+  // Adding a strategy opens the Strategy Tester, as on TradingView.
+  const tester = page.getByTestId('strategy-tester');
+  await expect(tester).toBeVisible();
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.trades?.fills ?? 0)
+    .toBeGreaterThan(1);
+  const trades = (await indicatorsOf(page))[0]?.trades;
+  expect(trades?.closed).toBeGreaterThan(0);
+  // Marked on the candles where they fall in view.
+  await expect
+    .poll(async () => (await indicatorsOf(page))[0]?.trades?.painted ?? 0)
+    .toBeGreaterThan(0);
+  await expect(tester.getByText('Net Profit', { exact: true })).toBeVisible();
+  await tester.getByRole('tab', { name: 'List of Trades' }).click();
+  await expect(tester.locator('tr[data-trade]')).toHaveCount(
+    (trades?.closed ?? 0) + (trades?.open ?? 0),
+  );
+  await tester.getByRole('tab', { name: 'Performance Summary' }).click();
+  await expect(tester.getByRole('rowheader', { name: 'Profit Factor' })).toBeVisible();
+  // Close, then the right toolbar's button brings it back.
+  await tester.getByRole('button', { name: 'Close' }).click();
+  await expect(tester).toBeHidden();
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Strategy Tester' })
+    .click();
+  await expect(page.getByTestId('strategy-tester')).toBeVisible();
 });
 
 test('a plotcandle is drawn from where its open, high, low and close have all settled', async ({

@@ -165,6 +165,8 @@ plot(a.get(-1))`,
       'Cannot use shift() if array is empty.',
     );
     expect(error('a = array.new<float>(-1)')).toBe('Cannot create an array with a negative size');
+    // An na size makes an empty array (a published v5 script relies on it).
+    expect(error('a = array.new_float(na)\nplot(a.size())')).toBeUndefined();
     expect(error('a = array.new<float>(100001)')).toBe(
       'Array is too large. Maximum size is 100000',
     );

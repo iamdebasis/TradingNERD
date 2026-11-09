@@ -1,0 +1,191 @@
+/*
+ * The alert manager on the right: a title row (Alerts, Create alert, Close), the Alerts and Log
+ * tabs, and their lists. In the right panels' style (Pine Logs, the watchlist); TradingView's own
+ * sizes and colors are provisional until measured from a screenshot (docs/SPEC.md §11).
+ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.top {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 0 8px 0 16px;
+}
+
+.heading {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.iconButton {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.iconButton:focus-visible,
+.tab:focus-visible,
+.clear:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.tabs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-gutter);
+}
+
+.tab,
+.clear {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--color-chip);
+  color: var(--color-text);
+}
+
+.tab:hover,
+.clear:hover {
+  color: var(--color-text);
+}
+
+.clear {
+  margin-left: auto;
+}
+
+.list {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.empty {
+  padding: 16px;
+  color: var(--color-text-secondary);
+}
+
+.row,
+.entry {
+  padding: 10px 8px 10px 16px;
+  border-bottom: 1px solid var(--color-gutter);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.row:hover {
+  background: var(--color-grid);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta,
+.time {
+  color: var(--color-text-secondary);
+}
+
+.status {
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+}
+
+.status[data-status="active"] {
+  color: var(--color-up-text);
+}
+
+.error {
+  margin-top: 2px;
+  color: var(--color-down);
+}
+
+/* The actions show on the row's hover, as TradingView's do, and when focused. */
+.actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0;
+}
+
+.row:hover .actions,
+.actions:focus-within {
+  opacity: 1;
+}
+
+.entryTop {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.entryTop .name {
+  flex: 1;
+}
+
+.time {
+  flex: none;
+  font-size: 12px;
+}
+
+.message {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

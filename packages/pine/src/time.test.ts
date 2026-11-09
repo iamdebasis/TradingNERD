@@ -28,6 +28,9 @@ describe('time zones', () => {
     expect(zoneOf('UTC+3')?.offset(t)).toBe(3 * HOUR);
     expect(zoneOf('GMT-0530')?.offset(t)).toBe(-5.5 * HOUR);
     expect(zoneOf('UTC+05:30')?.offset(t)).toBe(5.5 * HOUR);
+    // The sign left out is plus: the manual's own "UTC0" (UTC+0).
+    expect(zoneOf('UTC0')?.offset(t)).toBe(0);
+    expect(zoneOf('UTC5')?.offset(t)).toBe(5 * HOUR);
     // New York keeps its daylight saving: −5 h in January, −4 h in July.
     expect(zoneOf('America/New_York')?.offset(t)).toBe(-5 * HOUR);
     expect(zoneOf('America/New_York')?.offset(Date.UTC(2024, 6, 15))).toBe(-4 * HOUR);

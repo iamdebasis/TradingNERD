@@ -1,3 +1,4 @@
+import { asFreq } from './alerts.ts';
 import { Args, type Call, type Handler } from './args.ts';
 import type { Compiler, Scope } from './compiler.ts';
 import { PineRuntimeError } from './diagnostics.ts';
@@ -377,14 +378,34 @@ export function stringCalls(): Record<string, Handler> {
     'log.info': logCall('info'),
     'log.warning': logCall('warning'),
     'log.error': logCall('error'),
-    // Alerts come with the alerts dialog: until then an alert() call does nothing, as on a
-    // TradingView chart without an alert set on the script.
+    // An alert() call on a realtime bar makes an alert event, kept while an alert runs the script
+    // (alerts.ts); with no alert on it, it does nothing, as on a TradingView chart.
     alert: (c, call, scope) => {
       c.otherOutputs++;
+      const site = c.alertCalls++;
       const args = new Args(c, call, scope, ['message', 'freq'], 1);
-      args.string('message');
-      args.string('freq');
-      return { base: 'void', qual: SERIES, ev: () => null, span: call.span };
+      const message = args.string('message')?.ev ?? (() => '');
+      const freq = args.string('freq')?.ev ?? (() => 'once_per_bar');
+      // A strategy runs on realtime bars only at their close: "all alert() calls will use the
+      // alert.freq_once_per_bar_close frequency" unless calc_on_every_tick (Pine docs, Alerts).
+      const strategy = c.indicator?.strategy;
+      const closesOnly = strategy ? !strategy.calcOnEveryTick : false;
+      return {
+        base: 'void',
+        qual: SERIES,
+        ev: (rt) => {
+          if (!rt.alerting || rt.secondary || rt.index < rt.realtimeFrom) return null;
+          rt.alerts.push({
+            call: site,
+            message: String(message(rt) ?? ''),
+            freq: closesOnly ? 'once_per_bar_close' : asFreq(String(freq(rt) ?? '')),
+            bar: rt.index,
+            final: rt.final,
+          });
+          return null;
+        },
+        span: call.span,
+      };
     },
   };
 }

@@ -195,10 +195,11 @@ function newArray(c: Compiler, call: Call, scope: Scope, elem: Base): Compiled {
   return series(
     arrayOf(elem),
     (rt) => {
-      const n = size(rt);
-      // TradingView's own messages (Arrays, Error handling).
+      // An na size makes an empty array: a published v5 script (Flip Flop) starts one with
+      // array.new_float(na) and runs on TradingView (provisional, docs/SPEC.md §11).
+      const n = Number.isNaN(size(rt)) ? 0 : size(rt);
+      // TradingView's own message (Arrays, Error handling).
       if (n < 0) fail('Cannot create an array with a negative size', span);
-      if (!(n >= 0)) fail("An array's size can't be na", span);
       if (n > MAX_ARRAY) fail('Array is too large. Maximum size is 100000', span);
       const value = init(rt);
       return new PineArray(elem, new Array(Math.trunc(n)).fill(value));

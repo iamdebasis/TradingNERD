@@ -1,0 +1,213 @@
+/*
+ * The Create Alert dialog: a title bar, the fields one under another (label on the left), and
+ * Cancel and Create at the bottom, in the app's dialog style (ChartSettingsDialog). TradingView's
+ * own sizes are provisional until measured from a screenshot (docs/SPEC.md §11).
+ */
+.backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  padding: 0 16px 0 24px;
+  border-bottom: 1px solid var(--color-gutter);
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-gutter);
+}
+
+.body {
+  overflow-y: auto;
+  padding: 16px 24px 8px;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+
+.label {
+  padding: 7px 0 0;
+  color: var(--color-text-secondary);
+}
+
+/* A fieldset's legend sits in the grid's first column as the labels do. */
+fieldset > legend.label {
+  float: left;
+  width: 120px;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fixed {
+  min-height: 34px;
+  padding: 7px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 0;
+  padding: 7px 0 0;
+  color: var(--color-text-secondary);
+}
+
+.text,
+.textArea {
+  width: 100%;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--color-separator);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+}
+
+.text {
+  height: 34px;
+}
+
+.textArea {
+  padding: 6px 10px;
+  resize: vertical;
+}
+
+.text:focus,
+.textArea:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 7px 0 0;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.empty,
+.footnote {
+  margin: 0 0 16px;
+  color: var(--color-text-secondary);
+}
+
+.footnote {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-gutter);
+}
+
+.primary,
+.secondary {
+  min-width: 72px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  border: 0;
+  background: var(--color-accent);
+  color: var(--color-label-text);
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.secondary {
+  border: 1px solid var(--color-separator);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.secondary:hover {
+  background: var(--color-gutter);
+}
+
+.primary:focus-visible,
+.secondary:focus-visible,
+.close:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}

@@ -33,6 +33,16 @@ plot(y + z, color = color.new(color.red, 80))`);
     expect(firstDifference(plots(source, bars)[0] ?? [], plots(code, bars)[0] ?? [])).toBe(-1);
   });
 
+  it('casts a number given for a bool parameter or a bool variable, as for a condition', () => {
+    const source = v5(`x = close > 11 ? close : na
+bool b = bar_index % 2
+plot(ta.valuewhen(x, close, 0) + (b ? 1 : 0))`);
+    const code = converted(source);
+    expect(code).toContain('ta.valuewhen(bool(x), close, 0)');
+    expect(code).toContain('bool b = bool(bar_index % 2)');
+    expect(firstDifference(plots(source, bars)[0] ?? [], plots(code, bars)[0] ?? [])).toBe(-1);
+  });
+
   it('converts only v5 code, and only code that compiles', () => {
     expect(convertToV6('//@version=6\nindicator("x")\nplot(close)')).toMatchObject({
       ok: false,

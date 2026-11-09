@@ -37,9 +37,11 @@ export function zoneOf(name: string): Zone | null {
 }
 
 function parseZone(text: string): Zone | null {
-  const fixed = /^(?:UTC|GMT)(?:([+-])(\d{1,2})(?::?(\d{2}))?)?$/i.exec(text);
+  // "UTC-5", "UTC+05:30", "GMT+0100" (the manual, Time zone strings); the sign can be left out,
+  // as the manual's own "UTC0" (UTC+0) shows (Time, timestamp()).
+  const fixed = /^(?:UTC|GMT)(?:([+-]?)(\d{1,2})(?::?(\d{2}))?)?$/i.exec(text);
   if (fixed) {
-    if (!fixed[1]) return UTC_ZONE;
+    if (fixed[2] === undefined) return UTC_ZONE;
     const minutes = Number(fixed[2]) * 60 + Number(fixed[3] ?? 0);
     if (minutes > 14 * 60) return null;
     const offset = (fixed[1] === '-' ? -1 : 1) * minutes * MINUTE;
@@ -373,17 +375,20 @@ const sessions = new Map<string, SessionPeriod[] | null>();
 /**
  * A session string (Pine docs, Sessions: Session strings): "0930-1600", "0930-1600:23456",
  * "1700-1700:23456" (an overnight session belongs to the day it ends on), "0000-0000" or
- * "24x7" for the whole day, periods joined by commas. Null when it isn't one.
+ * "24x7" for the whole day, periods joined by commas. Null when it isn't one. Without days, a
+ * session is every day's ("1234567"); v4 and older meant Monday to Friday ("23456": the v5
+ * migration guide, "Changed the default session days for time() and time_close()").
  */
-export function parseSession(text: string): SessionPeriod[] | null {
-  const cached = sessions.get(text);
+export function parseSession(text: string, defaultDays = '1234567'): SessionPeriod[] | null {
+  const key = `${defaultDays}|${text}`;
+  const cached = sessions.get(key);
   if (cached !== undefined) return cached;
   const t = text.trim();
   let parsed: SessionPeriod[] | null = [];
   if (/^24x7$/i.test(t)) parsed = [{ start: 0, end: 0, days: new Set([1, 2, 3, 4, 5, 6, 7]) }];
   else {
     // "<periods>:<days>": the days, given once at the end, are every period's.
-    const [periods = '', daysText = '1234567', extra] = t.split(':');
+    const [periods = '', daysText = defaultDays, extra] = t.split(':');
     if (extra !== undefined || !/^[1-7]+$/.test(daysText)) parsed = null;
     const days = new Set(daysText.split('').map(Number));
     for (const part of periods.split(',')) {
@@ -395,7 +400,7 @@ export function parseSession(text: string): SessionPeriod[] | null {
       else parsed.push({ start, end, days });
     }
   }
-  sessions.set(text, parsed);
+  sessions.set(key, parsed);
   return parsed;
 }
 

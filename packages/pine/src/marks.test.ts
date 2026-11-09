@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { compileScript, DEFAULT_SYMBOL } from './index.ts';
 import { CANDLE_BORDER, CANDLE_WICK } from './marks.ts';
-import { closes, compileError, indicator, plots, program, runScript } from './testing.ts';
+import { closes, indicator, plots, program, runScript } from './testing.ts';
 import { COLORS, hexColor } from './values.ts';
 
 /**
@@ -87,13 +88,44 @@ plotarrow(close - open)`),
     expect(run.plotColors[1]?.[2]).toBe(COLORS.red);
   });
 
-  it('takes shape.*, location.* and size.* only where they belong', () => {
-    expect(compileError(indicator('plotshape(true, style = "circle")')).message).toMatch(/style/);
+  it('takes shape.*, location.* and size.* as the plain strings the v6 reference types them', () => {
     expect(
       program(
         indicator('plotchar(true, char = "▲", location = location.top, size = size.huge)'),
       ).describe([]).plots[0]?.mark,
     ).toMatchObject({ char: '▲', location: 'top', size: 'huge' });
+    // Kept in a string input and picked by the user, as scripts on TradingView do; the manual's
+    // own examples offer size.* in input.string()'s options (found 2026-11-08).
+    const picked = program(
+      indicator(`s = input.string(shape.circle, "Shape", options = [shape.circle, shape.cross])
+string where = location.belowbar
+z = input.string(size.small, "Size", options = [size.tiny, size.small, size.large])
+plotshape(true, style = s, location = where, size = z)`),
+    );
+    expect(picked.describe([]).plots[0]?.mark).toMatchObject({
+      shape: 'circle',
+      location: 'belowbar',
+      size: 'small',
+    });
+    expect(picked.describe(['cross', 'large']).plots[0]?.mark).toMatchObject({
+      shape: 'cross',
+      size: 'large',
+    });
+    // Text none of them has draws as the default would, with a warning.
+    const unknown = program(indicator('plotshape(true, style = "nope")'));
+    expect(unknown.describe([]).plots[0]?.mark).toMatchObject({ shape: 'xcross' });
+    expect(unknown.warnings.map((w) => w.message).join()).toMatch(/nope/);
+  });
+});
+
+describe('fill() between hlines', () => {
+  it('takes the hline overload’s own names, hline1 and hline2 (the v6 reference)', () => {
+    const p = program(
+      indicator(
+        'a = hline(70)\nb = hline(30)\nfill(hline1 = a, hline2 = b, color = color.new(color.blue, 90))\nplot(close)',
+      ),
+    );
+    expect(p.describe([]).fills).toHaveLength(1);
   });
 });
 
@@ -201,5 +233,46 @@ describe('barcolor', () => {
   it('keeps bgcolor() a background', () => {
     const [background] = program(indicator('bgcolor(color.red)')).describe([]).backgrounds;
     expect(background?.bars).toBe(false);
+  });
+});
+
+describe('offsets worked out as the script runs (the v6 reference: offset is "simple int")', () => {
+  const hourly = { ...DEFAULT_SYMBOL, timeframe: '60' };
+
+  it('takes a simple offset from the run: one from the chart’s timeframe, as v3’s Ichimoku has', () => {
+    const source = `//@version=4
+study("Shifted", overlay = true)
+per(v) => round(v * (timeframe.isintraday ? 2 : 1))
+shift = per(13)
+plot(close, offset = shift)
+plot(close, offset = -shift)
+bgcolor(color.red, offset = shift)`;
+    const daily = runScript(source, bars);
+    expect(daily.error).toBeNull();
+    expect(daily.offsets).toEqual({ plots: [13, -13], backgrounds: [13] });
+    const intraday = runScript(source, bars, [], hourly);
+    expect(intraday.offsets.plots).toEqual([26, -26]);
+    // Known before the bars, an offset stays the description's.
+    const plain = runScript(indicator('plot(close, offset = 2)'), bars);
+    expect(plain.offsets.plots).toEqual([null]);
+    expect(plain.description.plots[0]?.offset).toBe(2);
+  });
+
+  it('in v5, uses a series offset’s last value on the whole chart, and warns', () => {
+    // The v6 migration guide's example: bar_index / 2 at the last bar.
+    const source = `//@version=5
+indicator("\`offset\` parameter demo", overlay = true)
+int seriesOffset = bar_index / 2
+plot(math.max(close, open), "", color.orange, 4, plot.style_stepline, offset = seriesOffset)`;
+    const result = compileScript(source);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.warnings[0]?.message).toMatch(/uses only its last value/);
+    // Five bars: the last bar_index is 4.
+    expect(runScript(source, bars).offsets.plots).toEqual([2]);
+  });
+
+  it('refuses a series offset in v6 (the v6 migration guide: No series offset)', () => {
+    const result = compileScript(indicator('plot(close, offset = bar_index)'));
+    expect(result.ok).toBe(false);
   });
 });

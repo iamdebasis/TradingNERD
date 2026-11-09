@@ -1,4 +1,13 @@
 export {
+  type AlertConditionDef,
+  type AlertEvent,
+  type AlertFreq,
+  fillPlaceholders,
+  type PlaceholderContext,
+  placeholderNumber,
+  placeholderTime,
+} from './alerts.ts';
+export {
   DISPLAY,
   FORMATS,
   LINE_STYLES,
@@ -25,6 +34,20 @@ export {
   PineRuntimeError,
   type Span,
 } from './diagnostics.ts';
+export {
+  BoxObject,
+  type DrawingSnapshot,
+  EMPTY_DRAWINGS,
+  LABEL_STYLES,
+  LabelObject,
+  LineObject,
+  linePrice,
+  POSITIONS,
+  PolylineObject,
+  type TableCell,
+  TableObject,
+  TEXT_FORMATS,
+} from './drawings.ts';
 export { KEYWORDS, versionIn } from './lexer.ts';
 export {
   alignBar,
@@ -57,7 +80,16 @@ export {
   ScriptProgram,
   ScriptRun,
   type Shape,
+  stillForming,
 } from './script.ts';
+export {
+  DEFAULT_STRATEGY,
+  type StrategyFigures,
+  type StrategyFill,
+  type StrategyProps,
+  type StrategyState,
+  type Trade,
+} from './strategy.ts';
 export {
   COLORS,
   colorCss,

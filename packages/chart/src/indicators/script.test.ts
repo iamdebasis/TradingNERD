@@ -301,3 +301,24 @@ describe('Scripts’ other inputs, placements and formats', () => {
     expect(scriptInputs(p, {})).toEqual([5]);
   });
 });
+
+describe('offsets a script works out as it runs', () => {
+  it('draws with the run’s offsets in place of the description’s', () => {
+    const p = program(`//@version=4
+study("Shifted", overlay = true)
+shift = timeframe.isintraday ? 26 : 13
+plot(close, offset = shift)
+plot(close)
+bgcolor(color.red, offset = -shift)`);
+    const inputs = scriptDefaultInputs(p);
+    const run = new ScriptLayerRun(p, inputs, CONTEXT, null);
+    run.setBars(bars(30));
+    expect(run.run.offsets).toEqual({ plots: [13, null], backgrounds: [-13] });
+    // Before the run the description can't know them: 0.
+    const before = scriptDefinition(p, inputs, CONTEXT);
+    expect(before.plots.map((plot) => plot.look?.offset)).toEqual([0, 0]);
+    const after = scriptDefinition(p, inputs, CONTEXT, run.run.offsets);
+    expect(after.plots.map((plot) => plot.look?.offset)).toEqual([13, 0]);
+    expect(after.backgrounds?.map((background) => background.offset)).toEqual([-13]);
+  });
+});

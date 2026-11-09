@@ -18,11 +18,14 @@ import {
   colorCss,
   compileCached,
   DEFAULT_SYMBOL,
+  type DrawingSnapshot,
+  EMPTY_DRAWINGS,
   type LogEntry,
   type RequestFeed,
   type RequestKey,
   requestKeyText,
   type ScriptProgram,
+  type StrategyState,
 } from '@tradingnerd/pine';
 import {
   AreaSeries,
@@ -45,8 +48,10 @@ import {
 import type { AxisContext } from '../plugins/axisLabel';
 import { type BackgroundBand, BackgroundPrimitive } from '../plugins/BackgroundPrimitive';
 import { CrosshairPrimitive } from '../plugins/CrosshairPrimitive';
+import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
 import { type BandEdge, FillPrimitive, type FillShape } from '../plugins/FillPrimitive';
 import { type BarExtent, type MarkSet, MarksPrimitive } from '../plugins/MarksPrimitive';
+import { TradesPrimitive } from '../plugins/TradesPrimitive';
 import { type ValueLabel, ValueLabelsPrimitive } from '../plugins/ValueLabelsPrimitive';
 import type { ChartTheme } from '../theme';
 import {
@@ -65,7 +70,7 @@ import {
   withLevels,
   withOpacity,
 } from './model';
-import { type ScriptContext, ScriptLayerRun, scriptDefinition } from './script';
+import { type RunOffsets, type ScriptContext, ScriptLayerRun, scriptDefinition } from './script';
 import { builtinTimeframe, TimeframedRun } from './timeframed';
 
 /** The overlay scale Volume and its MA share at the bottom of the price pane. */
@@ -123,7 +128,10 @@ interface DrawnPlot {
 /** One indicator's state on the chart: its run and what draws it. */
 class IndicatorView {
   indicator: ChartIndicator;
-  readonly definition: IndicatorDefinition;
+  /** A script's is made again when its run works out other offsets (takeOffsets). */
+  definition: IndicatorDefinition;
+  /** Its run worked out offsets its drawn series don't have: it's built again. */
+  offsetsMoved = false;
   /** A script's compiled code; null for a built-in. */
   readonly program: ScriptProgram | null;
   run: LayerRun;
@@ -141,6 +149,10 @@ class IndicatorView {
   background: BackgroundPrimitive | null = null;
   crosshair: CrosshairPrimitive | null = null;
   labels: ValueLabelsPrimitive | null = null;
+  /** A script's labels, lines, boxes, tables, polylines and linefills. */
+  drawings: DrawingsPrimitive | null = null;
+  /** A strategy's fills, on the price pane whatever its own pane. */
+  trades: TradesPrimitive | null = null;
   /** Prices of its pane's tick labels, so its labels can hide the ones they cover. */
   tickPrices: readonly number[] = [];
   /** The libraries' revision a script was compiled with. */
@@ -194,6 +206,14 @@ class IndicatorView {
   }
 }
 
+/** A strategy on the chart, for the Strategy Tester. */
+export interface ScriptStrategy {
+  id: string;
+  title: string;
+  state: StrategyState;
+  error: string | null;
+}
+
 /** What the browser tests and the debug handle see of one indicator. */
 export interface IndicatorDebugState {
   id: string;
@@ -219,6 +239,20 @@ export interface IndicatorDebugState {
   backgrounds: string[];
   /** Its value labels on the price axis, as drawn. */
   valueLabels: string[];
+  /** How many of each drawing a script has on the chart, and its labels' and cells' text. */
+  drawings: {
+    labels: number;
+    lines: number;
+    boxes: number;
+    tables: number;
+    polylines: number;
+    linefills: number;
+    texts: string[];
+    /** How many the last frame painted: those in view, at prices on the scale. */
+    painted: { labels: number; lines: number; boxes: number; tables: number };
+  };
+  /** A strategy's fills, and how many the last frame marked; null for an indicator. */
+  trades: { fills: number; painted: number; closed: number; open: number } | null;
   /** What stopped a script, if anything did. */
   error: string | null;
 }
@@ -294,6 +328,7 @@ export class IndicatorLayer {
   private readonly theme: ChartTheme;
   private readonly font: string;
   private views: IndicatorView[] = [];
+  private readonly priceSeries: ISeriesApi<SeriesType> | null;
   private bars: readonly Bar[] = [];
   private times: readonly number[] = [];
   private fromListing = false;
@@ -308,7 +343,17 @@ export class IndicatorLayer {
   /** Where scripts' requests get their data (the app's loader); none: they wait. */
   private feed: RequestFeed | undefined;
 
-  constructor(chart: IChartApi, theme: ChartTheme, font: string) {
+  /**
+   * `priceSeries`: the chart's own bars, on the price pane's scale. An overlay script's drawings
+   * find their prices through it when the script has no plot with values.
+   */
+  constructor(
+    chart: IChartApi,
+    theme: ChartTheme,
+    font: string,
+    priceSeries: ISeriesApi<SeriesType> | null = null,
+  ) {
+    this.priceSeries = priceSeries;
     this.chart = chart;
     this.theme = theme;
     this.font = font;
@@ -341,7 +386,10 @@ export class IndicatorLayer {
       // A script that stops compiling (a library removed) stays where it was.
       const view = this.createView(indicator, old?.definition.placement);
       // A hidden indicator isn't computed: showing it again builds it afresh.
-      if (this.bars.length > 0 && !indicator.hidden && !view.compileError) this.runBars(view);
+      if (this.bars.length > 0 && !indicator.hidden && !view.compileError) {
+        this.runBars(view);
+        this.takeOffsets(view);
+      }
       if (old) {
         // Into the old one's pane, so the pane keeps its place and height; then the old one goes.
         // A script now drawn elsewhere (overlay changed) gets the pane its placement wants.
@@ -376,13 +424,35 @@ export class IndicatorLayer {
     }
   }
 
-  /** A script that imports, compiled with libraries that have changed since. */
+  /**
+   * A script that imports, compiled with libraries that have changed since; or one whose run
+   * worked out offsets its series don't have.
+   */
   private stale(view: IndicatorView): boolean {
+    if (view.offsetsMoved) return true;
     return (
       view.indicator.kind === 'script' &&
       view.librariesRevision !== this.libraries.revision &&
       IMPORTS.test(view.indicator.script?.source ?? '')
     );
+  }
+
+  /**
+   * A script whose run worked out an offset as it ran (a "simple int" from the chart's timeframe,
+   * or v5's series, its last value): its definition takes the run's, before it's built. Whether
+   * they differ from those it has.
+   */
+  private takeOffsets(view: IndicatorView): boolean {
+    const script = view.script;
+    if (!script || !view.program || !this.offsetsDiffer(view)) return false;
+    const offsets: RunOffsets = script.run.offsets;
+    view.definition = scriptDefinition(
+      view.program,
+      view.indicator.settings.inputs,
+      this.context,
+      offsets,
+    );
+    return true;
   }
 
   /** New bars throughout: every run computed afresh, as Pine reloads a script. */
@@ -395,10 +465,29 @@ export class IndicatorLayer {
       if (view.run.symbol !== this.symbol)
         view.run = this.makeRun(view.indicator, view.definition, view.program);
       this.runBars(view);
+      // Offsets its run worked out afresh that its series don't have: it's built again below.
+      if (view.script && this.offsetsDiffer(view)) {
+        view.offsetsMoved = true;
+        continue;
+      }
       this.refreshStarts(view);
       this.push(view);
     }
     this.barColorChanges = 'all';
+    if (this.views.some((view) => view.offsetsMoved)) {
+      this.set(this.views.map((view) => view.indicator));
+    }
+  }
+
+  /** Whether a script's run worked out offsets other than its definition's. */
+  private offsetsDiffer(view: IndicatorView): boolean {
+    const offsets = view.script?.run.offsets;
+    if (!offsets) return false;
+    const { plots, backgrounds } = view.definition;
+    return (
+      offsets.plots.some((o, i) => o !== null && o !== (plots[i]?.look?.offset ?? 0)) ||
+      offsets.backgrounds.some((o, i) => o !== null && o !== (backgrounds?.[i]?.offset ?? 0))
+    );
   }
 
   /** A live change to the bars at `index` (see IndicatorRun.update). */
@@ -596,6 +685,17 @@ export class IndicatorLayer {
     return out;
   }
 
+  /** Each strategy on the chart, in the legend's order: its title and state (the Strategy Tester). */
+  strategies(): ScriptStrategy[] {
+    const out: ScriptStrategy[] = [];
+    for (const view of this.views) {
+      const state = view.script?.run.strategy;
+      if (!state || view.indicator.hidden) continue;
+      out.push({ id: view.indicator.id, title: view.definition.name, state, error: view.error });
+    }
+    return out;
+  }
+
   errors(): Map<string, string> {
     const errors = new Map<string, string>();
     for (const view of this.views) {
@@ -703,6 +803,18 @@ export class IndicatorLayer {
         })) ?? [],
       backgrounds: view.background?.current().map((band) => band.id) ?? [],
       valueLabels: view.labels?.current().map((label) => label.text) ?? [],
+      trades: view.script?.run.strategy
+        ? {
+            fills: view.script.run.strategy.fills.length,
+            painted: view.trades?.paintedCount() ?? 0,
+            closed: view.script.run.strategy.closed.length,
+            open: view.script.run.strategy.open.length,
+          }
+        : null,
+      drawings: {
+        ...drawingCounts(view.drawings?.current() ?? EMPTY_DRAWINGS),
+        painted: view.drawings?.paintedCounts() ?? { labels: 0, lines: 0, boxes: 0, tables: 0 },
+      },
       error: view.error,
     }));
   }
@@ -895,6 +1007,17 @@ export class IndicatorLayer {
       view.labels = new ValueLabelsPrimitive(this.font, this.theme.labelText, axis);
       host.attachPrimitive(view.fill);
       host.attachPrimitive(view.labels);
+      // A script's drawings, on the scale of its pane's plots (the candles' for an overlay).
+      if (view.program) {
+        view.drawings = new DrawingsPrimitive(this.font, (price) => this.drawingY(view, price));
+        host.attachPrimitive(view.drawings);
+      }
+      // A strategy's entries and exits are marked on the chart's own bars (the reference,
+      // strategy(): "on the main chart regardless of" overlay).
+      if (view.program?.strategy && this.priceSeries) {
+        view.trades = new TradesPrimitive(this.font, this.theme.axisText);
+        this.priceSeries.attachPrimitive(view.trades);
+      }
       // barcolor() colors the chart's bars instead (ChartController).
       if ((definition.backgrounds ?? []).some((spec) => !spec.bars)) {
         view.background = new BackgroundPrimitive();
@@ -1024,6 +1147,8 @@ export class IndicatorLayer {
     view.background = null;
     view.labels = null;
     view.crosshair = null;
+    if (view.trades) this.priceSeries?.detachPrimitive(view.trades);
+    view.trades = null;
   }
 
   /**
@@ -1294,6 +1419,14 @@ export class IndicatorLayer {
     view.fill?.update(stopped ? [] : this.fills(view));
     view.background?.update(stopped ? [] : this.backgrounds(view));
     view.labels?.update(stopped ? [] : this.valueLabels(view));
+    view.trades?.update(stopped ? [] : (view.script?.run.strategy?.fills ?? []), this.barExtent);
+    view.drawings?.update(
+      stopped ? EMPTY_DRAWINGS : (view.script?.run.drawings ?? EMPTY_DRAWINGS),
+      {
+        times: this.times,
+        bars: this.barExtent,
+      },
+    );
     for (const plot of view.plots) {
       const set = stopped ? null : this.markSet(view, plot);
       plot.marks?.update(set ? [set] : [], this.barExtent);
@@ -1308,6 +1441,22 @@ export class IndicatorLayer {
         last + (plot.spec.look?.offset ?? 0) >= this.drawnFrom(view, plot.spec, plot.index);
       plot.track.applyOptions(show ? { price: value, lineVisible: true } : { lineVisible: false });
     }
+  }
+
+  /**
+   * Where a price is on a script's pane: through a series with values on its scale, since one
+   * with none gives no place (a script that only draws). An overlay's scale is the bars'.
+   */
+  private drawingY(view: IndicatorView, price: number): number | null {
+    if (!view.ownPane && this.priceSeries) {
+      const y = this.priceSeries.priceToCoordinate(price);
+      if (y !== null) return y;
+    }
+    for (const series of view.series) {
+      const y = series.priceToCoordinate(price);
+      if (y !== null) return y;
+    }
+    return null;
   }
 
   /** The chart's bars' highs and lows, for marks above and below them. */
@@ -1519,4 +1668,20 @@ export class IndicatorLayer {
     }
     return ys;
   }
+}
+
+/** A script's drawings as the debug state counts them. */
+function drawingCounts(d: DrawingSnapshot): Omit<IndicatorDebugState['drawings'], 'painted'> {
+  const cells = d.tables.flatMap((table) =>
+    table.cells.flatMap((row) => row.map((cell) => cell?.text ?? '')),
+  );
+  return {
+    labels: d.labels.length,
+    lines: d.lines.length,
+    boxes: d.boxes.length,
+    tables: d.tables.length,
+    polylines: d.polylines.length,
+    linefills: d.linefills.length,
+    texts: [...d.labels.map((label) => label.text), ...cells].filter((text) => text !== ''),
+  };
 }

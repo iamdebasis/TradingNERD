@@ -2,6 +2,7 @@ import type { Bar } from '@tradingnerd/core';
 import type { CompiledProgram } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import type { LogEntry, Outputs, Runtime, ScriptSymbol } from './runtime.ts';
+import { Broker } from './strategy.ts';
 import type { Value } from './values.ts';
 
 /** A runtime error: the script stops, as Pine's do, and the chart shows the message. */
@@ -57,6 +58,9 @@ export class Execution {
       plotColors: program.plots.map((plot) => (plot.color.dynamic ? NONE : null)),
       backgrounds: program.bgcolors.map(() => NONE),
       fillColors: program.fills.map((fill) => (fill.color?.dynamic ? NONE : null)),
+      plotOffsets: new Float64Array(program.plots.length).fill(Number.NaN),
+      backgroundOffsets: new Float64Array(program.bgcolors.length).fill(Number.NaN),
+      conditions: program.alertConditions.map(() => NONE),
     };
     const rt = program.runtime;
     rt.inputs = inputs;
@@ -67,6 +71,11 @@ export class Execution {
     rt.changed = changed;
     rt.realtimeFrom = realtimeFrom;
     rt.outputs = this.outputs;
+    if (program.indicator?.drawings) rt.drawings.limits = { ...program.indicator.drawings };
+    // A strategy's broker emulator; it makes the script run afresh on a correction.
+    const strategy = program.indicator?.strategy;
+    rt.broker = strategy && !rt.secondary ? new Broker(strategy) : null;
+    if (rt.broker) rt.usesObjects = true;
   }
 
   /** The runtime it runs in: its variables, and a request's captured values. */
@@ -138,7 +147,18 @@ export class Execution {
     const rt = this.program.runtime;
     rt.begin(index, final);
     try {
-      this.program.run(rt);
+      // A strategy's orders fill on the bar's prices before the script runs on its close.
+      rt.broker?.openBar(rt);
+      // On a realtime bar a strategy runs only once it closes, unless calc_on_every_tick: "the
+      // script only executes on a realtime bar after it closes" (Pine docs, Strategies: Altering
+      // calculation behavior). Its stop and limit orders still fill on the bar's prices so far.
+      const waits =
+        rt.broker !== null &&
+        !final &&
+        index >= rt.realtimeFrom &&
+        !this.program.indicator?.strategy?.calcOnEveryTick;
+      if (!waits) this.program.run(rt);
+      rt.broker?.closeBar(rt);
       rt.end();
     } catch (error) {
       if (!(error instanceof PineRuntimeError)) throw error;
@@ -160,6 +180,7 @@ export class Execution {
     o.plotColors = o.plotColors.map((colors) => colors && grow(colors));
     o.backgrounds = o.backgrounds.map(grow);
     o.fillColors = o.fillColors.map((colors) => colors && grow(colors));
+    o.conditions = o.conditions.map(grow);
   }
 }
 

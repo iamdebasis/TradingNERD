@@ -5,8 +5,11 @@ import {
   UTC_CLOCK,
   UTC_ZONE,
 } from '@tradingnerd/core';
+import type { AlertEvent } from './alerts.ts';
 import { PineRuntimeError } from './diagnostics.ts';
+import { DrawingStore } from './drawings.ts';
 import type { RequestBroker } from './requests.ts';
+import type { Broker } from './strategy.ts';
 import type { Stateful } from './ta.ts';
 import type { Value } from './values.ts';
 
@@ -153,6 +156,15 @@ export interface Outputs {
   backgrounds: Float64Array[];
   /** Each fill's color, for a fill whose color changes from bar to bar. */
   fillColors: (Float64Array | null)[];
+  /**
+   * Each plot's offset as the script worked it out, its last value (builtins.ts offsetArg); NaN
+   * for one known before the bars.
+   */
+  plotOffsets: Float64Array;
+  /** Each bgcolor()'s and barcolor()'s, the same way. */
+  backgroundOffsets: Float64Array;
+  /** Each alertcondition()'s condition on each bar: 1 true, 0 false (alerts.ts). */
+  conditions: Float64Array[];
 }
 
 /** How long one bar's execution may take, as Pine stops a loop after 500 ms. */
@@ -294,7 +306,19 @@ export class Runtime {
   logs: LogEntry[] = [];
   /** How many messages it has logged in all, so a reader can tell when there are new ones. */
   logsWritten = 0;
-  outputs: Outputs = { plots: [], plotColors: [], backgrounds: [], fillColors: [] };
+  outputs: Outputs = {
+    plots: [],
+    plotColors: [],
+    backgrounds: [],
+    fillColors: [],
+    plotOffsets: new Float64Array(0),
+    backgroundOffsets: new Float64Array(0),
+    conditions: [],
+  };
+  /** Its labels, lines, boxes, tables, polylines and linefills (drawings.ts). */
+  readonly drawings = new DrawingStore();
+  /** A strategy's broker emulator: its orders, trades and figures (strategy.ts); null otherwise. */
+  broker: Broker | null = null;
   /** A context program's values, by bar: what its request expression gives (requests.ts). */
   captured: Value[] = [];
   /**
@@ -302,6 +326,12 @@ export class Runtime {
    * (only the code its expression depends on is copied, Pine docs: Other timeframes and data).
    */
   secondary = false;
+  /**
+   * Whether an alert runs this script (apps/web alerts): only then do its alert() calls on
+   * realtime bars make events, which the alert takes after each update (alerts.ts).
+   */
+  alerting = false;
+  alerts: AlertEvent[] = [];
   /** The chart's symbol, when this runs a request's context (syminfo.main_tickerid). */
   main: ScriptSymbol | null = null;
   /** Where this run's request calls get their values; null when there's no feed (requests.ts). */

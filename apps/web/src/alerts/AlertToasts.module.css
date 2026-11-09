@@ -1,0 +1,91 @@
+/*
+ * Alerts' pop-ups: stacked at the bottom right over the chart, newest at the bottom, in the
+ * menus' colors. TradingView's own pop-up is provisional until measured (docs/SPEC.md §11).
+ */
+.toasts {
+  position: fixed;
+  z-index: 300;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 8px 12px 12px;
+  border: 1px solid var(--color-separator);
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 45%);
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.icon {
+  display: flex;
+  flex: none;
+  color: var(--color-accent);
+}
+
+.icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-weight: 600;
+}
+
+.name,
+.time {
+  color: var(--color-text-secondary);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.time {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.close {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}

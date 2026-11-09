@@ -1,5 +1,6 @@
-import type { Bar } from '@tradingnerd/core';
+import { type Bar, parseResolution } from '@tradingnerd/core';
 import { type BarChange, isSourceName } from '@tradingnerd/indicators';
+import type { AlertConditionDef, AlertEvent } from './alerts.ts';
 import type { Script } from './ast.ts';
 import {
   DISPLAY,
@@ -19,6 +20,7 @@ import {
 } from './compiler.ts';
 import { PineCompileError, type PineDiagnostic } from './diagnostics.ts';
 import { upgrade } from './dialect.ts';
+import { type DrawingSnapshot, EMPTY_DRAWINGS } from './drawings.ts';
 import { spanText } from './edits.ts';
 import { CHECKS, Execution, type RunClock, type ScriptError, scaledBar } from './execution.ts';
 import { LOCATIONS, SHAPES, SIZES } from './marks.ts';
@@ -36,6 +38,7 @@ import {
   timesOf,
 } from './requests.ts';
 import { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
+import type { StrategyProps, StrategyState } from './strategy.ts';
 import type { FoldEnv, Qual } from './types.ts';
 import type { OutputRef, Value } from './values.ts';
 import { Agreement, drawnFrom } from './warmup.ts';
@@ -44,6 +47,17 @@ export type { ScriptError };
 
 /** The newest Pine Script® version: TradingView's current one. Older ones run by their own rules. */
 export const PINE_VERSION = 6;
+
+/**
+ * Whether a chart's last bar is still forming, its realtime bar: before its close by the symbol's
+ * clock (a tick bar until the next opens). A closed market's last bar has closed, and is history.
+ */
+export function stillForming(symbol: ScriptSymbol, bar: Bar | undefined, now: number): boolean {
+  if (!bar) return false;
+  const resolution = parseResolution(symbol.timeframe);
+  if (!resolution || resolution.unit === 'tick') return true;
+  return symbol.clock.close(resolution, bar.start ?? bar.time * 1000) > now;
+}
 
 /** Compile passes at most before every variable's qualifier is known (see compileScript). */
 const MAX_PASSES = 8;
@@ -352,7 +366,7 @@ export class ScriptProgram {
         histbase: numberOr(plot.histbase(env), 0),
         offset: Math.round(numberOr(plot.offset(env), 0)),
         join: plot.join(env) === true,
-        editable: plot.editable,
+        editable: plot.editable(env) !== false,
         showLast: countOf(plot.showLast(env)),
         display: Math.round(numberOr(plot.display(env), DISPLAY.all)),
         format: formatOf(plot.format(env)),
@@ -380,7 +394,7 @@ export class ScriptProgram {
         color: colorOf(hline.color(env)),
         linestyle: oneOf(LINE_STYLES, hline.linestyle(env), 'dashed'),
         linewidth: Math.max(1, Math.round(numberOr(hline.linewidth(env), 1))),
-        editable: hline.editable,
+        editable: hline.editable(env) !== false,
         display: Math.round(numberOr(hline.display(env), DISPLAY.all)),
       })),
       fills: p.fills.map((fill) => ({
@@ -399,7 +413,7 @@ export class ScriptProgram {
             }
           : null,
         title: fill.title,
-        editable: fill.editable,
+        editable: fill.editable(env) !== false,
         showLast: countOf(fill.showLast(env)),
         fillgaps: fill.fillgaps,
         display: Math.round(numberOr(fill.display(env), DISPLAY.all)),
@@ -410,7 +424,7 @@ export class ScriptProgram {
         colorChanges: bg.color.dynamic,
         offset: Math.round(numberOr(bg.offset(env), 0)),
         title: bg.title,
-        editable: bg.editable,
+        editable: bg.editable(env) !== false,
         showLast: countOf(bg.showLast(env)),
         display: Math.round(numberOr(bg.display(env), DISPLAY.all)),
       })),
@@ -456,6 +470,21 @@ export class ScriptProgram {
   /** Declared with library(). */
   get isLibrary(): boolean {
     return this.compiled.indicator.library;
+  }
+
+  /** Declared with strategy(): its properties (the Strategy Tester's Properties); else null. */
+  get strategy(): StrategyProps | null {
+    return this.compiled.indicator.strategy;
+  }
+
+  /** Its alertcondition() calls, as the Create Alert dialog lists them (alerts.ts). */
+  get alertConditions(): readonly AlertConditionDef[] {
+    return this.compiled.alertConditions;
+  }
+
+  /** Whether it has alert() calls: the dialog's "Any alert() function call". */
+  get hasAlertCalls(): boolean {
+    return this.compiled.alertCalls > 0;
   }
 }
 
@@ -569,6 +598,8 @@ export class ScriptRun {
     fillColors: [],
   };
   private fromListing = false;
+  /** Whether an alert runs it (watchAlerts). */
+  private alerting = false;
   private readonly feed: RequestFeed;
 
   constructor(
@@ -593,6 +624,49 @@ export class ScriptRun {
     return this.on ? this.chartBars.length : (this.main?.length ?? 0);
   }
 
+  /**
+   * An alert runs it (apps/web alerts): its alert() calls on realtime bars make events from now
+   * on, taken with takeAlerts(). Events of a run afresh are let go: an alert counts the calls of
+   * the updates after it starts.
+   */
+  watchAlerts(): void {
+    this.alerting = true;
+    if (this.main) this.main.runtime.alerting = true;
+  }
+
+  /** The alert() events since the last take, oldest first. */
+  takeAlerts(): AlertEvent[] {
+    const runtime = this.main?.runtime;
+    if (!runtime || runtime.alerts.length === 0) return [];
+    const taken = runtime.alerts;
+    runtime.alerts = [];
+    return taken;
+  }
+
+  /** An alertcondition()'s condition on bar `bar` (by its place); null where it hasn't run. */
+  conditionOn(index: number, bar: number): boolean | null {
+    const value = this.main?.outputs.conditions[index]?.[bar];
+    return value === undefined || Number.isNaN(value) ? null : value === 1;
+  }
+
+  /**
+   * The offsets its run worked out, by plot and by background (bgcolor() and barcolor()): the
+   * last value of each worked out as the script ran (marks.ts offsetArg); null where the
+   * description's is the one, known before the bars.
+   */
+  get offsets(): { plots: (number | null)[]; backgrounds: (number | null)[] } {
+    const outputs = this.main?.outputs;
+    const read = (list: Float64Array | undefined, count: number) =>
+      Array.from({ length: count }, (_, i) => {
+        const value = list?.[i] ?? Number.NaN;
+        return Number.isFinite(value) ? value : null;
+      });
+    return {
+      plots: read(outputs?.plotOffsets, this.description.plots.length),
+      backgrounds: read(outputs?.backgroundOffsets, this.description.backgrounds.length),
+    };
+  }
+
   /** The script's Pine Logs from its run over the chart's bars, oldest first (Pine docs, Debugging). */
   get logs(): readonly LogEntry[] {
     return this.main?.logs ?? [];
@@ -610,9 +684,11 @@ export class ScriptRun {
 
   /**
    * Runs the script afresh over every bar. When our first bar is the symbol's listing,
-   * TradingView's history starts there too, and every value is drawn without checking.
+   * TradingView's history starts there too, and every value is drawn without checking. `live`
+   * says whether the last bar is still forming (the realtime bar); a closed market's last bar is
+   * history, as on TradingView, and a strategy then calculates on it (execution.ts).
    */
-  setBars(bars: readonly Bar[], fromListing: boolean): void {
+  setBars(bars: readonly Bar[], fromListing: boolean, live = true): void {
     this.fromListing = fromListing;
     this.chartBars = bars;
     const timeframe = this.ownTimeframe();
@@ -621,7 +697,7 @@ export class ScriptRun {
       return;
     }
     this.on = null;
-    this.load(bars, fromListing, this.symbol, Math.max(0, bars.length - 1));
+    this.load(bars, fromListing, this.symbol, live ? Math.max(0, bars.length - 1) : bars.length);
   }
 
   /** Runs the script afresh over `bars`: the chart's, or its own timeframe's. */
@@ -657,7 +733,10 @@ export class ScriptRun {
       return execution;
     };
     this.main = make(0, []);
+    this.main.runtime.alerting = this.alerting;
     this.main.all(bars);
+    // A run afresh doesn't alert: its realtime bar's calls were the earlier run's.
+    this.main.runtime.alerts = [];
     this.checks =
       fromListing || bars.length < 2 || this.main.error
         ? []
@@ -874,7 +953,25 @@ export class ScriptRun {
     this.backgrounds = main.outputs.backgrounds;
     this.fillColors = main.outputs.fillColors;
     this.error = main.error;
+    // Its drawings as they stand, copied only when they changed (each change bumps the version).
+    const drawn = main.runtime.drawings;
+    if (drawn.version !== this.drawingsVersion) {
+      this.drawings = drawn.snapshot();
+      this.drawingsVersion = drawn.version;
+    }
+    const broker = main.runtime.broker;
+    if (broker && broker.version !== this.strategyVersion) {
+      this.strategy = broker.state();
+      this.strategyVersion = broker.version;
+    }
   }
+
+  /** Its labels, lines, boxes, tables, polylines and linefills at the last bar it ran. */
+  drawings: DrawingSnapshot = EMPTY_DRAWINGS;
+  private drawingsVersion = -1;
+  /** A strategy's trades, fills and figures as of its last bar (strategy.ts); null otherwise. */
+  strategy: StrategyState | null = null;
+  private strategyVersion = -1;
 
   /** Each output's agreement with each check run, over the closed bars. */
   private compare(length: number): OutputAgreements {

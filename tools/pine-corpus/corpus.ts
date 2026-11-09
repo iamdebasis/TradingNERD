@@ -47,6 +47,16 @@ const SOURCES = [
   { name: 'codybbrown', repo: 'codybbrown/pinescript', kind: 'community' },
   { name: 'arunkbhaskar', repo: 'arunkbhaskar/pinescript', kind: 'community' },
   { name: 'tradefab', repo: 'TradeFab/Tradingview.public', kind: 'community' },
+  // Added 2026-11-08, after a v4 script (VuManChu B) failed on a rule none of the above used:
+  // more v3, v4 and v5 community scripts, and a large set of v6 indicators.
+  { name: 'f13end', repo: 'f13end/tradingview-custom-indicators', kind: 'community' },
+  { name: '800cherries', repo: '800cherries/Tradingview-Indicators', kind: 'community' },
+  {
+    name: 'harryguiacorn',
+    repo: 'harryguiacorn/TradingView-Proprietary-Indicators',
+    kind: 'community',
+  },
+  { name: 'mihakralj', repo: 'mihakralj/pinescript', kind: 'community' },
 ] as const;
 
 /** Features by pattern, to tell which milestone a script needs (approximate, for planning). */

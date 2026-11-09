@@ -1,4 +1,5 @@
-import type { Block, Expr, Param, Script, Stmt, TypeRef } from './ast.ts';
+import type { AlertConditionDef } from './alerts.ts';
+import type { Arg, Block, Expr, Param, Script, Stmt, TypeRef } from './ast.ts';
 import { versionOf } from './ast.ts';
 import {
   compileBuiltinName,
@@ -18,6 +19,7 @@ import { type ConversionEdit, type EditSink, repeatedArg } from './edits.ts';
 import { parse } from './parser.ts';
 import type { ContextPlan, RequestSite } from './requests.ts';
 import { Runtime, type Slot } from './runtime.ts';
+import type { StrategyProps } from './strategy.ts';
 import {
   assignable,
   type Base,
@@ -147,8 +149,11 @@ export interface PlotDef {
   trackprice: Fold;
   histbase: Fold;
   offset: Fold;
+  /** An offset worked out as the script runs (builtins.ts offsetArg); null when `offset` has it. */
+  offsetAt?: ((rt: Runtime) => number) | null;
   join: Fold;
-  editable: boolean;
+  /** "input bool" in the v6 reference: published scripts pass a bool input. */
+  editable: Fold;
   showLast: Fold;
   display: Fold;
   format: Fold;
@@ -163,7 +168,7 @@ export interface HlineDef {
   color: Fold;
   linestyle: Fold;
   linewidth: Fold;
-  editable: boolean;
+  editable: Fold;
   display: Fold;
   span: Span;
 }
@@ -176,7 +181,7 @@ export interface FillDef {
   color: StyleArg | null;
   gradient: { top: Fold; bottom: Fold; topColor: Fold; bottomColor: Fold } | null;
   title: string;
-  editable: boolean;
+  editable: Fold;
   showLast: Fold;
   fillgaps: boolean;
   display: Fold;
@@ -189,7 +194,9 @@ export interface BgcolorDef {
   bars: boolean;
   color: StyleArg;
   offset: Fold;
-  editable: boolean;
+  /** As PlotDef's. */
+  offsetAt?: ((rt: Runtime) => number) | null;
+  editable: Fold;
   showLast: Fold;
   title: string;
   display: Fold;
@@ -218,8 +225,37 @@ export interface IndicatorDecl {
    * and "Wait for timeframe closes" (`timeframe_gaps`). Null when it isn't declared so.
    */
   timeframe: { input: number; gaps: number } | null;
+  /** How many of each drawing it keeps on the chart (max_labels_count and the rest). */
+  drawings: Record<'label' | 'line' | 'box' | 'polyline', number>;
+  /** Declared with strategy(): its properties (strategy.ts); null for indicators and libraries. */
+  strategy: StrategyProps | null;
   span: Span;
 }
+
+/** Built-in namespaces whose functions a variable of the same name doesn't hide. */
+const BUILTIN_NAMESPACES: ReadonlySet<string> = new Set([
+  'array',
+  'matrix',
+  'map',
+  'label',
+  'line',
+  'box',
+  'table',
+  'linefill',
+  'polyline',
+  'str',
+  'math',
+  'ta',
+  'color',
+  'timeframe',
+  'syminfo',
+  'request',
+  'ticker',
+  'input',
+  'chart',
+  'log',
+  'runtime',
+]);
 
 /** A variable in a scope. */
 export interface Var {
@@ -357,6 +393,9 @@ export interface CompiledProgram {
   logging: boolean;
   /** Its request.*() calls (requests.ts). */
   requests: RequestSite[];
+  /** Its alertcondition() calls, and how many alert() calls it has (alerts.ts). */
+  alertConditions: AlertConditionDef[];
+  alertCalls: number;
 }
 
 /** What one statement reads and writes: a request copies the statements its expression needs. */
@@ -384,7 +423,12 @@ interface Frame {
   params?: Var[];
   exported?: boolean;
   /** A loop's: the requests inside it, and what their expressions need (checked at its end). */
-  requests?: { call: Extract<Expr, { kind: 'call' }>; needed: ReadonlySet<Var> }[];
+  requests?: {
+    call: Extract<Expr, { kind: 'call' }>;
+    needed: ReadonlySet<Var>;
+    /** What the expression itself writes: a function's own variables, not the loop's. */
+    own: ReadonlySet<Var>;
+  }[];
 }
 
 /** Pine's display.all and display.none (builtins.ts DISPLAY), for the inputs the compiler adds. */
@@ -551,6 +595,9 @@ export class Compiler {
    * these runs, as TradingView's manual's log-only examples do (Debugging; Time, Figure 295).
    */
   otherOutputs = 0;
+  /** Its alertcondition() calls, in order, and its alert() calls counted (alerts.ts). */
+  readonly alertConditions: AlertConditionDef[] = [];
+  alertCalls = 0;
   /** Calls log.info(), log.warning() or log.error() somewhere (the Pine Logs pane lists it). */
   logging = false;
   indicator: IndicatorDecl | null = null;
@@ -558,6 +605,12 @@ export class Compiler {
   readonly quals = new Map<object, Qual>();
   /** The script's Pine version: older versions keep their own rules (v6 migration guide). */
   readonly version: number;
+  /**
+   * A bool's na. In v5 and older a bool is true, false or na: na() finds it, it isn't equal to
+   * false, and a condition reads it as false (v6 migration guide, "Boolean values cannot be
+   * na"); v6 has no na bool, so it reads false.
+   */
+  readonly boolNa: Value;
   /** Every user-defined type and enum the script and its libraries declare, by key. */
   readonly types = new Map<string, TypeDef>();
   readonly enums = new Map<string, EnumDef>();
@@ -606,6 +659,7 @@ export class Compiler {
     this.strict = strict;
     this.options = options;
     this.version = versionOf(script);
+    this.boolNa = this.version <= 5 ? null : false;
     this.history = historyNames(script.statements);
     this.plan = options.context ?? null;
   }
@@ -614,6 +668,19 @@ export class Compiler {
     const global = new Scope(null, 'global');
     const main = new Module('', this.version, global);
     this.module = main;
+    // chart.point: a built-in object type with three fields (the v6 reference, chart.point).
+    this.types.set('chart.point', {
+      key: 'chart.point',
+      name: 'chart.point',
+      fields: [
+        { name: 'time', type: 'int', default: null, varip: false },
+        { name: 'index', type: 'int', default: null, varip: false },
+        { name: 'price', type: 'float', default: null, varip: false },
+      ],
+      module: main,
+      exported: true,
+      span: { line: 1, column: 1, endLine: 1, endColumn: 1 },
+    });
     this.declareAll(main, this.script.statements);
     const body = this.statements(this.script.statements, global, this.plan !== null);
     if (!this.indicator) {
@@ -685,6 +752,8 @@ export class Compiler {
       quals: this.quals,
       logging: this.logging,
       requests: this.requests,
+      alertConditions: this.alertConditions,
+      alertCalls: this.alertCalls,
     };
   }
 
@@ -1026,6 +1095,7 @@ export class Compiler {
 
   /** Notes a variable written (declared, or reassigned) by the statements being compiled. */
   private noteWrite(v: Var, reassigned = false): void {
+    for (const collector of this.writeCollectors) collector.add(v);
     for (const frame of this.frames) {
       frame.current?.writes.add(v);
       if (reassigned) frame.current?.assigns.add(v);
@@ -1045,9 +1115,12 @@ export class Compiler {
   private checkLoopRequests(frame: Frame): void {
     const changed = new Set<Var>();
     for (const info of frame.infos) for (const v of info.assigns) changed.add(v);
-    for (const { call, needed } of frame.requests ?? []) {
+    for (const { call, needed, own } of frame.requests ?? []) {
       for (const v of needed) {
-        if (changed.has(v)) {
+        // The expression's own variables (a function's, declared and changed inside its call)
+        // change with every evaluation, not with the loop (a screener's request of a function
+        // with var locals runs on TradingView; found 2026-11-08).
+        if (changed.has(v) && !own.has(v)) {
           this.fail(
             `The expression of '${call.callee}' can't depend on a variable that changes in the loop: only the symbol and the timeframe can`,
             call.span,
@@ -1058,14 +1131,19 @@ export class Compiler {
   }
 
   /** Compiles something, noting every variable it reads into `into`. */
-  collectReads<T>(into: Set<Var>, compile: () => T): T {
+  collectReads<T>(into: Set<Var>, compile: () => T, writes?: Set<Var>): T {
     this.collectors.push(into);
+    if (writes) this.writeCollectors.push(writes);
     try {
       return compile();
     } finally {
       this.collectors.pop();
+      if (writes) this.writeCollectors.pop();
     }
   }
+
+  /** Sets that hear every variable written while they're on the stack (requests' own writes). */
+  private readonly writeCollectors: Set<Var>[] = [];
 
   /** Whether this compile is a context program and this is the request it captures. */
   capturing(call: Extract<Expr, { kind: 'call' }>): boolean {
@@ -1092,14 +1170,19 @@ export class Compiler {
     call: Extract<Expr, { kind: 'call' }>,
     reads: ReadonlySet<Var>,
     result: { base: Base; items?: Base[] },
+    own: ReadonlySet<Var> = new Set(),
   ): RequestSite {
     const keep = new Set<Stmt>();
     const next = new Map<object, object>();
     const needed = new Set(reads);
+    // What the kept statements also set: a kept if that sets other variables too compiles whole,
+    // so their declarations must compile with it (a screener's crash, found 2026-11-08).
+    const declared = new Set<Var>();
     const isObject = (v: Var) => isReferenceType(v.base) || this.types.has(v.base);
     const needs = (info: StmtInfo): boolean => {
       for (const v of info.writes) if (needed.has(v)) return true;
       for (const v of info.reads) if (needed.has(v) && isObject(v)) return true;
+      for (const v of info.writes) if (declared.has(v) && !info.assigns.has(v)) return true;
       return false;
     };
     const calls: Expr[] = [];
@@ -1112,6 +1195,7 @@ export class Compiler {
         if (!needs(info)) continue;
         keep.add(info.stmt);
         for (const v of info.reads) needed.add(v);
+        for (const v of info.writes) declared.add(v);
       }
       if (frame.kind === 'loop') {
         if (frame.loopVars.some((v) => needed.has(v))) {
@@ -1121,7 +1205,7 @@ export class Compiler {
           );
         }
         frame.requests ??= [];
-        frame.requests.push({ call, needed: new Set(needed) });
+        frame.requests.push({ call, needed: new Set(needed), own });
       }
       // "provided that the evaluated expressions do not depend on any exported function
       // parameters" (Pine docs, Dynamic requests: In libraries).
@@ -1316,13 +1400,14 @@ export class Compiler {
   }
 
   private declaration(stmt: Extract<Stmt, { kind: 'decl' }>, scope: Scope): CompiledBlock {
-    const value = this.expr(stmt.value, scope);
+    let value = this.expr(stmt.value, scope);
     if (value.base === 'tuple')
       this.fail('A tuple needs a tuple declaration: [a, b] = …', stmt.value.span);
     if (value.base === 'void') this.fail('This expression has no value to assign', stmt.value.span);
     let base: Base = value.base;
     if (stmt.type) {
       const declared = this.resolveType(stmt.type, stmt.nameSpan);
+      value = this.boolFor(value, declared);
       if (!this.assignableTo(value.base, declared)) {
         this.fail(
           `Cannot assign a value of type '${displayType(value.base)}' to the variable "${stmt.name}" of type '${displayType(declared)}'`,
@@ -1340,7 +1425,10 @@ export class Compiler {
           stmt.span,
         );
     }
-    if (stmt.qualifier === 'const' && value.qual > CONST && this.strict) {
+    // A const variable can keep a constant reference to an object, its id a series value: "a
+    // script can declare a const variable that maintains a constant reference to an expression
+    // returning the ID of a special type" (the manual, Type system: const).
+    if (stmt.qualifier === 'const' && value.qual > CONST && this.strict && !isReferenceType(base)) {
       this.fail(
         `"${stmt.name}" is declared const, but its value is ${typeName(value)}`,
         stmt.value.span,
@@ -1365,7 +1453,7 @@ export class Compiler {
     if (v.qual <= INPUT) v.fold = value.fold;
     if (stmt.qualifier === 'simple' && this.version >= 6) v.simpleOnly = true;
     const slot = v.slot;
-    const cast = castTo(value, base);
+    const cast = castTo(value, base, this.boolNa);
     return {
       run: slot.mode ? (rt) => slot.push(slot.kept ? null : cast(rt)) : (rt) => slot.push(cast(rt)),
       base,
@@ -1458,7 +1546,10 @@ export class Compiler {
     if (v.isConst) this.fail(`"${name}" is const: it can't be reassigned`, target.span);
     this.noteWrite(v, true);
     if (stmt.op !== ':=') this.noteRead(v);
-    const value = this.expr(stmt.value, scope);
+    const value =
+      stmt.op === ':='
+        ? this.boolFor(this.expr(stmt.value, scope), v.base)
+        : this.expr(stmt.value, scope);
     if (v.simpleOnly && value.qual > SIMPLE) {
       this.fail(
         `"${name}" is declared simple, so it can't take a ${QUAL_NAMES[value.qual]} value`,
@@ -1476,7 +1567,7 @@ export class Compiler {
           stmt.value.span,
         );
       }
-      const cast = castTo(value, v.base);
+      const cast = castTo(value, v.base, this.boolNa);
       return {
         run: (rt) => {
           const next = cast(rt);
@@ -1520,7 +1611,10 @@ export class Compiler {
   ): CompiledBlock {
     const { def, index } = this.field(object, fieldName, stmt.target.span);
     const field = def.fields[index] as TypeDef['fields'][number];
-    const value = this.expr(stmt.value, scope);
+    const value =
+      stmt.op === ':='
+        ? this.boolFor(this.expr(stmt.value, scope), field.type)
+        : this.expr(stmt.value, scope);
     const obj = object.ev;
     let next: (rt: Runtime, o: PineObject) => Value;
     if (stmt.op === ':=') {
@@ -1530,7 +1624,7 @@ export class Compiler {
           stmt.value.span,
         );
       }
-      const cast = castTo(value, field.type);
+      const cast = castTo(value, field.type, this.boolNa);
       next = (rt) => cast(rt);
     } else {
       let current: PineObject | null = null;
@@ -1697,7 +1791,15 @@ export class Compiler {
     return {
       base,
       qual: v.qual,
-      ev: base === 'bool' ? () => slot.get() === true : () => slot.get() ?? na,
+      ev:
+        base !== 'bool'
+          ? () => slot.get() ?? na
+          : this.boolNa === null
+            ? () => {
+                const value = slot.get();
+                return value === true ? true : value === false ? false : null;
+              }
+            : () => slot.get() === true,
       fold: v.qual <= INPUT ? v.fold : undefined,
       span,
     };
@@ -1792,6 +1894,21 @@ export class Compiler {
   }
 
   /** A value where a bool is needed: v5 and older cast numbers (0 and na are false). */
+  /**
+   * A value going where a bool is required: a function's bool parameter, a bool variable or
+   * field. v5 and older cast a number there as in conditions ("when an expression or function
+   * requires a boolean value ... na, 0, or 0.0 are considered false, and any other value is
+   * considered true": v6 migration guide, Explicit bool casting); v6 keeps it an error.
+   */
+  /** A type's na in this script: a bool's is boolNa (v5 and older have one). */
+  naFor(base: Base): Value {
+    return base === 'bool' ? this.boolNa : naOf(base);
+  }
+
+  boolFor(value: Compiled, to: Base): Compiled {
+    return to === 'bool' && isNumeric(value.base) ? this.toBool(value) : value;
+  }
+
   toBool(c: Compiled): Compiled {
     if (c.base === 'bool') return c;
     if (c.base === 'na') return { ...c, base: 'bool', ev: () => false, fold: () => false };
@@ -1872,8 +1989,8 @@ export class Compiler {
         qual,
         ev: eager
           ? (rt) => {
-              const x = a(rt) as boolean;
-              const y = b(rt) as boolean;
+              const x = a(rt) === true;
+              const y = b(rt) === true;
               return x && y;
             }
           : (rt) => (a(rt) as boolean) && (b(rt) as boolean),
@@ -1886,8 +2003,8 @@ export class Compiler {
       qual,
       ev: eager
         ? (rt) => {
-            const x = a(rt) as boolean;
-            const y = b(rt) as boolean;
+            const x = a(rt) === true;
+            const y = b(rt) === true;
             return x || y;
           }
         : (rt) => (a(rt) as boolean) || (b(rt) as boolean),
@@ -1915,8 +2032,17 @@ export class Compiler {
 
   binary(op: string, leftRaw: Compiled, rightRaw: Compiled, span: Span): Compiled {
     const equality = op === '==' || op === '!=';
-    const left = equality ? leftRaw : this.numberOfBool(leftRaw);
-    const right = equality ? rightRaw : this.numberOfBool(rightRaw);
+    let [leftGiven, rightGiven] = [leftRaw, rightRaw];
+    // v5 and older cast a number compared with a bool to a bool, as they do "when an expression
+    // or function requires a boolean value" (the v6 migration guide): `flag == 1` is
+    // `flag == true` (a published v5 script's, found 2026-11-08). v6 refuses it.
+    if (equality && this.version <= 5) {
+      const number = (c: Compiled) => c.base === 'int' || c.base === 'float';
+      if (leftGiven.base === 'bool' && number(rightGiven)) rightGiven = this.toBool(rightGiven);
+      else if (rightGiven.base === 'bool' && number(leftGiven)) leftGiven = this.toBool(leftGiven);
+    }
+    const left = equality ? leftGiven : this.numberOfBool(leftGiven);
+    const right = equality ? rightGiven : this.numberOfBool(rightGiven);
     const qual = maxQual(left.qual, right.qual);
     const a = left.ev;
     const b = right.ev;
@@ -2068,8 +2194,15 @@ export class Compiler {
 
   private ternary(expr: Extract<Expr, { kind: 'ternary' }>, scope: Scope): Compiled {
     const cond = this.condition(this.expr(expr.cond, scope));
-    const then = this.expr(expr.then, scope);
-    const otherwise = this.expr(expr.otherwise, scope);
+    let then = this.expr(expr.then, scope);
+    let otherwise = this.expr(expr.otherwise, scope);
+    // v5 and older cast a number to a bool where one is needed: a bool on one side asks for
+    // one on the other (the v6 migration guide; a published v4 strategy's selection of signals).
+    if (this.version <= 5) {
+      const number = (x: Compiled) => x.base === 'int' || x.base === 'float';
+      if (then.base === 'bool' && number(otherwise)) otherwise = this.toBool(otherwise);
+      else if (otherwise.base === 'bool' && number(then)) then = this.toBool(then);
+    }
     const base = unify(then.base, otherwise.base);
     if (!base || base === 'tuple' || base === 'void') {
       this.fail(
@@ -2078,8 +2211,8 @@ export class Compiler {
       );
     }
     const c = cond.ev;
-    const t = castTo(then, base);
-    const o = castTo(otherwise, base);
+    const t = castTo(then, base, this.boolNa);
+    const o = castTo(otherwise, base, this.boolNa);
     const fc = cond.fold;
     const ft = then.fold;
     const fo = otherwise.fold;
@@ -2116,7 +2249,7 @@ export class Compiler {
         this.noteRead(v);
         const slot = v.slot;
         const base = v.base;
-        const na = naOf(base);
+        const na = this.naFor(base);
         return {
           base,
           qual: SERIES,
@@ -2156,7 +2289,7 @@ export class Compiler {
     if (target.literal) this.convertEdit({ span: expr.span, replace: this.text(target.span) });
     const slot = this.rt.slot(null, true, isNumericSlot(target.base));
     const ev = target.ev;
-    const na = naOf(target.base);
+    const na = this.naFor(target.base);
     return {
       base: target.base,
       qual: SERIES,
@@ -2188,7 +2321,7 @@ export class Compiler {
     const { base, items } = this.unifyBlocks(all, expr.span);
     if (used && !otherwise) this.needWhole(base, 'An if', 'an else', expr.span);
     // No block ran: na, false for bool (Pine docs, if structure).
-    const empty = base === 'tuple' ? (items ?? []).map(naOf) : naOf(base);
+    const empty = base === 'tuple' ? (items ?? []).map((b) => this.naFor(b)) : this.naFor(base);
     const evs = conds.map((cond) => cond.ev);
     const runs = bodies.map((body) => body.run);
     const otherRun = otherwise?.run ?? null;
@@ -2291,7 +2424,7 @@ export class Compiler {
     if (used && matches.every((match) => match !== null)) {
       this.needWhole(base, 'A switch', 'a default', expr.span);
     }
-    const empty = base === 'tuple' ? (items ?? []).map(naOf) : naOf(base);
+    const empty = base === 'tuple' ? (items ?? []).map((b) => this.naFor(b)) : this.naFor(base);
     const evs = matches.map((match) => match?.ev ?? null);
     const runs = bodies.map((body) => body.run);
     const count = runs.length;
@@ -2349,7 +2482,7 @@ export class Compiler {
     const s = step?.ev ?? (() => 1);
     const slot = counter.slot;
     const run = body.run;
-    const empty = naOf(body.base);
+    const empty = this.naFor(body.base);
     // v6 reads the end before every iteration; v5 and older once (v6 guide: Dynamic for loop
     // boundaries).
     const dynamicEnd = this.version >= 6;
@@ -2452,7 +2585,7 @@ export class Compiler {
     this.rt.loopDepth = this.loops;
     const run = body.run;
     const collection = target.ev;
-    const empty = naOf(body.base);
+    const empty = this.naFor(body.base);
     const elem = elemOf(base);
     // Its value is its body's on the last iteration that ran to its end, as a for loop's (Pine
     // docs, Loops): the reference's for...in example returns it from a function.
@@ -2518,7 +2651,7 @@ export class Compiler {
     this.loops--;
     this.rt.loopDepth = this.loops;
     const run = body.run;
-    const empty = naOf(body.base);
+    const empty = this.naFor(body.base);
     return {
       base: body.base,
       items: body.items,
@@ -2560,9 +2693,13 @@ export class Compiler {
     const parts = expr.callee.split('.');
     const first = parts[0] as string;
     if (parts.length > 1) {
-      // A method on a variable or its fields: `arr.push(x)`, `p.pos.move()`.
+      // A method on a variable or its fields: `arr.push(x)`, `p.pos.move()`. A variable named
+      // after a namespace doesn't hide its functions: `line.delete(line)`, `matrix.set(matrix,
+      // r, c, v)` and `timeframe.change(timeframe)` call the built-ins, as on TradingView (the
+      // manual's own examples write them; found 2026-11-08).
       const v = scope.lookup(first);
-      if (v && this.hasMethods(v.base, parts.at(-1) as string)) {
+      const builtin = isBuiltinNamespace(expr.callee) && BUILTIN_NAMESPACES.has(first);
+      if (v && !builtin && this.hasMethods(v.base, parts.at(-1) as string)) {
         const receiver = this.dotted(parts.slice(0, -1).join('.'), expr.calleeSpan, scope);
         if (receiver) return this.methodCall(receiver, parts.at(-1) as string, expr, scope);
       }
@@ -2571,6 +2708,14 @@ export class Compiler {
       if (!v && !isBuiltinNamespace(expr.callee) && this.findMethods(method).length > 0) {
         const receiver = compileBuiltinName(this, parts.slice(0, -1).join('.'), expr.calleeSpan);
         if (receiver) return this.methodCall(receiver, method, expr, scope);
+      }
+      // A built-in method on a built-in value: `label.all.size()`, `line.all.get(0)`.
+      if (!v && !isBuiltinNamespace(expr.callee) && parts.length > 2) {
+        const receiver = compileBuiltinName(this, parts.slice(0, -1).join('.'), expr.calleeSpan);
+        const space = receiver ? methodNamespace(receiver.base) : null;
+        if (receiver && space && isBuiltinNamespace(`${space}.${method}`)) {
+          return this.methodCall(receiver, method, expr, scope);
+        }
       }
       // A type's constructor or copy: `Point.new(…)`, `lib.Point.new(…)`.
       const typeCall = this.typeCall(parts, expr, scope);
@@ -2590,6 +2735,16 @@ export class Compiler {
     } else {
       const own = this.findFunctions(first);
       if (own.length > 0) return this.userCall(own, expr, scope, null);
+      // A method called as a function, its receiver the first argument (Pine docs, Methods:
+      // "can be called using dot notation ... or as regular functions").
+      const methods = this.findMethods(first);
+      if (methods.length > 0 && expr.args.length > 0 && !isBuiltinNamespace(first)) {
+        const [head, ...rest] = expr.args as [Arg, ...Arg[]];
+        if (head.name === null) {
+          const receiver = this.expr(head.value, scope);
+          return this.methodCall(receiver, first, { ...expr, args: rest }, scope);
+        }
+      }
     }
     return compileCall(this, expr, scope);
   }
@@ -2669,7 +2824,7 @@ export class Compiler {
         if (i < 0) this.fail(`"${def.name}" has no field "${arg.name}"`, arg.span);
       }
       const field = def.fields[i] as TypeDef['fields'][number];
-      const value = this.expr(arg.value, scope);
+      const value = this.boolFor(this.expr(arg.value, scope), field.type);
       if (!this.assignableTo(value.base, field.type)) {
         this.fail(
           `Cannot set the field "${field.name}" of type '${displayType(field.type)}' to '${displayType(value.base)}'`,
@@ -2682,19 +2837,19 @@ export class Compiler {
     this.module = def.module;
     const evs = def.fields.map((field, i) => {
       const given = values[i];
-      if (given) return castTo(given, field.type);
+      if (given) return castTo(given, field.type, this.boolNa);
       if (!field.default) {
         const na = naOf(field.type);
         return () => na;
       }
-      const fallback = this.expr(field.default, def.module.scope);
+      const fallback = this.boolFor(this.expr(field.default, def.module.scope), field.type);
       if (!this.assignableTo(fallback.base, field.type)) {
         this.fail(
           `The default of the field "${field.name}" must be '${displayType(field.type)}'`,
           field.default.span,
         );
       }
-      return castTo(fallback, field.type);
+      return castTo(fallback, field.type, this.boolNa);
     });
     this.module = outer;
     const key = def.key;
@@ -2826,10 +2981,11 @@ export class Compiler {
       bound[i] = value;
     }
     return params.map((param, i) => {
-      const value = bound[i];
+      let value = bound[i];
       if (value) {
         if (param.type) {
           const type = this.resolveType(param.type, param.span, fn.module);
+          value = this.boolFor(value, type);
           if (!this.assignableTo(value.base, type)) {
             this.fail(
               `Cannot call '${name}' with argument '${param.name}'='${this.text(value.span)}'. An argument of '${typeName(value)}' type was used but a '${displayType(type)}' is expected.`,
@@ -2885,7 +3041,7 @@ export class Compiler {
       const key = stableKey(param, expr);
       const v = this.define(fnScope, param.name, param.span, base, qual, key, null, false);
       v.fold = arg.fold;
-      return { slot: v.slot, ev: castTo(arg, base) };
+      return { slot: v.slot, ev: castTo(arg, base, this.boolNa) };
     });
     this.calling.push(id);
     // A function's body is its own: a loop around the call doesn't let it break.

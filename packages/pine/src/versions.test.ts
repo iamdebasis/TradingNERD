@@ -114,6 +114,41 @@ plot(ta.barssince(close > open))`;
     expect(program(v3).describe([]).hlines[0]?.linestyle).toBe('solid');
   });
 
+  it('runs what published v3 and v4 scripts write: linktoseries, a repeated transp, plot(style = dashed)', () => {
+    // Found in a community collection (2026-11-08): each compiled on TradingView.
+    for (const source of [
+      '//@version=3\nstudy("T", overlay=true, linktoseries=true)\nplot(close)',
+      '//@version=3\nstudy("T")\nplot(close, transp=0, style=histogram, transp=50)',
+      '//@version=3\nstudy("T")\nplot(close, style=dashed, linewidth=1)',
+      '//@version=4\nstudy("T", linktoseries=true)\nplot(close)',
+    ]) {
+      expect(() => program(source)).not.toThrow();
+    }
+    expect(
+      program('//@version=3\nstudy("T")\nplot(close, style=dashed)').describe([]).plots[0]?.style,
+    ).toBe('line');
+  });
+
+  it('reads a v4 session without days as Monday to Friday; v5 as every day', () => {
+    // The v5 guide, "Changed the default session days for time() and time_close()": "23456"
+    // became "1234567", which matters on symbols that trade at weekends.
+    const days = Array.from({ length: 7 }, (_, i) => ({
+      time: 1_699_920_000 + i * 86_400, // Tuesday 14 November 2023 onward, 00:00 UTC
+      open: 1,
+      high: 2,
+      low: 0.5,
+      close: 1.5,
+      volume: 1,
+    }));
+    const body = 't = time(timeframe.period, "0000-2359")\nplot(na(t) ? 0 : 1)\nplot(dayofweek)';
+    const daily = { ...DEFAULT_SYMBOL, timeframe: 'D' };
+    const [v4, weekday] = plots(`//@version=4\nstudy("Test")\n${body}`, days, [], daily);
+    const [v5] = plots(`//@version=5\nindicator("Test")\n${body}`, days, [], daily);
+    expect(weekday).toEqual([3, 4, 5, 6, 7, 1, 2]);
+    expect(v4).toEqual([1, 1, 1, 1, 0, 0, 1]);
+    expect(v5).toEqual([1, 1, 1, 1, 1, 1, 1]);
+  });
+
   it('gives v4’s bgcolor() and fill() a transparency of 90 when none is given', () => {
     const background = program(`//@version=4
 study("Test")
@@ -142,6 +177,109 @@ plot(bar_index ? 1 : 0)`).slice(0, 3),
 indicator("Test")
 plot(bar_index ? 1 : 0)`).message,
     ).toMatch(/must be a bool/);
+  });
+
+  it('makes a ?: of a bool and a number a bool in v4 and v5; v6 refuses it', () => {
+    // A published v4 strategy picks one of several signals, na when none.
+    expect(
+      first(`//@version=4
+study("Test")
+pick = 1
+sig = pick == 0 ? close > open : pick == 1 ? close < open : na
+plot(sig ? 1 : 0)`).slice(1, 3),
+    ).toEqual(
+      first(`//@version=6
+indicator("Test")
+plot(close < open ? 1 : 0)`).slice(1, 3),
+    );
+    expect(
+      compileError(`//@version=6
+indicator("Test")
+x = close > open ? true : 1
+plot(close)`).message,
+    ).toMatch(/same type/);
+  });
+
+  it('compares a bool with a number as two bools in v5: `flag == 1` is `flag == true`', () => {
+    // A published v5 script's `barcolor(vis and (test_50 == 1) ? …)` (found 2026-11-08).
+    expect(
+      first(`//@version=5
+indicator("Test")
+up = close > open
+plot(up == 1 ? 1 : up == 0 ? 0 : -1)`).slice(0, 3),
+    ).toEqual(
+      first(`//@version=6
+indicator("Test")
+up = close > open
+plot(up == true ? 1 : up == false ? 0 : -1)`).slice(0, 3),
+    );
+    expect(
+      compileError(`//@version=6
+indicator("Test")
+up = close > open
+plot(up == 1 ? 1 : 0)`).message,
+    ).toMatch(/Cannot compare/);
+  });
+
+  it('casts numbers where a function or a bool variable needs a bool, in v4 and v5; v6 asks for one', () => {
+    // The v6 guide: v5 cast "when an expression or function requires a boolean value". Found
+    // with VuManChu B (v4), whose valuewhen() takes a price or na as its condition (2026-11-08).
+    const asNumber = first(`//@version=4
+study("Test")
+x = close > open ? close : na
+plot(valuewhen(x, close, 0) + barssince(x ? 1 : 0))`);
+    const asBool = first(`//@version=6
+indicator("Test")
+x = close > open
+plot(ta.valuewhen(x, close, 0) + ta.barssince(x))`);
+    expect(firstDifference(asNumber, asBool)).toBe(-1);
+    for (const body of [
+      'x = close > open ? 1 : 0\nplot(ta.valuewhen(x, close, 0))',
+      'x = close > open ? 1 : 0\nalertcondition(x, "a", "b")\nplot(close)',
+      'bool b = 0\nb := close > open ? 1 : 0\nplot(b ? 1 : 0)',
+      'f(bool up) => up ? 1 : 0\nplot(f(bar_index))',
+      'type T\n    bool up = 1\nt = T.new(0)\nt.up := 2\nplot(t.up ? 1 : 0)',
+    ]) {
+      expect(() => program(`//@version=5\nindicator("Test")\n${body}`)).not.toThrow();
+      expect(compileError(`//@version=6\nindicator("Test")\n${body}`).message).toMatch(
+        /bool|Cannot assign|Cannot set|default/,
+      );
+    }
+    expect(
+      first('//@version=5\nindicator("Test")\nbool b = bar_index % 2\nplot(b ? 1 : 0)').slice(0, 4),
+    ).toEqual([0, 1, 0, 1]);
+  });
+
+  it('gives v5 bools a third value, na, which na(), nz() and fixnan() see and == false doesn’t', () => {
+    // The v6 guide, "Boolean values cannot be na": in v5 "na is evaluated as false" when cast,
+    // "is not considered equal to false" with ==, and na() returns true for it.
+    const v5 = (body: string) =>
+      plots(
+        `//@version=5\nindicator("Test")\nbool b = na\nb := bar_index > 2 ? true : na\n${body}`,
+        bars,
+      ).map((p) => p.slice(0, 5));
+    expect(
+      v5(`plot(na(b) ? 1 : 0)
+plot(b == false ? 1 : 0)
+plot(nz(b) ? 1 : 0)
+plot(b and true ? 1 : 0)
+plot(na(b[1]) ? 1 : 0)
+plot(fixnan(bar_index == 1 ? true : bar_index == 3 ? false : na) ? 1 : 0)`),
+    ).toEqual([
+      [1, 1, 1, 0, 0],
+      [0, 0, 0, 0, 0],
+      [0, 0, 0, 1, 1],
+      [0, 0, 0, 1, 1],
+      [1, 1, 1, 1, 0],
+      [0, 1, 1, 0, 0],
+    ]);
+    // An if without else gives na in v5, false in v6.
+    expect(
+      first('//@version=5\nindicator("Test")\nx = if close < 0\n    true\nplot(na(x) ? 1 : 0)')[0],
+    ).toBe(1);
+    expect(
+      compileError('//@version=6\nindicator("Test")\nbool b = true\nplot(na(b) ? 1 : 0)').message,
+    ).toMatch(/na\(\) doesn't take a bool/);
   });
 
   it('works out both sides of and/or in v5; v6 stops when the left side decides', () => {

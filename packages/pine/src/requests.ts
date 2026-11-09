@@ -6,11 +6,20 @@ import {
   resolutionDurationMs,
 } from '@tradingnerd/core';
 import type { Expr, Stmt } from './ast.ts';
+import {
+  CHART_TYPES,
+  type ChartTypeInputs,
+  chartTypeMaker,
+  chartTypeProblem,
+  extendsBars,
+  sameBars,
+  settledFrom,
+} from './chartTypes.ts';
 import type { CompiledProgram } from './compiler.ts';
 import { PineRuntimeError, type Span } from './diagnostics.ts';
 import { CHECKS, Execution, type RunClock, type ScriptError, scaledBar } from './execution.ts';
 import type { Runtime, ScriptSymbol } from './runtime.ts';
-import { parseTickerId } from './tickers.ts';
+import { parseTickerId, sortedInputs } from './tickers.ts';
 import { type Base, elemOf, naOf } from './types.ts';
 import { PineArray, PineMap, PineMatrix, PineObject, type Value } from './values.ts';
 import { Agreement, drawnFrom } from './warmup.ts';
@@ -60,6 +69,11 @@ export interface ContextData {
    * (a page of history, a reload, a correction): a run then starts afresh.
    */
   readonly history: number;
+  /**
+   * How many of its first bars depend on bars before the first, for bars made from others
+   * (Renko's and the rest: chartTypes.ts settledFrom); none when absent.
+   */
+  readonly warmup?: number;
 }
 
 /** Where a script's requests get their data: the app's loader, or a test's bars. */
@@ -513,7 +527,10 @@ export class ContextRun {
     for (const check of this.checks) check.all(bars);
     this.times(bars, data);
     this.settledFrom = this.settle(bars.length, data.fromListing || this.from > 0);
-    if (!data.fromListing) this.settledFrom = Math.max(this.settledFrom, this.warmup);
+    if (!data.fromListing) {
+      // Made bars trusted from `data.warmup` on: what the code remembers counts from there.
+      this.settledFrom = Math.max(this.settledFrom + (data.warmup ?? 0), this.warmup);
+    }
   }
 
   private times(bars: readonly Bar[], data: ContextData): void {
@@ -614,8 +631,10 @@ export class ContextStore {
     this.clock = clock;
   }
 
-  /** Bars made from the feed's (Heikin Ashi's), by the key's text, with what they came from. */
+  /** Bars made from the feed's (Heikin Ashi's and the rest), by the key's text, with their source. */
   private readonly made = new Map<string, { from: ContextData; data: ContextData }>();
+  /** How many times each made context's bars changed other than at their end. */
+  private readonly remade = new Map<string, number>();
   /** Prices converted to another currency, by the key's text, with what they came from. */
   private readonly converted = new Map<
     string,
@@ -628,16 +647,18 @@ export class ContextStore {
 
   /**
    * The run of a context for a request, or why there's none. `type` asks for non-standard bars
-   * made from the symbol's own ("heikinashi").
+   * made from the symbol's own ("heikinashi", or one of chartTypes.ts's with its `inputs`).
    */
   run(
     site: RequestSite,
     key: RequestKey,
     options: SecurityOptions,
     type: string | null = null,
+    inputs: ChartTypeInputs | null = null,
   ): ContextRun | 'missing' | 'invalid' | 'no rate' {
     const currency = (options.currency ?? '').toUpperCase();
-    const text = `${requestKeyText(key)}${type ? `#${type}` : ''}${currency ? `$${currency}` : ''}`;
+    const made = type ? `#${type}${inputs ? JSON.stringify(sortedInputs(inputs)) : ''}` : '';
+    const text = `${requestKeyText(key)}${made}${currency ? `$${currency}` : ''}`;
     this.used.set(text, key);
     const resolution = parseResolution(key.timeframe);
     if (!resolution) return 'invalid';
@@ -657,15 +678,16 @@ export class ContextStore {
       return 'missing';
     }
     if (fed === 'invalid') return 'invalid';
-    if (type !== null && type !== 'heikinashi') return 'invalid';
+    if (type !== null && type !== 'heikinashi' && !CHART_TYPES.includes(type)) return 'invalid';
     let data = fed;
     if (currency && currency !== fed.symbol.currency.toUpperCase()) {
-      const made = this.convert(text, fed, currency);
-      if (made === 'missing' || made === 'no rate')
-        return made === 'missing' ? 'missing' : 'no rate';
-      data = made;
+      const converted = this.convert(text, fed, currency);
+      if (converted === 'missing' || converted === 'no rate')
+        return converted === 'missing' ? 'missing' : 'no rate';
+      data = converted;
     }
     if (type === 'heikinashi') data = this.heikinAshi(text, data);
+    else if (type !== null) data = this.nonStandard(text, data, type, inputs ?? {});
     const id = `${site.shared ?? site.id}|${text}|${options.calcBars}`;
     let run = this.runs.get(id);
     if (!run) {
@@ -789,6 +811,48 @@ export class ContextStore {
     this.made.set(text, { from, data });
     return data;
   }
+
+  /**
+   * A context's Renko, Line Break, Kagi or Point & Figure bars (chartTypes.ts), made again when
+   * the feed's change. Unchanged bars keep their version, so the request doesn't run again; bars
+   * changed other than at their end (a brick the live bar had made, gone) start the run afresh.
+   * The last is still forming when the feed's live bar made or changed it.
+   */
+  private nonStandard(
+    text: string,
+    from: ContextData,
+    type: string,
+    inputs: ChartTypeInputs,
+  ): ContextData {
+    const known = this.made.get(text);
+    if (known && known.from === from) return known.data;
+    const make = chartTypeMaker(type, inputs, from.bars, from.symbol.mintick);
+    const bars = make ? make(from.bars) : [];
+    const last = bars.at(-1);
+    const sourceLast = from.bars.at(-1);
+    const live =
+      from.live && last !== undefined && sourceLast !== undefined && last.time === sourceLast.time;
+    const before = known && known.from.history === from.history ? known.data : undefined;
+    if (before && before.live === live && sameBars(before.bars, bars)) {
+      this.made.set(text, { from, data: before });
+      return before;
+    }
+    const goesOn = before !== undefined && extendsBars(before.bars, bars);
+    let remade = this.remade.get(text) ?? 0;
+    if (!goesOn) this.remade.set(text, ++remade);
+    let warmup = 0;
+    if (goesOn) warmup = before.warmup ?? 0;
+    else if (make && !from.fromListing) warmup = settledFrom(bars, make, from.bars);
+    const data: ContextData = {
+      ...from,
+      bars,
+      live,
+      history: from.history * 1_000_003 + remade,
+      warmup,
+    };
+    this.made.set(text, { from, data });
+    return data;
+  }
 }
 
 /**
@@ -827,10 +891,11 @@ export class RequestBroker {
   ): Value {
     const asking = this.key(symbol, timeframe, rt);
     if (!asking) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
-    const { key, type } = asking;
+    const { key, type, inputs } = asking;
+    this.checkType(site, type, inputs);
     // A realtime bar can't ask for a new context (Pine docs, Dynamic requests).
     this.sealed(site, key, rt);
-    const run = this.store.run(site, key, { ...options, currency }, type);
+    const run = this.store.run(site, key, { ...options, currency }, type, inputs);
     if (run === 'missing') return requestNa(site.base, site.items);
     if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);
     if (run === 'no rate') throw noRate(key.symbol, currency, site.span);
@@ -858,7 +923,8 @@ export class RequestBroker {
   ): Value {
     const asking = this.key(symbol, timeframe, rt);
     if (!asking) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
-    const { key, type } = asking;
+    const { key, type, inputs } = asking;
+    this.checkType(site, type, inputs);
     this.sealed(site, key, rt);
     const resolution = parseResolution(key.timeframe);
     if (resolution && spanOf(resolution) > spanOf(this.resolution(rt))) {
@@ -868,7 +934,7 @@ export class RequestBroker {
         site.span,
       );
     }
-    const run = this.store.run(site, key, { ...options, currency }, type);
+    const run = this.store.run(site, key, { ...options, currency }, type, inputs);
     if (run === 'missing') return requestNa(site.base, site.items);
     if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);
     if (run === 'no rate') throw noRate(key.symbol, currency, site.span);
@@ -942,7 +1008,7 @@ export class RequestBroker {
     symbol: string,
     timeframe: string,
     rt: Runtime,
-  ): { key: RequestKey; type: string | null } | null {
+  ): { key: RequestKey; type: string | null; inputs: ChartTypeInputs | null } | null {
     const own = rt.symbol;
     const id = parseTickerId(symbol ?? '');
     const sym = id.symbol.trim().toUpperCase() || own.tickerid.toUpperCase();
@@ -961,7 +1027,15 @@ export class RequestBroker {
         ...(adjustment ? { adjustment } : {}),
       },
       type: id.type ?? null,
+      inputs: id.type && id.type !== 'heikinashi' ? (id.inputs ?? {}) : null,
     };
+  }
+
+  /** A non-standard type's settings that can't make bars stop the script, as a bad argument does. */
+  private checkType(site: RequestSite, type: string | null, inputs: ChartTypeInputs | null): void {
+    if (type === null || type === 'heikinashi' || !CHART_TYPES.includes(type)) return;
+    const problem = chartTypeProblem(type, inputs ?? {});
+    if (problem) throw new PineRuntimeError(problem, site.span);
   }
 
   private resolution(rt: Runtime): Resolution {

@@ -158,6 +158,10 @@ describe('ta.* over windows', () => {
     ]);
   });
 
+  it('ta.change of an int is an int (the reference’s int, float and bool overloads)', () => {
+    expect(series('int d = ta.change(bar_index)\nplot(d)', TEN.slice(0, 3))).toEqual([NA, 1, 1]);
+  });
+
   it('ta.stdev is the population’s unless biased = false, and ta.variance its square', () => {
     const sd = stdev(CLOSE, 10);
     same('plot(ta.stdev(close, 10))', sd);
@@ -339,6 +343,24 @@ describe('ta.* events', () => {
       15,
       15,
     ]);
+  });
+
+  it('ta.valuewhen gives the source’s own type: int, bool and color too, as the reference does', () => {
+    // The manual's own: `int closedIndex = ta.valuewhen(newDailyBar, bar_index - 1, 0)`.
+    expect(
+      series('int i = ta.valuewhen(close > open, bar_index, 0)\nplot(i)', TEN.slice(0, 4)),
+    ).toEqual([NA, 1, 2, 2]);
+    expect(
+      series(
+        'bool up = ta.valuewhen(close > open, close > 11, 0)\nplot(up ? 1 : 0)',
+        TEN.slice(0, 4),
+      ),
+    ).toEqual([0, 0, 1, 1]);
+    const run = runScript(
+      indicator('color k = ta.valuewhen(close > open, color.red, 0)\nplot(close, color = k)'),
+      TEN.slice(0, 3),
+    );
+    expect(run.plotColors[0]?.[1]).toBe(COLORS.red);
   });
 
   it('ta.tr is na on the first bar unless handle_na, and ta.atr is its RMA', () => {

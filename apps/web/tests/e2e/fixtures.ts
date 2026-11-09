@@ -631,6 +631,9 @@ export interface MockMarket {
   connections(): number;
   /** Resolves with the id once the page has subscribed to a channel. */
   subscribed(channel: 'bars' | 'book'): Promise<string>;
+  /** How many streams of a channel are open (the chart's, a request's, an alert's). */
+  streams(channel: 'bars' | 'book' | 'quotes'): number;
+  /** A bar on the chart's stream and every other stream of its symbol and timeframe. */
   sendBar(bar: Bar, historical?: boolean): Promise<void>;
   sendBook(bid: number, ask: number): Promise<void>;
   /** Reports the chart's bars subscription as reconnecting or live, as during an exchange outage. */
@@ -772,7 +775,10 @@ class MockGateway implements MockMarket {
   private openCount = 0;
   private failingLoads = false;
   private refusedLoads = 0;
-  private readonly subscriptions = new Map<string, { channel: string; symbol: string }>();
+  private readonly subscriptions = new Map<
+    string,
+    { channel: string; symbol: string; resolution: string }
+  >();
   private readonly series = new Map<string, Bar[]>();
   private readonly stockSeries = new Map<string, Bar[]>();
 
@@ -1199,9 +1205,23 @@ class MockGateway implements MockMarket {
     return id as string;
   }
 
+  /** How many streams of a channel are open (the chart's, a request's, an alert's). */
+  streams(channel: 'bars' | 'book' | 'quotes'): number {
+    return [...this.subscriptions.values()].filter((sub) => sub.channel === channel).length;
+  }
+
+  /**
+   * A bar on the chart's stream, and on every other stream of the same symbol and timeframe (an
+   * alert's runs its own), as the gateway sends each of its subscribers.
+   */
   async sendBar(bar: Bar, historical = false): Promise<void> {
     const id = await this.subscribed('bars');
-    this.socket?.send(JSON.stringify({ type: 'bar', id, bar, historical }));
+    const first = this.subscriptions.get(id);
+    for (const [other, sub] of this.subscriptions) {
+      if (sub.channel !== 'bars' || sub.symbol !== first?.symbol) continue;
+      if (sub.resolution !== first.resolution) continue;
+      this.socket?.send(JSON.stringify({ type: 'bar', id: other, bar, historical }));
+    }
   }
 
   async sendBook(bid: number, ask: number): Promise<void> {
@@ -1235,7 +1255,11 @@ class MockGateway implements MockMarket {
         session?: SessionHours;
       };
       if (message.type === 'subscribe') {
-        this.subscriptions.set(message.id, { channel: message.channel, symbol: message.symbol });
+        this.subscriptions.set(message.id, {
+          channel: message.channel,
+          symbol: message.symbol,
+          resolution: message.resolution ?? '1D',
+        });
         const isStock = stockInfoFor(message.symbol) !== null;
         if (isStock && !this.stockKey.configured) {
           socket.send(
@@ -1363,6 +1387,20 @@ export interface ChartState {
     /** A script's backgrounds, by id. */
     backgrounds: string[];
     valueLabels: string[];
+    /** How many of each drawing a script has on the chart, and its labels' and cells' text. */
+    drawings: {
+      labels: number;
+      lines: number;
+      boxes: number;
+      tables: number;
+      polylines: number;
+      linefills: number;
+      texts: string[];
+      /** How many the last frame painted: those in view, at prices on the scale. */
+      painted: { labels: number; lines: number; boxes: number; tables: number };
+    };
+    /** A strategy's fills, and how many the last frame marked; null for an indicator. */
+    trades: { fills: number; painted: number; closed: number; open: number } | null;
     /** What stopped a script, if anything did. */
     error: string | null;
   }[];

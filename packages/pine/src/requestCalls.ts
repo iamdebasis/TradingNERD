@@ -35,12 +35,16 @@ const SECURITY_PARAMS = [
 
 /**
  * "All the request.*() function calls in a script taken together cannot return more than 127
- * tuple elements" (Pine docs, Limitations).
+ * tuple elements" (Pine docs, Limitations). Each call written in the script counts once, however
+ * many times its function is called: published screeners call one function with a 4-element
+ * request for 40 symbols (160 by a count of calls), which TradingView runs. The manual's examples
+ * are calls written out; how it counts a function's call is undocumented, so this is provisional
+ * (docs/SPEC.md §11, found 2026-11-08).
  */
 export const MAX_TUPLE_ELEMENTS = 127;
 
-/** How many tuple elements the requests compiled so far return, per compile. */
-const tupleElements = new WeakMap<Compiler, number>();
+/** How many tuple elements the requests compiled so far return, and the calls counted, per compile. */
+const tupleElements = new WeakMap<Compiler, { total: number; counted: WeakSet<Call> }>();
 
 /** A request's expression: a tuple in brackets, or any value but a tuple of tuples. */
 function expressionOf(c: Compiler, call: Call, scope: Scope, args: Args): Compiled {
@@ -97,8 +101,9 @@ const securityCall: Handler = (c, call, scope) => {
   // of the context's bars.
   if (c.capturing(call)) return capture(expressionOf(c, call, scope, args), call.span);
   const reads = new Set<Var>();
-  const value = c.collectReads(reads, () => expressionOf(c, call, scope, args));
-  countTuple(c, value);
+  const own = new Set<Var>();
+  const value = c.collectReads(reads, () => expressionOf(c, call, scope, args), own);
+  countTuple(c, call, value);
   // Without dynamic requests, the context can't change from bar to bar (Pine docs, "series"
   // arguments): the symbol and the timeframe must be known by the first bar.
   const most = c.dynamicRequests() ? SERIES : SIMPLE;
@@ -117,7 +122,7 @@ const securityCall: Handler = (c, call, scope) => {
   const ignore = args.foldedAs('ignore_invalid_symbol', 'bool', false);
   const currency = args.string('currency')?.ev ?? null;
   const calcBars = args.foldedAs('calc_bars_count', 'int', Number.NaN, SIMPLE);
-  const site = c.requestSite(call, reads, { base: value.base, items: value.items });
+  const site = c.requestSite(call, reads, { base: value.base, items: value.items }, own);
   const na = requestNa(value.base, value.items);
   // The options are the inputs' alone: worked out once a run.
   let seen: readonly Value[] | null = null;
@@ -175,7 +180,8 @@ const lowerTfCall: Handler = (c, call, scope) => {
   const args = new Args(c, call, scope, LOWER_TF_PARAMS, 3);
   if (c.capturing(call)) return capture(expressionOf(c, call, scope, args), call.span);
   const reads = new Set<Var>();
-  const value = c.collectReads(reads, () => expressionOf(c, call, scope, args));
+  const own = new Set<Var>();
+  const value = c.collectReads(reads, () => expressionOf(c, call, scope, args), own);
   const parts = value.base === 'tuple' ? (value.items ?? []) : [value.base];
   for (const part of parts) {
     if (isCollection(part)) {
@@ -185,7 +191,7 @@ const lowerTfCall: Handler = (c, call, scope) => {
       );
     }
   }
-  countTuple(c, value);
+  countTuple(c, call, value);
   const most = c.dynamicRequests() ? SERIES : SIMPLE;
   const symbol = (args.string('symbol', most) as Compiled).ev;
   const timeframe = (args.string('timeframe', most) as Compiled).ev;
@@ -196,7 +202,7 @@ const lowerTfCall: Handler = (c, call, scope) => {
   const elem = (base: Base): Base => arrayOf(base === 'na' ? 'float' : base);
   const items = value.base === 'tuple' ? (value.items ?? []).map(elem) : undefined;
   const base: Base = value.base === 'tuple' ? 'tuple' : elem(value.base);
-  const site = c.requestSite(call, reads, { base, items });
+  const site = c.requestSite(call, reads, { base, items }, own);
   const na = requestNa(base, items);
   let seen: readonly Value[] | null = null;
   let options: (SecurityOptions & { ignoreInvalidTimeframe: boolean }) | null = null;
@@ -248,11 +254,18 @@ function capture(value: Compiled, span: Compiled['span']): Compiled {
   };
 }
 
-/** Counts a request's tuple elements toward Pine's limit for the whole script. */
-function countTuple(c: Compiler, value: Compiled): void {
+/** Counts a request's tuple elements toward Pine's limit for the whole script, once per call. */
+function countTuple(c: Compiler, call: Call, value: Compiled): void {
   if (value.base !== 'tuple') return;
-  const total = (tupleElements.get(c) ?? 0) + (value.items?.length ?? 0);
-  tupleElements.set(c, total);
+  let tally = tupleElements.get(c);
+  if (!tally) {
+    tally = { total: 0, counted: new WeakSet() };
+    tupleElements.set(c, tally);
+  }
+  if (tally.counted.has(call)) return;
+  tally.counted.add(call);
+  tally.total += value.items?.length ?? 0;
+  const total = tally.total;
   if (total > MAX_TUPLE_ELEMENTS) {
     c.fail(
       `The requests return ${total} tuple elements in all: the limit is ${MAX_TUPLE_ELEMENTS}`,

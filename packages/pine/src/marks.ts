@@ -1,7 +1,7 @@
-import { Args, type Call, constant, type Fold, type Handler, type NumEv } from './args.ts';
+import { Args, type Call, constant, type Ev, type Fold, type Handler, type NumEv } from './args.ts';
 import type { Compiler, MarkDef, PlotDef } from './compiler.ts';
 import type { Span } from './diagnostics.ts';
-import { CONST, type Compiled, INPUT, isNumeric } from './types.ts';
+import { CONST, type Compiled, INPUT, isNumeric, SIMPLE } from './types.ts';
 import { COLORS, hexColor } from './values.ts';
 
 /**
@@ -40,18 +40,48 @@ export const LOCATIONS = ['abovebar', 'belowbar', 'top', 'bottom', 'absolute'] a
 /** Mark sizes (size.*). */
 export const SIZES = ['auto', 'tiny', 'small', 'normal', 'large', 'huge'] as const;
 
-/** shape.*, location.* and size.* constants by name; null when the name isn't one. */
+/**
+ * shape.*, location.* and size.* constants by name; null when the name isn't one. Each is a
+ * plain "const string" in TradingView's v6 reference, so a script can keep one in a string
+ * variable or offer them in input.string()'s options. Their text, the member's name, is ours:
+ * the reference doesn't give it (provisional, docs/SPEC.md §11).
+ */
 export function markConstant(space: string, member: string, span: Span): Compiled | null {
   if (space === 'shape' && (SHAPES as readonly string[]).includes(member)) {
-    return constant('shape_style', member, span);
+    return constant('string', member, span);
   }
   if (space === 'location' && (LOCATIONS as readonly string[]).includes(member)) {
-    return constant('location_style', member, span);
+    return constant('string', member, span);
   }
   if (space === 'size' && (SIZES as readonly string[]).includes(member)) {
-    return constant('size_style', member, span);
+    return constant('string', member, span);
   }
   return null;
+}
+
+/**
+ * A mark's style, location or size: text that must be one of its constants' values. One that
+ * isn't draws as the default would, with a warning when the script spells it out.
+ */
+function markText(
+  c: Compiler,
+  args: Args,
+  name: string,
+  allowed: readonly string[],
+  fallback: string,
+): Fold {
+  const given = args.get(name);
+  if (given?.literal && given.fold) {
+    const value = given.fold({ inputs: [] });
+    if (typeof value === 'string' && !allowed.includes(value)) {
+      c.warn(`"${value}" isn't a value '${name}' knows: it draws as "${fallback}"`, given.span);
+    }
+  }
+  const fold = args.foldedAs(name, 'string', fallback);
+  return (env) => {
+    const value = fold(env);
+    return typeof value === 'string' && allowed.includes(value) ? value : fallback;
+  };
 }
 
 /** A color argument: folded when it can't change from bar to bar, else read on each bar. */
@@ -63,7 +93,58 @@ function colorOf(args: Args, name: string, fallback: number) {
 }
 
 const constTitle = (args: Args) => String(args.constant('title', '', 'string') ?? '');
-const constEditable = (args: Args) => args.constant('editable', true, 'bool') !== false;
+/** `editable`: an input bool, as the v6 reference types it (a published script passes one). */
+const editableOf = (args: Args): Fold => args.foldedAs('editable', 'bool', true);
+
+/**
+ * An output's `offset`, a "simple int" in the v6 reference: one the inputs give is known before
+ * the bars; one worked out as the script runs (from the chart's timeframe, say) is recorded on
+ * each bar and the chart takes its value (ScriptRun.offsets). v5 and older also take a series and
+ * use "only the last calculated offset … on the whole chart", with a warning (Pine docs, v6
+ * migration guide: No series offset); v6 refuses one.
+ */
+export function offsetArg(c: Compiler, args: Args): { fold: Fold; at: NumEv | null } {
+  const value = args.get('offset');
+  if (!value || value.fold !== undefined) {
+    return { fold: args.foldedAs('offset', 'int', 0), at: null };
+  }
+  const numeric =
+    value.base === 'int' || value.base === 'na' || (c.version <= 5 && value.base === 'float');
+  c.needType(value, numeric, args.fn, 'offset', 'simple int');
+  if (value.qual > SIMPLE) {
+    if (c.version >= 6) c.needQual(value, SIMPLE, args.fn, 'offset', 'int');
+    else {
+      c.warn(
+        `A series 'offset' in '${args.fn}' uses only its last value, on the whole chart (Pine v6 refuses it)`,
+        value.span,
+      );
+    }
+  }
+  const ev = value.ev as NumEv;
+  // An int with a fraction takes its floor, as int parameters do (args.ts).
+  return { fold: () => 0, at: (rt) => Math.floor(ev(rt)) };
+}
+
+/** offsetArg as an output's definition has it. */
+export function offsetDefs(c: Compiler, args: Args): { offset: Fold; offsetAt: NumEv | null } {
+  const { fold, at } = offsetArg(c, args);
+  return { offset: fold, offsetAt: at };
+}
+
+/** A bgcolor()'s or barcolor()'s run: its color on the bar, and its offset when it's worked out. */
+export function backgroundWrite(c: Compiler, index: number, ev: Ev, span: Span): Compiled {
+  const offsetAt = c.bgcolors[index]?.offsetAt ?? null;
+  return {
+    base: 'void',
+    qual: CONST,
+    ev: (rt) => {
+      if (offsetAt) rt.outputs.backgroundOffsets[index] = offsetAt(rt);
+      (rt.outputs.backgrounds[index] as Float64Array)[rt.index] = ev(rt) as number;
+      return null;
+    },
+    span,
+  };
+}
 
 /** A plot entry's fields that marks and bars don't use, at plot()'s defaults. */
 function plotLike(
@@ -81,9 +162,9 @@ function plotLike(
     linestyle: () => 'solid',
     trackprice: () => false,
     histbase: () => 0,
-    offset: names.includes('offset') ? args.foldedAs('offset', 'int', 0) : () => 0,
+    ...(names.includes('offset') ? offsetDefs(c, args) : { offset: () => 0, offsetAt: null }),
     join: () => false,
-    editable: constEditable(args),
+    editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     display: args.foldedAs('display', 'int', 31),
     format: args.foldedAs('format', 'string', null),
@@ -107,7 +188,7 @@ function part(c: Compiler, color: { fold: Fold; dynamic: boolean }, span: Span):
     histbase: () => 0,
     offset: () => 0,
     join: () => false,
-    editable: false,
+    editable: () => false,
     showLast: () => Number.NaN,
     display: () => 0,
     format: () => null,
@@ -210,14 +291,12 @@ function markCall(kind: 'shape' | 'char' | 'arrow'): Handler {
     const up = kind === 'arrow' ? colorOf(args, 'colorup', COLORS.lime as number) : null;
     const down = kind === 'arrow' ? colorOf(args, 'colordown', COLORS.red as number) : null;
     const mark: MarkDef = {
-      shape: kind === 'shape' ? args.foldedAs('style', 'shape_style', 'xcross') : () => null,
+      shape: kind === 'shape' ? markText(c, args, 'style', SHAPES, 'xcross') : () => null,
       // plotchar's default character isn't in the reference's text: ★ (provisional, §11).
       char: kind === 'char' ? args.foldedAs('char', 'string', '★') : () => null,
       location:
-        kind === 'arrow'
-          ? () => 'absolute'
-          : args.foldedAs('location', 'location_style', 'abovebar'),
-      size: kind === 'arrow' ? () => 'auto' : args.foldedAs('size', 'size_style', 'auto'),
+        kind === 'arrow' ? () => 'absolute' : markText(c, args, 'location', LOCATIONS, 'abovebar'),
+      size: kind === 'arrow' ? () => 'auto' : markText(c, args, 'size', SIZES, 'auto'),
       text: kind === 'arrow' ? '' : String(args.constant('text', '', 'string') ?? ''),
       textColor: { fold: textColor.fold, dynamic: textColor.dynamic },
       textPart: null,
@@ -411,23 +490,14 @@ const barcolorCall: Handler = (c, call, scope) => {
     index,
     bars: true,
     color: { fold: dynamic ? () => Number.NaN : args.folded('color', Number.NaN), dynamic },
-    offset: args.foldedAs('offset', 'int', 0),
-    editable: constEditable(args),
+    ...offsetDefs(c, args),
+    editable: editableOf(args),
     showLast: args.foldedAs('show_last', 'int', Number.NaN),
     title: constTitle(args),
     display: args.foldedAs('display', 'int', 31),
     span: call.span,
   });
-  const ev = color.ev;
-  return {
-    base: 'void',
-    qual: CONST,
-    ev: (rt) => {
-      (rt.outputs.backgrounds[index] as Float64Array)[rt.index] = ev(rt) as number;
-      return null;
-    },
-    span: call.span,
-  };
+  return backgroundWrite(c, index, color.ev, call.span);
 };
 
 export function markCalls(): Record<string, Handler> {
