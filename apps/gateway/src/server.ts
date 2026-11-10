@@ -4,6 +4,7 @@ import {
   type ApiErrorBody,
   type HealthResponse,
   PROTOCOL_VERSION,
+  WEB_DEV_PORT,
   WS_PATH,
 } from '@tradingnerd/core';
 import Fastify, { type FastifyInstance, LogController } from 'fastify';
@@ -46,6 +47,9 @@ export interface GatewayDeps {
   /** Older market caps' Live Coin Watch key routes (absent in tests that don't need them). */
   olderCaps?: { older: OlderCaps; coins: OlderCoins };
 }
+
+/** The app itself: the web dev server, which forwards its data calls here (apps/web/vite.config.ts). */
+const APP_URL = `http://127.0.0.1:${WEB_DEV_PORT}`;
 
 export async function buildServer(
   config: GatewayConfig,
@@ -97,6 +101,15 @@ export async function buildServer(
       serverTime: Date.now(),
     }),
   );
+
+  // The gateway has no page of its own, so a browser opened on its address is sent on to the app,
+  // with the query that holds the app's symbol and interval. A redirect rather than a page, so the
+  // address bar shows the app's; temporary (302), so no browser keeps it. The guard above has
+  // already turned away other hosts and websites.
+  app.get('/', (request, reply) => {
+    const query = request.url.indexOf('?');
+    return reply.redirect(`${APP_URL}/${query < 0 ? '' : request.url.slice(query)}`, 302);
+  });
 
   registerMarketRoutes(app, deps.market);
   registerSymbolRoutes(app, deps.catalog);

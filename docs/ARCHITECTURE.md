@@ -13,7 +13,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
  │          │ their panes                   │ the Pine Editor      │      │
  └──────────┴───────────────┬───────────────┴──────────────────────┴──────┘
    REST (history /api/bars, search, lists, scripts, keys) + one WebSocket (live bars, quotes, book)
- Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only)
+ Local gateway: Node 26 + Fastify (127.0.0.1:5180, loopback only; its own address sends a browser to the app)
  ┌──────────────────────────▼───────────────────────────────────────┐
  │ MarketService: history paging, resampling, the whole-bar rule,   │
  │ live candles, quotes, an in-memory history cache                 │

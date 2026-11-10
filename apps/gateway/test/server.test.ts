@@ -146,6 +146,21 @@ describe('gateway HTTP', () => {
     expect(res.json()).toEqual({ error: 'forbidden_host' });
   });
 
+  it('sends a browser opened on its own address on to the app, with the chart in the query', async () => {
+    const res = await get('/');
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe(`${UI_ORIGIN}/`);
+    const linked = await get('/?symbol=BINANCE:BTCUSDT&interval=60');
+    expect(linked.statusCode).toBe(302);
+    expect(linked.headers.location).toBe(`${UI_ORIGIN}/?symbol=BINANCE:BTCUSDT&interval=60`);
+    expect((await get('/', { host: 'localhost:5180' })).headers.location).toBe(`${UI_ORIGIN}/`);
+    // Other hosts and websites are still turned away first.
+    expect((await get('/', { host: 'evil.example:5180' })).statusCode).toBe(403);
+    expect((await get('/', { origin: 'https://evil.example' })).statusCode).toBe(403);
+    // The data routes answer as before.
+    expect((await get('/api/nope')).statusCode).toBe(404);
+  });
+
   it('sends no CORS headers', async () => {
     const res = await get('/api/health', { origin: UI_ORIGIN });
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
