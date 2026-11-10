@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BinanceExchange } from '../src/exchanges/binance/BinanceExchange.ts';
 import { parseMiniTickers, parseTradingSymbols } from '../src/exchanges/binance/parse.ts';
 import { BitstampExchange } from '../src/exchanges/bitstamp/BitstampExchange.ts';
@@ -236,12 +236,27 @@ describe('exchange outages', () => {
     await expect(new OkxExchange({ fetch: busy }).fetchCatalog()).rejects.toMatchObject({
       code: 'rate_limited',
     });
-    const offline = (async () => {
-      throw new TypeError('fetch failed');
-    }) as typeof fetch;
-    await expect(new BybitExchange({ fetch: offline }).fetchCatalog()).rejects.toMatchObject({
-      code: 'upstream_error',
-      message: 'Bybit is unreachable (fetch failed)',
-    });
+    // No connection: asked twice more first (catalog/http.ts), so the fake clock runs through the
+    // waits, 0.5 s and 1.5 s, rather than the test sitting through them.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    try {
+      const asked: number[] = [];
+      const offline = (async (url: unknown) => {
+        if (String(url).includes('instruments-info')) asked.push(Date.now());
+        throw new TypeError('fetch failed');
+      }) as typeof fetch;
+      const start = Date.now();
+      const unreachable = expect(
+        new BybitExchange({ fetch: offline }).fetchCatalog(),
+      ).rejects.toMatchObject({
+        code: 'upstream_error',
+        message: 'Bybit is unreachable (fetch failed)',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await unreachable;
+      expect(asked.map((at) => at - start)).toEqual([0, 500, 2_000]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

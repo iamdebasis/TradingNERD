@@ -37,7 +37,7 @@ With #9 merged, the user signed git in to GitHub (`gh auth login`), renewed the 
 
 The other 73 live tests passed, the 30 s outage on all six exchanges among them. The web half of `pnpm test:live` runs after the gateway half passes, so it hasn't run yet.
 
-**Checks (cloud):** typecheck and lint clean; the unit tests pass four times in a row (core 350, indicators 78, Pine 409, chart 100, web 228, gateway 576); the five retry tests (three in `http.test.ts`, two in `binance-rest.test.ts`) fail without the retry, and the sixth (no asking again after a timeout or an answer) fails when every error is asked again. The live tests can't run in the cloud (Binance's futures API answers 451 there; the spot exchanges aren't allowed): the Mac's next `pnpm test:live` is their check.
+**Checks (cloud):** typecheck and lint clean; the unit tests pass four times in a row (core 350, indicators 78, Pine 409, chart 100, web 228, gateway 576); the six retry tests (three in `http.test.ts`, two in `binance-rest.test.ts`, and Bybit's outage in `catalog-sources.test.ts`) fail without the retry, and the one for a timeout or an answer fails when every error is asked again. Bybit's outage test was the only one the retry slowed (it sat through the real waits, 2 s); it now runs them on the fake clock, in 8 ms. The live tests can't run in the cloud (Binance's futures API answers 451 there; the spot exchanges aren't allowed): the Mac's next `pnpm test:live` is their check.
 
 ## 2i. The Mac's `pnpm verify` of 10 November
 
