@@ -261,6 +261,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
           key={alerts.dialog.editing ?? 'new'}
           symbol={symbol}
           interval={resolution}
+          info={chartInfo?.id.toUpperCase() === symbol.toUpperCase() ? chartInfo : null}
           sources={alertSources(indicatorStore.get().list, librariesStore.compileOptions())}
           editing={alerts.dialog.editing ? (alertStore.find(alerts.dialog.editing) ?? null) : null}
           onClose={() => alertStore.closeDialog()}

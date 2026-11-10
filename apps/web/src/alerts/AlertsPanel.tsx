@@ -3,12 +3,16 @@ import { TrashIcon } from '../indicators/icons';
 import { PauseIcon, ResumeIcon } from '../pine/icons';
 import { CloseIcon, PlusIcon } from '../toolbar/icons';
 import styles from './AlertsPanel.module.css';
-import { type AlertDef, alertTitle, conditionLabel } from './alertModel';
+import { type AlertDef, alertTitle, conditionLabel, isPriceAlert } from './alertModel';
 import { alertStore, useAlerts } from './alertStore';
 import { EditIcon } from './icons';
 
-/** An alert's symbol and timeframe as the list writes them: "BTCUSDT, 1h". */
+/**
+ * An alert's symbol and timeframe as the list writes them: "BTCUSDT, 1h". A price alert's is the
+ * symbol alone (no timeframe given), as it triggers regardless of the interval.
+ */
 export function alertPlace(symbol: string, interval: string): string {
+  if (!interval) return symbolName(symbol);
   const resolution = parseResolution(interval);
   return `${symbolName(symbol)}, ${resolution ? resolutionLabel(resolution) : interval}`;
 }
@@ -98,8 +102,8 @@ export function AlertsPanel({
         <ul className={styles.list} aria-label="Alert list">
           {alerts.length === 0 && (
             <li className={styles.empty}>
-              No alerts yet. Create one on a script with alert() or alertcondition() calls, or on a
-              strategy.
+              No alerts yet. Create one on a symbol’s price, on a script with alert() or
+              alertcondition() calls, or on a strategy.
             </li>
           )}
           {alerts.map((alert) => (
@@ -107,7 +111,8 @@ export function AlertsPanel({
               <div className={styles.main}>
                 <div className={styles.name}>{alertTitle(alert)}</div>
                 <div className={styles.meta}>
-                  {alertPlace(alert.symbol, alert.interval)} · {conditionLabel(alert.condition)}
+                  {alertPlace(alert.symbol, isPriceAlert(alert) ? '' : alert.interval)} ·{' '}
+                  {conditionLabel(alert.condition)}
                 </div>
                 <div className={styles.status} data-status={alert.status}>
                   {STATUS[alert.status]}

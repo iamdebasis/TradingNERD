@@ -2,15 +2,15 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 9 November 2026 (step 4: alerts on scripts; Renko, Line Break, Kagi and Point & Figure data; strategies on the realtime bar; offsets worked out as the script runs), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 9 November 2026 (price alerts; step 4 merged as pull request #6), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
 | | |
 |---|---|
-| Branches | `main` is at `684091e` (pull request #4 (https://github.com/iamdebasis/TradingNERD/pull/4) merged on 7 November: P2 and P4; #3 before it: P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
-| Merged | **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, merged on 8 November: `main` is at `6ee4bf0` |
-| Under way | **Pine like TradingView's, for any script** (8 November, the user's YES: "FIX whatever it takes to run any possible scripts like tradingview … and DELIVER"), on `claude/keen-allen-7wubfe` from `main` at `6ee4bf0`, in steps: 1. compatibility with older versions (done: §2c); 2. drawings (done: §2d); 3. strategies and the Strategy Tester (done: §2e); 4. alerts, and Renko, Kagi, Line Break and Point & Figure data (done: §2f). Steps 1 to 4 are pull request #6 (https://github.com/iamdebasis/TradingNERD/pull/6), open |
+| Branches | `main` is at `4ccb2d1` (pull request #6 (https://github.com/iamdebasis/TradingNERD/pull/6) merged on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
+| Merged | **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). `main` is at `4ccb2d1`. **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
+| Under way | **Price alerts** (the user's YES of 9 November), built on `claude/keen-allen-7wubfe` from `main` at `4ccb2d1` (§2g), for its own pull request once committed and pushed on the user's YES |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
@@ -21,6 +21,20 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
 What's left for the Mac, for every milestone, is one list: §9. The milestone table is SPEC §8.
+
+## 2g. Price alerts (9 November)
+
+The user's YES: "build price alerts (Crossing, Crossing Up, Crossing Down, Greater Than and Less Than a value, on any symbol, triggering Only once or Every time on the live price) in the Create Alert dialog and the alert manager, with tests and the docs updated" (SPEC §3, 9 November; §4.23; §5.26; §6.22; §11 item 135).
+
+- **The dialog** (the top bar's Alert, Alt+A, or the alert manager's +) now starts on the chart symbol's price, as TradingView's does: Condition is the symbol (the chart's scripts come next in the same drop-down), then Crossing, Crossing Up, Crossing Down, Greater Than or Less Than; Value starts at the current price in the symbol's decimals (the arrow keys step it by the tick); Trigger is Only once or Every time; the name and message follow the condition ("XRPUSDT Crossing Up 1.3500") until typed in, with the same placeholders.
+- **The alert manager** lists a price alert by its condition and its symbol alone, as it triggers regardless of the interval; Edit keeps it a price alert on its own symbol.
+- **How they run:** each active price alert watches its symbol's 1-minute live bars from the gateway while tradingNerd is open, whatever the chart shows. A new high or low since the update before is a price that traded, so a spike through the value inside one update is caught. Crossing Up needs the price below the value and then at it ("drops below … and then rises back to that level"); Greater Than and Less Than need the price past the value, and trigger at once when it already is (provisional: TradingView doesn't say); Every time triggers again at most once a minute; Only once stops it. A stock's pre- and post-market trades count when its chart showed extended hours; a symbol without 1-minute bars (a market cap) is watched on the alert's timeframe.
+
+**Found and fixed on the way:** an edited price alert kept its old message ("XRPUSDT Crossing Up 1.3500" after the value became 1.36); while the message is the condition's own text it now follows the value. And an alert restarted after an error (a stock's before its Alpaca key was added, or a script's) kept showing the old error while running; each start now clears it, for alerts on scripts too. Each fix has a test that fails without it.
+
+**Checks (cloud):** typecheck and lint clean; unit tests all pass (core 350, indicators 78, Pine 409, chart 100, web 228, gateway 570 and 77 live ones skipped); the new `priceAlerts.test.ts` (16) catches a rule broken on purpose (2 of its tests failed with Crossing Up from above wrong). The browser suite without its visual and performance tests: 226 of 231 passed; the 5 failures are the cloud's known 4 pixel and font checks (§6) and Symbol Search's "Enter adds the top match" under load, which passed 3 of 3 alone, as in step 4. `alerts.spec.ts` (4) passes: a price alert starts at the current price, triggers when the live price crosses its value, stops, and edits with its message following; a Greater Than one, Every time, triggers again a minute on. Screenshots of the dialog, its operators, the alert manager, a pop-up and the edit dialog were looked at in the cloud's browser. No live exchange check: the cloud can't reach the exchanges' live streams (§9 has the Mac's).
+
+**Not built** (SPEC §5.26 "Later"): the channel and Moving conditions, alerts on an indicator's plot or a drawing, Expiration. **Provisional** (SPEC §11, item 135): the "already past the value" case, Every time's minute, the default name and message, the dialog's layout.
 
 ## 2f. Step 4: alerts, non-standard data, the realtime bar, offsets (9 November)
 
@@ -221,10 +235,10 @@ Built on the user's YES of 27 October, from `main` at `6c403cb`, and merged on 3
 - **Start:** `pnpm dev`, then open http://127.0.0.1:5173.
 - **Keys,** each in its dialog: CoinGecko (coin logos and CRYPTOCAP), Alpaca (US stocks), Live Coin Watch (older market caps).
 - **Before every delivery:** `pnpm verify`, then a read-only check against the running app (AGENTS.md).
-- **Test counts on 8 November:**
-  - core 350, indicators 78, pine 312, chart 91, web 202;
+- **Test counts on 9 November:**
+  - core 350, indicators 78, pine 409, chart 100, web 228;
   - gateway 570 (plus 77 that need the live internet);
-  - browser 237 (13 visual, 5 performance among them);
+  - browser 249 (13 visual, 5 performance among them);
   - lint and typecheck clean.
 - **Known flaky tests:** Bitstamp's "polls the live candle every 30 s" sometimes fails under load and passes on a rerun; in the cloud, so does the gestures test's 1 px flick.
 - **Cloud sessions** (Claude Code on the web): put `/opt/node26/bin` first on PATH (the default `node` there is 22). Typecheck, lint and the unit tests run there; `pnpm test:e2e` doesn't yet, a known gap (AGENTS.md, "Commands"). The real check against the running app happens on the Mac.
@@ -264,11 +278,12 @@ The full list is SPEC §11; these are the ones that matter most.
 - **Indicators (I1):** every look not measured from a screenshot is provisional (SPEC §11, items 62–63 and 70); TradingView's tick volume for TOTAL isn't ours (item 68); the sentence-case title waits on the user (item 73). RSI's Timeframe came with P4 (item 71), the Source code button with P1 (item 72).
 - **Pine (P1, P2):** the editor's look is provisional until the screenshots in SPEC §11, item 74; the built-in RSI's smoothed MA waits on the user (item 76); P2's provisional looks are items 89 to 103.
 - **Requests and open interest (P4):** open interest's units and history depth wait on the user's word (§3; SPEC §11, items 113 and 115); it isn't listed in Symbol Search yet (item 111); the ring's and the symbol field's look wait on a screenshot (item 107); the top bar's pill cuts names as long as `BTCUSDT.P_OI` (item 118).
+- **Price alerts:** whether Greater Than and Less Than trigger at once when the price is already past the value, and how often Every time triggers, wait on a check against TradingView (SPEC §11, item 135); the dialog's look waits on a screenshot.
 - **Step 4 (alerts, non-standard data):** alerts run only while the app is open and live in this browser (SPEC §11, item 133); the non-standard bars' undocumented choices (item 130); a strategy's last bar of a session closes when the next opens (item 131); the alert UI and its defaults wait on screenshots (item 133, SPEC §7.7).
 
 ## 9. Next steps, in order
 
-**1. Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6): steps 1 to 4 of Pine for any script (§2c, §2d, §2e, §2f). The user merges it on GitHub.
+**1. Price alerts' pull request** (§2g), once the user says YES to commit, and again to push and open it; the user merges it on GitHub. Pull request #6 (steps 1 to 4 of Pine for any script) was merged on 9 November.
 
 **2. On the Mac, after pulling `main`** (none of this can be done in the cloud):
 1. `pnpm install` (P1 added `monaco-editor` and `packages/pine`), then restart `pnpm dev`: the gateway and the web app are on protocol v12.
@@ -276,9 +291,9 @@ The full list is SPEC §11; these are the ones that matter most.
 3. The performance budgets with Volume and RSI: `pnpm exec playwright test perf --no-deps` (in `apps/web`).
 4. `pnpm test:live`: Binance's futures APIs, Bybit and the spot exchanges, which the cloud can't reach.
 5. A read-only check against the running app (AGENTS.md): the user's OI script on BTCUSDT 1h, its values against TradingView's at a few hours. The first daily load of `BINANCE:BTCUSDTPERP_OI` waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
-6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d); a strategy's List of Trades and Performance Summary beside TradingView's Strategy Tester on the same symbol and timeframe (§2e); an alert on a script with `alert()` and one with `alertcondition()`, created on both, triggering on the same live bars with the same messages; a `request.security(ticker.renko(…))` plot (and Kagi, Line Break, P&F) beside TradingView's (§2f).
+6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d); a strategy's List of Trades and Performance Summary beside TradingView's Strategy Tester on the same symbol and timeframe (§2e); an alert on a script with `alert()` and one with `alertcondition()`, created on both, triggering on the same live bars with the same messages; a Crossing Up price alert just above the live price on both, triggering together, and a Greater Than one made below the price, to see whether TradingView's triggers at once (SPEC §11, item 135); a `request.security(ticker.renko(…))` plot (and Kagi, Line Break, P&F) beside TradingView's (§2f).
 
-**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123); TradingView's Strategy Tester and a strategy's trade markers in the dark theme (item 128); the Create Alert dialog on a script, the alert manager with an alert and its log, and an alert's pop-up (item 133); a Renko, Kagi, Line Break and P&F request plotted on a chart, with the bars' dates (item 130).
+**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123); TradingView's Strategy Tester and a strategy's trade markers in the dark theme (item 128); the Create Alert dialog on a script and on a price, the alert manager with an alert and its log, and an alert's pop-up (items 133 and 135); a Renko, Kagi, Line Break and P&F request plotted on a chart, with the bars' dates (item 130).
 
 **4. M9f** (on the Mac: the download runs on its gateway, and the ruler needs macOS's `sips`):
 1. Size step 2b and tell the user how many requests it needs.
@@ -286,4 +301,4 @@ The full list is SPEC §11; these are the ones that matter most.
 3. Report the result year by year, then ask YES to switch M9f on in the charts.
 4. Update SPEC (§5.14 status, §8, §11) and this file, then ask YES to commit, and again to push and open a pull request.
 
-**5. Then the plan's next milestones** (SPEC §8): price and drawing alerts; the chart types themselves (Renko and the rest on the chart); the strategies' Properties tab and `calc_on_order_fills` (SPEC §11, item 129); the open items P2 and P4 left (SPEC §11, items 100, 111 and 122); Phase 3 (Kraken's history files); and the user's list above.
+**5. Then the plan's next milestones** (SPEC §8): the channel and Moving price conditions, and indicator, drawing and watchlist alerts; the chart types themselves (Renko and the rest on the chart); the strategies' Properties tab and `calc_on_order_fills` (SPEC §11, item 129); the open items P2 and P4 left (SPEC §11, items 100, 111 and 122); Phase 3 (Kraken's history files); and the user's list above.
