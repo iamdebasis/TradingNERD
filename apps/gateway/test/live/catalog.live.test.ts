@@ -74,5 +74,7 @@ describe.runIf(LIVE)('symbol catalog, live', () => {
     } finally {
       catalog.close();
     }
-  });
+    // Room for its 30 s wait for six exchanges' lists (Bitstamp's alone took 2.2 s on the Mac on
+    // 2026-11-10, when the default 5 s ran out).
+  }, 60_000);
 });

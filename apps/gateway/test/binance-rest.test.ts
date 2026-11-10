@@ -28,6 +28,8 @@ function client(respond: (url: URL) => Response | Promise<Response>) {
     baseUrl: 'https://binance.test/',
     assetsUrl: 'https://binance.test/assets',
     fetch: fetchMock as unknown as typeof fetch,
+    // A dropped connection is asked again at once here (the gateway waits 0.5 s, then 1.5 s).
+    retryDelaysMs: [0, 0],
   });
   return { rest, calls };
 }
@@ -94,13 +96,27 @@ describe('BinanceRest errors', () => {
     );
   });
 
-  it('maps network failures to upstream_error', async () => {
-    const { rest } = client(() => {
+  it('maps network failures to upstream_error, after asking twice more', async () => {
+    const { rest, calls } = client(() => {
       throw new TypeError('fetch failed');
     });
     const error = await errorOf(rest.klines('XRPUSDT', '1m', null, 1));
     expect(error.code).toBe('upstream_error');
     expect(error.message).toMatch(/unreachable/);
+    expect(calls).toHaveLength(3);
+  });
+
+  it('asks again after a dropped connection, and the answer that comes counts', async () => {
+    let dropped = false;
+    const { rest, calls } = client(() => {
+      if (!dropped) {
+        dropped = true;
+        throw new TypeError('fetch failed');
+      }
+      return json([row(60_000)]);
+    });
+    expect((await rest.klines('XRPUSDT', '1m', null, 1)).map((bar) => bar.time)).toEqual([60]);
+    expect(calls).toHaveLength(2);
   });
 });
 

@@ -59,9 +59,47 @@ export function toBar(
   return { time: Math.floor(openMs / 1000), open: o, high: h, low: l, close: c, volume: v };
 }
 
+/**
+ * When a request's connection fails (refused, reset or dropped: Node's "fetch failed"), it goes
+ * again this long after, twice, before the exchange counts as unreachable. A passing network
+ * hiccup failed two live tests on the Mac (2026-11-10: Kraken and Bitstamp, once each), and would
+ * put an error on a chart. A timeout isn't asked again: it has waited long enough already.
+ */
+export const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_500];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Whether a fetch failed on its connection, rather than timing out or being stopped. */
+export function droppedConnection(error: unknown): boolean {
+  return error instanceof TypeError && error.message === 'fetch failed';
+}
+
+/**
+ * A GET asked again after a dropped connection (RECONNECT_DELAYS_MS), each time with a fresh
+ * timeout. Any answer, an error one included, comes back as it is.
+ */
+export async function fetchAgainOnDrop(
+  fetchFn: typeof fetch,
+  url: string,
+  timeoutMs: number,
+  delays: readonly number[] = RECONNECT_DELAYS_MS,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchFn(url, { signal: AbortSignal.timeout(timeoutMs) });
+    } catch (error) {
+      const delay = delays[attempt];
+      if (delay === undefined || !droppedConnection(error)) throw error;
+      await sleep(delay);
+    }
+  }
+}
+
 export interface FetchOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** Waits before asking again after a dropped connection (RECONNECT_DELAYS_MS by default). */
+  retryDelaysMs?: readonly number[];
 }
 
 /** GETs JSON from an exchange's public API; a failure becomes a MarketError naming it. */
@@ -72,9 +110,12 @@ export async function getJson(
 ): Promise<unknown> {
   let response: Response;
   try {
-    response = await (options.fetch ?? fetch)(url, {
-      signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
-    });
+    response = await fetchAgainOnDrop(
+      options.fetch ?? fetch,
+      url,
+      options.timeoutMs ?? 20_000,
+      options.retryDelaysMs,
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new MarketError('upstream_error', `${exchange} is unreachable (${detail})`);

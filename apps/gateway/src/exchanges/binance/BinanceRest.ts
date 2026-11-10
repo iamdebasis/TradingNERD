@@ -1,4 +1,5 @@
 import type { AggTrade, Bar } from '@tradingnerd/core';
+import { fetchAgainOnDrop } from '../../catalog/http.ts';
 import { MarketError } from '../../market/types.ts';
 import {
   type BinanceSymbol,
@@ -18,6 +19,8 @@ export interface BinanceRestOptions {
   assetsUrl: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** Waits before asking again after a dropped connection (RECONNECT_DELAYS_MS by default). */
+  retryDelaysMs?: readonly number[];
 }
 
 /** Binance error code for "Invalid symbol." */
@@ -28,12 +31,14 @@ export class BinanceRest {
   private readonly assetsUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly retryDelaysMs: readonly number[] | undefined;
 
   constructor(options: BinanceRestOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.assetsUrl = options.assetsUrl;
     this.fetchFn = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.retryDelaysMs = options.retryDelaysMs;
   }
 
   /**
@@ -125,7 +130,8 @@ export class BinanceRest {
   private async get(url: string): Promise<unknown> {
     let response: Response;
     try {
-      response = await this.fetchFn(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+      // A dropped connection is asked again, as every exchange's request is (catalog/http.ts).
+      response = await fetchAgainOnDrop(this.fetchFn, url, this.timeoutMs, this.retryDelaysMs);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw upstream(`Binance is unreachable (${detail})`);
