@@ -305,7 +305,9 @@ describe('BitstampExchange', () => {
     await vi.advanceTimersByTimeAsync(CANDLE_POLL_MS - 1);
     expect(updates).toEqual([]);
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(updates).toHaveLength(2);
+    // The poll's answer comes through promises the fake clock doesn't wait for, so on a busy
+    // machine it lands a moment later (the Mac's verify of 2026-11-10): the test waits for it.
+    await vi.waitFor(() => expect(updates).toHaveLength(2));
     stop();
     await vi.advanceTimersByTimeAsync(CANDLE_POLL_MS * 2);
     expect(updates).toHaveLength(2);

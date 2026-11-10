@@ -182,7 +182,7 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 
 ## Definition of done
 
-1. `pnpm verify` passes (in a cloud session, every check but e2e: see "Commands"). Rerun a known flaky test before reporting it: Bitstamp's "polls the live candle every 30 s" fails now and then under load.
+1. `pnpm verify` passes (in a cloud session, every check but e2e: see "Commands"). A test that fails now and then gets its cause found and fixed, not a rerun: Bitstamp's "polls the live candle every 30 s" checked before the poll's answer had come, and was fixed on 10 November (SPEC §9).
 2. A real check against the user's running app, read-only, with the numbers compared to TradingView's.
 3. `docs/SPEC.md` updated: decision rows, research, requirements, architecture, tests, plan and open items.
 4. `docs/HANDOVER.md` updated with the state and next steps.
@@ -191,7 +191,8 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 ## Where the work stands
 
 See [docs/HANDOVER.md](docs/HANDOVER.md). As of 10 November 2026:
-- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), M9f's checkpoint, switched off in the charts, Pine like TradingView's for any script (pull request #6, 9 November: compatibility with older versions, drawings, strategies with the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), price alerts (pull request #7) and the gateway's own address sending a browser on to the app (pull request #8, both 10 November). `main` is at `de15c5f`, public.
-- **Under way:** the hand-over after the Mac's `pnpm verify` of 10 November: three browser tests fixed to press the Mac's keys, and the docs, on `claude/keen-allen-7wubfe` from `main` at `de15c5f`, for its own pull request.
+- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), M9f's checkpoint, switched off in the charts, Pine like TradingView's for any script (pull request #6, 9 November: compatibility with older versions, drawings, strategies with the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), price alerts (pull request #7), the gateway's own address sending a browser on to the app (pull request #8) and the hand-over after the Mac's first `pnpm verify`, with three browser tests pressing the Mac's keys (pull request #9, all three 10 November). `main` is at `31a9352`, public.
+- **To merge:** the Mac's five renewed visual baselines (pull request #10, opened from the Mac on 10 November).
+- **Under way:** the fixes after the Mac's second run of 10 November: the gateway asks again when a connection drops, the Bitstamp polling test waits for the poll's answer, and two live tests allow for the network, on `claude/keen-allen-7wubfe` from `main` at `31a9352`, for its own pull request.
 - **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.
-- **Left for the Mac:** signing git in to GitHub (`gh auth login`), renewing five visual baselines after a look (SPEC §11, item 134), then `pnpm verify`, `pnpm test:live` and the hand checks (HANDOVER §9).
+- **Left for the Mac:** after merging both, `pnpm verify` (it should pass in full), `pnpm test:live` and the hand checks (HANDOVER §9).

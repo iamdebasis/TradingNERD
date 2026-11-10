@@ -57,10 +57,11 @@ describe.runIf(LIVE).each(CASES)('$name open interest, live', ({ source, exchang
     expect(Math.abs(now.time - Date.now())).toBeLessThan(10 * 60_000);
     const points = await own.recent(contract, Date.now() - 86_400_000);
     expect(points.length).toBeGreaterThan(250);
-    const steps = new Set(
-      points.slice(1).map((p, i) => p.time - (points[i] as { time: number }).time),
-    );
-    expect([...steps]).toEqual([300_000]);
+    // Whole 5-minute steps. Binance's live API leaves one out now and then (COIN-M on the Mac on
+    // 2026-11-10: steps of 10 and 15 minutes in a day), though its archive has every point (288 a
+    // day, 6 to 9 November); the series fills those from the archive a day on.
+    const steps = points.slice(1).map((p, i) => p.time - (points[i] as { time: number }).time);
+    expect(steps.every((step) => step > 0 && step % 300_000 === 0)).toBe(true);
   }, 60_000);
 
   it("names a perpetual it doesn't list unknown", async () => {
