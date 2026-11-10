@@ -25,6 +25,7 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
   - The gateway (5180) and the web app (5173) listen on 127.0.0.1 only.
   - Every gateway request, REST or WebSocket, must carry a loopback `Host`, and an allowed `Origin` if any. That shuts out other websites and DNS rebinding (`apps/gateway/src/security.ts`).
   - No CORS headers are sent.
+  - The gateway's own address (`/`) has no page: it only sends a browser on to the app on 127.0.0.1:5173, after the same checks.
 - **Keys:**
   - **Where they're kept:** in `data/secrets.json` (owner-only, `-rw-------`, in an owner-only `data/`), or in the environment (`COINGECKO_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `LIVECOINWATCH_API_KEY`).
   - **Saving one:** a key is checked with its provider before it's kept.

@@ -2,15 +2,15 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 9 November 2026 (price alerts; step 4 merged as pull request #6), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 10 November 2026 (the gateway's own address sends a browser on to the app; price alerts merged as pull request #7), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
 | | |
 |---|---|
-| Branches | `main` is at `4ccb2d1` (pull request #6 (https://github.com/iamdebasis/TradingNERD/pull/6) merged on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
-| Merged | **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). `main` is at `4ccb2d1`. **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
-| Under way | **Price alerts** (the user's YES of 9 November), built on `claude/keen-allen-7wubfe` from `main` at `4ccb2d1` (§2g), for its own pull request once committed and pushed on the user's YES |
+| Branches | `main` is at `aa2bf34` (pull request #7 (https://github.com/iamdebasis/TradingNERD/pull/7) merged on 10 November: price alerts; #6 on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
+| Merged | **Pull request #7** (https://github.com/iamdebasis/TradingNERD/pull/7), price alerts (§2g), merged on 10 November: `main` is at `aa2bf34`. **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
+| Under way | **The gateway's own address sends a browser on to the app** (the user's YES of 10 November, §2h), on `claude/keen-allen-7wubfe` from `main` at `aa2bf34`, for its own pull request |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
 | Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest); all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
@@ -21,6 +21,12 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
 What's left for the Mac, for every milestone, is one list: §9. The milestone table is SPEC §8.
+
+## 2h. The gateway's own address (10 November)
+
+Opening http://127.0.0.1:5180 showed `{"message":"Route GET:/ not found",…}` (the user's screenshot): 5180 is the gateway, which only serves the app's data; the app is on 5173. Nothing was broken, but the address was a dead end. Now the gateway's own address sends the browser on to the app with a temporary redirect, keeping the chart in the query (`http://127.0.0.1:5180/?symbol=BINANCE:BTCUSDT&interval=60` opens the app on that chart). The Host and Origin checks still run first, so other websites and DNS rebinding are refused as before (SPEC §3 and §6.9, 10 November; SECURITY.md).
+
+**Checks (cloud):** the gateway's `server.test.ts` (50) passes, and its new test fails without the route; a gateway of our own on port 5191 (a scratch data folder, no keys) answered `302` to `http://127.0.0.1:5173/` and refused a foreign Host, and a real browser opened on its address landed on the app with the asked-for chart.
 
 ## 2g. Price alerts (9 November)
 
@@ -232,12 +238,12 @@ Built on the user's YES of 27 October, from `main` at `6c403cb`, and merged on 3
 
 ## 6. Running and checking
 
-- **Start:** `pnpm dev`, then open http://127.0.0.1:5173.
+- **Start:** `pnpm dev`, then open http://127.0.0.1:5173 (the gateway's own address, http://127.0.0.1:5180, sends you there too).
 - **Keys,** each in its dialog: CoinGecko (coin logos and CRYPTOCAP), Alpaca (US stocks), Live Coin Watch (older market caps).
 - **Before every delivery:** `pnpm verify`, then a read-only check against the running app (AGENTS.md).
-- **Test counts on 9 November:**
+- **Test counts on 10 November:**
   - core 350, indicators 78, pine 409, chart 100, web 228;
-  - gateway 570 (plus 77 that need the live internet);
+  - gateway 571 (plus 77 that need the live internet);
   - browser 249 (13 visual, 5 performance among them);
   - lint and typecheck clean.
 - **Known flaky tests:** Bitstamp's "polls the live candle every 30 s" sometimes fails under load and passes on a rerun; in the cloud, so does the gestures test's 1 px flick.
@@ -283,7 +289,7 @@ The full list is SPEC §11; these are the ones that matter most.
 
 ## 9. Next steps, in order
 
-**1. Price alerts' pull request** (§2g), once the user says YES to commit, and again to push and open it; the user merges it on GitHub. Pull request #6 (steps 1 to 4 of Pine for any script) was merged on 9 November.
+**1. The gateway's own address, its pull request** (§2h); the user merges it on GitHub. Price alerts (§2g) were merged on 10 November as pull request #7, and steps 1 to 4 of Pine for any script on 9 November as #6.
 
 **2. On the Mac, after pulling `main`** (none of this can be done in the cloud):
 1. `pnpm install` (P1 added `monaco-editor` and `packages/pine`), then restart `pnpm dev`: the gateway and the web app are on protocol v12.

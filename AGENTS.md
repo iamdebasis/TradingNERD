@@ -149,7 +149,7 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 | Command | What it does |
 |---|---|
 | `pnpm install` | Installs the dependencies (pnpm workspace; Node 26, see `.nvmrc`) |
-| `pnpm dev` | Gateway on 127.0.0.1:5180, web app on http://127.0.0.1:5173 |
+| `pnpm dev` | Gateway on 127.0.0.1:5180 (its own address sends a browser on to the app), web app on http://127.0.0.1:5173 |
 | `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm test:e2e` | Each check on its own |
 | `pnpm format` | Biome: formats and applies safe fixes |
 | `pnpm verify` | Every check above: run it before every delivery |
@@ -190,7 +190,7 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 ## Where the work stands
 
 See [docs/HANDOVER.md](docs/HANDOVER.md). As of 9 November 2026:
-- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), M9f's checkpoint, switched off in the charts, and Pine like TradingView's for any script (pull request #6, 9 November: compatibility with older versions, drawings, strategies with the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data). `main` is at `4ccb2d1`, public. The Mac's visual baselines need renewing for the Alert and Alerts buttons (SPEC §11, item 134).
-- **Under way:** price alerts (the user's YES of 9 November): Crossing, Crossing Up, Crossing Down, Greater Than and Less Than a value on the live price, Only once or Every time, built on `claude/keen-allen-7wubfe` from `main` at `4ccb2d1` for its own pull request.
+- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), M9f's checkpoint, switched off in the charts, Pine like TradingView's for any script (pull request #6, 9 November: compatibility with older versions, drawings, strategies with the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), and price alerts (pull request #7, 10 November). `main` is at `aa2bf34`, public. The Mac's visual baselines need renewing for the Alert and Alerts buttons (SPEC §11, item 134).
+- **Under way:** the gateway's own address sending a browser on to the app (the user's YES of 10 November), on `claude/keen-allen-7wubfe` from `main` at `aa2bf34`, for its own pull request.
 - **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.
 - **Left for the Mac:** `pnpm verify`, `pnpm test:live` and the hand checks (HANDOVER §9).
