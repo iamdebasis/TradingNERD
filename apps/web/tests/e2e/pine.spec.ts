@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { RSI_PINE } from '@tradingnerd/indicators';
-import { chartState, expect, LAST_DAY, NOW, openChart, test } from './fixtures';
+import { CODE_END, chartState, expect, LAST_DAY, NOW, openChart, test } from './fixtures';
 
 /**
  * The Pine Editor (docs/SPEC.md §5.16, milestone P1): the right toolbar, a built-in's code
@@ -800,7 +800,7 @@ test.describe('typing in the editor', () => {
     // Suggestions after a namespace's dot: the engine's own ta.* functions.
     // Monaco takes keys through the browser's EditContext, on its code text box.
     await editor(page).getByRole('textbox', { name: 'Pine Script code' }).focus();
-    await page.keyboard.press('Control+End');
+    await page.keyboard.press(CODE_END);
     await page.keyboard.press('Enter');
     await page.keyboard.type('x = ta.sm');
     // Typed into the code, not the chart: letters there open symbol search (and Shift+W the
@@ -816,12 +816,13 @@ test.describe('typing in the editor', () => {
       'ta.sma(source, length)',
     );
     await page.keyboard.press('Escape');
-    // Hover help at the cursor (Ctrl+K Ctrl+I): the signature and TradingView's reference.
+    // Hover help at the cursor (Ctrl+K Ctrl+I, ⌘K ⌘I on a Mac): the signature and TradingView's
+    // reference.
     // Into "sma" of "x = ta.sma(close, ": eight characters in.
     await page.keyboard.press('Home');
     for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('Control+K');
-    await page.keyboard.press('Control+I');
+    await page.keyboard.press('ControlOrMeta+K');
+    await page.keyboard.press('ControlOrMeta+I');
     const hover = page.locator('.monaco-hover');
     await expect(hover).toContainText('ta.sma(source, length)');
     await expect(hover.getByRole('link', { name: 'Reference' })).toHaveAttribute(

@@ -176,6 +176,7 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
   - Playwright in `apps/web/tests/e2e/`, against a fake gateway (`fixtures.ts`).
   - Fakes live in `apps/gateway/test/helpers/`.
   - A regression test must fail without its fix: check that it does.
+  - Shortcuts press each platform's own keys, as the user's Mac runs the browser tests too: `ControlOrMeta` for a shortcut that is ⌘ on a Mac and Ctrl elsewhere (⌘A, ⌘K ⌘I), and `CODE_TOP` and `CODE_END` from `fixtures.ts` for the code editor's first and last line (⌘↑ and ⌘↓ on a Mac, Ctrl+Home and Ctrl+End elsewhere).
 - **Data files** are written whole or not at all (`storage/jsonFile.ts`). One that can't be read is moved aside, never overwritten silently.
 - **UI text** uses TradingView's wording. Measurements of TradingView's look are in SPEC §7, with its tokens.
 
@@ -189,8 +190,8 @@ Everything is in [docs/SECURITY.md](docs/SECURITY.md). In short:
 
 ## Where the work stands
 
-See [docs/HANDOVER.md](docs/HANDOVER.md). As of 9 November 2026:
-- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), M9f's checkpoint, switched off in the charts, Pine like TradingView's for any script (pull request #6, 9 November: compatibility with older versions, drawings, strategies with the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), and price alerts (pull request #7, 10 November). `main` is at `aa2bf34`, public. The Mac's visual baselines need renewing for the Alert and Alerts buttons (SPEC §11, item 134).
-- **Under way:** the gateway's own address sending a browser on to the app (the user's YES of 10 November), on `claude/keen-allen-7wubfe` from `main` at `aa2bf34`, for its own pull request.
+See [docs/HANDOVER.md](docs/HANDOVER.md). As of 10 November 2026:
+- **Merged on GitHub:** M0–M9e, A1, A2, A6, I1 (indicators), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest), the hand-over of 8 November (pull request #5), M9f's checkpoint, switched off in the charts, Pine like TradingView's for any script (pull request #6, 9 November: compatibility with older versions, drawings, strategies with the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), price alerts (pull request #7) and the gateway's own address sending a browser on to the app (pull request #8, both 10 November). `main` is at `de15c5f`, public.
+- **Under way:** the hand-over after the Mac's `pnpm verify` of 10 November: three browser tests fixed to press the Mac's keys, and the docs, on `claude/keen-allen-7wubfe` from `main` at `de15c5f`, for its own pull request.
 - **Under way:** M9f's download (it pauses while the app is stopped). Its accuracy test waits for it.
-- **Left for the Mac:** `pnpm verify`, `pnpm test:live` and the hand checks (HANDOVER §9).
+- **Left for the Mac:** signing git in to GitHub (`gh auth login`), renewing five visual baselines after a look (SPEC §11, item 134), then `pnpm verify`, `pnpm test:live` and the hand checks (HANDOVER §9).
