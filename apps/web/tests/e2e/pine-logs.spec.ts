@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { chartState, DAY, expect, LAST_DAY, openChart, test } from './fixtures';
+import { CODE_TOP, chartState, DAY, expect, LAST_DAY, openChart, test } from './fixtures';
 
 /**
  * Pine Logs and the Pine Editor below the chart (docs/SPEC.md §5.19; Pine docs, Debugging: Pine
@@ -206,7 +206,7 @@ test('an entry’s Scroll to bar shows its bar, and Source code its line in the 
   await expect(editor(page)).toContainText('Line 6, Col 45');
   // The cursor moved away and the code edited, the line isn't selected again: the cursor stays
   // where the edit leaves it.
-  await page.keyboard.press('ControlOrMeta+Home');
+  await page.keyboard.press(CODE_TOP);
   await expect(editor(page)).toContainText('Line 1, Col 1');
   await setCode(page, `${DEMO}\n`);
   await expect(editor(page)).toContainText(/Line (1|12), Col 1Pine/);

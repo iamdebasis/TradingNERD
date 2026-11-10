@@ -47,6 +47,16 @@ export const DAY = 86_400;
 /** Open time (UTC seconds) of today's daily bar. */
 export const LAST_DAY = Date.UTC(2026, 9, 18) / 1000;
 
+/**
+ * Shortcuts are the platform's own: the browser runs on the tests' machine, the user's Mac or a
+ * Linux cloud session. ⌘ and Ctrl alone are Playwright's `ControlOrMeta`; the code editor's
+ * first and last line are Ctrl+Home and Ctrl+End, but ⌘↑ and ⌘↓ on a Mac (Monaco's CursorTop
+ * and CursorBottom), where ⌘Home does nothing (the Mac's verify of 2026-11-10).
+ */
+export const MAC = process.platform === 'darwin';
+export const CODE_TOP = MAC ? 'Meta+ArrowUp' : 'Control+Home';
+export const CODE_END = MAC ? 'Meta+ArrowDown' : 'Control+End';
+
 /** The CoinGecko key the mock gateway accepts. */
 export const MOCK_KEY = 'CG-demo-key-3f9a';
 /** The Live Coin Watch key the mock gateway accepts. */

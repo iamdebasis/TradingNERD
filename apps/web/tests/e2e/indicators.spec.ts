@@ -115,14 +115,15 @@ test('/ opens the dialog; typing finds by name and short name; Enter adds the fi
   await expect(dialog(page)).toBeVisible();
   await page.keyboard.type('relative str');
   await expect(dialog(page).getByRole('option')).toHaveText(['Relative Strength Index']);
-  await page.keyboard.press('Control+a');
+  // Select all: ⌘A on a Mac, where Ctrl+A only goes to the start of the field.
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type('vol');
   await expect(dialog(page).getByRole('option')).toHaveText(['Volume']);
   await page.keyboard.press('Enter');
   await expect
     .poll(async () => (await indicatorsOf(page)).map((item) => item.kind))
     .toEqual(['volume']);
-  await page.keyboard.press('Control+a');
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type('macd');
   await expect(dialog(page).getByText('No indicators match your criteria')).toBeVisible();
   await page.keyboard.press('Escape');

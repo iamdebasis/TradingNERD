@@ -2,17 +2,18 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 10 November 2026 (the gateway's own address sends a browser on to the app; price alerts merged as pull request #7), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 10 November 2026 (the hand-over after the Mac's `pnpm verify`: three browser tests fixed for the Mac's keys, five visual baselines to renew on the Mac, GitHub sign-in on the Mac; the gateway's own address merged as pull request #8), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
 | | |
 |---|---|
-| Branches | `main` is at `aa2bf34` (pull request #7 (https://github.com/iamdebasis/TradingNERD/pull/7) merged on 10 November: price alerts; #6 on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
-| Merged | **Pull request #7** (https://github.com/iamdebasis/TradingNERD/pull/7), price alerts (§2g), merged on 10 November: `main` is at `aa2bf34`. **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
-| Under way | **The gateway's own address sends a browser on to the app** (the user's YES of 10 November, §2h), on `claude/keen-allen-7wubfe` from `main` at `aa2bf34`, for its own pull request |
+| Branches | `main` is at `de15c5f` (pull request #8 (https://github.com/iamdebasis/TradingNERD/pull/8) merged on 10 November: the gateway's own address; #7 the same day: price alerts; #6 on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
+| Merged | **Pull request #8** (https://github.com/iamdebasis/TradingNERD/pull/8), the gateway's own address sending a browser on to the app (§2h), merged on 10 November: `main` is at `de15c5f`. **Pull request #7** (https://github.com/iamdebasis/TradingNERD/pull/7), price alerts (§2g), merged on 10 November. **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
+| Under way | **The hand-over after the Mac's `pnpm verify`** (§2i): three browser tests fixed to press the Mac's keys, and these docs, on `claude/keen-allen-7wubfe` from `main` at `de15c5f`, for its own pull request |
+| Waiting on the Mac | Renewing five visual baselines after a look, and signing git in to GitHub so the Mac can push (§9, step 2) |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
-| Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's) and P4 (other symbols and timeframes, open interest); all merged on GitHub |
+| Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's), P4 (other symbols and timeframes, open interest), Pine for any script (compatibility with older versions, drawings, strategies and the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), price alerts and the gateway's own address; all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
 | Merged: P2 | **P2, real Pine scripts and the editor as TradingView's** (31 October to 2 November), from `main` at `4295233`, committed step by step on the user's YES: step 1 (versions and types, `212fb59`), step 3 (the built-ins on TradingView's own values, `0c80d88`), step 4 (the plotshape family, `074a0a7`), step 5 (libraries, protocol v12, `264218c`), step 6 (the script menu, Version history, help while typing, `f296709`) and step 7 (Pine Logs, Convert code to v6, Move script to bottom, the corpus's last fixes, `e90c080`). The corpus: 478 of 481 manual examples and 199 of 199 community scripts that need only P2 run (99.6%), and the manual's error examples all stop as on TradingView; 671 of 689 plots equal TradingView's (SPEC §4.17). Merged with P4 on 7 November (pull request #4). Provisional: SPEC §11, items 89 to 103 |
@@ -22,9 +23,33 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 
 What's left for the Mac, for every milestone, is one list: §9. The milestone table is SPEC §8.
 
+## 2i. The Mac's `pnpm verify` of 10 November
+
+The user ran `pnpm verify` on the Mac with price alerts and the gateway's address merged. Typecheck, lint and every unit test passed (verify runs them first). The browser tests: 236 passed, 8 failed, 5 didn't run. None of the failures was the app's.
+
+| What | Tests | Why | Now |
+|---|---|---|---|
+| Keys | 3: Indicators' "/ opens the dialog…", Pine Logs' "an entry's Scroll to bar… Source code…", the editor's "help while typing" | Written and passed in the cloud with Linux's keys. On a Mac, Ctrl+A goes to the field's start, so "vol" landed before the old text; the code editor's first line is ⌘↑ (⌘Home does nothing); hover help is ⌘K ⌘I, not Ctrl+K Ctrl+I | Fixed: each test presses its platform's keys (AGENTS.md, "Tests"; SPEC §3) |
+| Visual | 5: the chart page, a row's menu, the interval menu, the Gestures popup, the custom interval dialog | The chart page's reference is from 24 October, before the Indicators, Alert and Alerts buttons and the right toolbar's 48 px. The other four differ by 9 to 2,893 pixels with code unchanged since 26 October; the cloud's renders of all four show the same content as the Mac's references, so only the drawing of text differs (the Gestures popup now sits at x = 823.84 px under its button, which the new buttons moved) | To renew on the Mac after a look (§9, step 2; SPEC §11, item 134) |
+| Speed | 5 didn't run | The performance tests run only after the others pass | §9, step 2 |
+
+**Pushing from the Mac** failed: "Invalid username or token. Password authentication is not supported for Git operations." Git on the Mac isn't signed in to GitHub, which takes a token or the GitHub CLI since 2021; `gh auth login` once (§9). The first try also had nothing to commit, as the images hadn't been renewed yet.
+
+**Checks (cloud), 10 November:**
+
+| Check | Result |
+|---|---|
+| Typecheck and lint | Clean |
+| Unit tests | All pass: core 350, indicators 78, Pine 409, chart 100, web 228, gateway 571 (77 live ones skipped) |
+| The three fixed tests, on Linux | Pass |
+| The code editor with a Mac user agent (Monaco then takes its Mac keys) | ⌘↓ goes to the last line, ⌘↑ to Line 1, Col 1, ⌘K ⌘I opens the hover help, and ⌘Home does nothing: the Mac's failure, reproduced |
+| The browser suite without the visual and performance tests (231) | 227 pass; the 4 failures are the cloud's known pixel and font checks (§6), which pass on the Mac |
+| The Pine corpus | Unchanged: the manual's 1,034 of 1,069 examples run, the community's 809 of 854; 33 of the 34 error examples stop (manual-663 runs as v5, as before) |
+| UI review: the five visual scenes rendered in the cloud beside the Mac's references | The four element shots hold the same content (labels, values, colors, stars, buttons); the chart page differs by the new buttons and the right toolbar |
+
 ## 2h. The gateway's own address (10 November)
 
-Opening http://127.0.0.1:5180 showed `{"message":"Route GET:/ not found",…}` (the user's screenshot): 5180 is the gateway, which only serves the app's data; the app is on 5173. Nothing was broken, but the address was a dead end. Now the gateway's own address sends the browser on to the app with a temporary redirect, keeping the chart in the query (`http://127.0.0.1:5180/?symbol=BINANCE:BTCUSDT&interval=60` opens the app on that chart). The Host and Origin checks still run first, so other websites and DNS rebinding are refused as before (SPEC §3 and §6.9, 10 November; SECURITY.md).
+Merged on 10 November as pull request #8. Opening http://127.0.0.1:5180 showed `{"message":"Route GET:/ not found",…}` (the user's screenshot): 5180 is the gateway, which only serves the app's data; the app is on 5173. Nothing was broken, but the address was a dead end. Now the gateway's own address sends the browser on to the app with a temporary redirect, keeping the chart in the query (`http://127.0.0.1:5180/?symbol=BINANCE:BTCUSDT&interval=60` opens the app on that chart). The Host and Origin checks still run first, so other websites and DNS rebinding are refused as before (SPEC §3 and §6.9, 10 November; SECURITY.md).
 
 **Checks (cloud):** the gateway's `server.test.ts` (50) passes, and its new test fails without the route; a gateway of our own on port 5191 (a scratch data folder, no keys) answered `302` to `http://127.0.0.1:5173/` and refused a foreign Host, and a real browser opened on its address landed on the app with the asked-for chart.
 
@@ -279,25 +304,39 @@ The full list is SPEC §11; these are the ones that matter most.
   - TradingView-style self-widening watchlist columns (item 53);
   - a separate data folder for the browser tests' own gateway (item 57);
   - M7c stock logos.
-- **GitHub's merge commits:** merging on GitHub made `9324baa` (pull request #1), `6c403cb` (#2), `4295233` (#3) and `684091e` (#4), with GitHub as committer and +0530, the time zone the 26 October rewrite took out. They're public on `main`, so the identity check (AGENTS.md, "Git") prints a second line, which no push of ours adds. How merges should go is the user's call, from the options given on 26 October: fast-forward `main` from the Mac with a bypass of the ruleset for the user alone, accept GitHub's commits in the docs, or try merging from a browser set to UTC (GitHub doesn't document which time zone it stamps).
+- **GitHub's merge commits:** merging on GitHub made `9324baa` (pull request #1), `6c403cb` (#2), `4295233` (#3), `684091e` (#4) and every merge since (#5 to #8, `de15c5f` the latest), with GitHub as committer and +0530, the time zone the 26 October rewrite took out. They're public on `main`, so the identity check (AGENTS.md, "Git") prints a second line, which no push of ours adds. How merges should go is the user's call, from the options given on 26 October: fast-forward `main` from the Mac with a bypass of the ruleset for the user alone, accept GitHub's commits in the docs, or try merging from a browser set to UTC (GitHub doesn't document which time zone it stamps).
 - **Free limits that can change:** CoinGecko's 10,000 calls a month, Live Coin Watch's 10,000 requests a day. CoinDesk reportedly ended its free plan in 2026.
 - **Indicators (I1):** every look not measured from a screenshot is provisional (SPEC §11, items 62–63 and 70); TradingView's tick volume for TOTAL isn't ours (item 68); the sentence-case title waits on the user (item 73). RSI's Timeframe came with P4 (item 71), the Source code button with P1 (item 72).
 - **Pine (P1, P2):** the editor's look is provisional until the screenshots in SPEC §11, item 74; the built-in RSI's smoothed MA waits on the user (item 76); P2's provisional looks are items 89 to 103.
 - **Requests and open interest (P4):** open interest's units and history depth wait on the user's word (§3; SPEC §11, items 113 and 115); it isn't listed in Symbol Search yet (item 111); the ring's and the symbol field's look wait on a screenshot (item 107); the top bar's pill cuts names as long as `BTCUSDT.P_OI` (item 118).
+- **The Mac's visual baselines:** five to renew after a look (§2i; SPEC §11, item 134). Until then `pnpm verify` fails on them, and the five performance tests, which run after the others, don't run.
+- **Pushing from the Mac:** git there isn't signed in to GitHub (10 November: "Password authentication is not supported for Git operations"). `gh auth login` once fixes it (§9).
 - **Price alerts:** whether Greater Than and Less Than trigger at once when the price is already past the value, and how often Every time triggers, wait on a check against TradingView (SPEC §11, item 135); the dialog's look waits on a screenshot.
 - **Step 4 (alerts, non-standard data):** alerts run only while the app is open and live in this browser (SPEC §11, item 133); the non-standard bars' undocumented choices (item 130); a strategy's last bar of a session closes when the next opens (item 131); the alert UI and its defaults wait on screenshots (item 133, SPEC §7.7).
 
 ## 9. Next steps, in order
 
-**1. The gateway's own address, its pull request** (§2h); the user merges it on GitHub. Price alerts (§2g) were merged on 10 November as pull request #7, and steps 1 to 4 of Pine for any script on 9 November as #6.
+**1. This hand-over's pull request** (§2i: the three tests' keys and these docs); the user merges it on GitHub. The gateway's own address (§2h) was merged on 10 November as pull request #8, price alerts (§2g) as #7, and steps 1 to 4 of Pine for any script on 9 November as #6.
 
-**2. On the Mac, after pulling `main`** (none of this can be done in the cloud):
-1. `pnpm install` (P1 added `monaco-editor` and `packages/pine`), then restart `pnpm dev`: the gateway and the web app are on protocol v12.
-2. `pnpm verify`, the browser tests included. The chart page's full-page baseline (`chart-page.png`) changes on purpose: the Indicators button (I1), the right toolbar (P1, 48 px wider), and now the top bar's Alert button and the right toolbar's Alerts button (step 4). Look at it, then renew it with `pnpm exec playwright test visual --update-snapshots` (in `apps/web`). Element shots of the top bar or the right toolbar change for the same reason; any other that changes, look at why before renewing it.
-3. The performance budgets with Volume and RSI: `pnpm exec playwright test perf --no-deps` (in `apps/web`).
-4. `pnpm test:live`: Binance's futures APIs, Bybit and the spot exchanges, which the cloud can't reach.
-5. A read-only check against the running app (AGENTS.md): the user's OI script on BTCUSDT 1h, its values against TradingView's at a few hours. The first daily load of `BINANCE:BTCUSDTPERP_OI` waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
-6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d); a strategy's List of Trades and Performance Summary beside TradingView's Strategy Tester on the same symbol and timeframe (§2e); an alert on a script with `alert()` and one with `alertcondition()`, created on both, triggering on the same live bars with the same messages; a Crossing Up price alert just above the live price on both, triggering together, and a Greater Than one made below the price, to see whether TradingView's triggers at once (SPEC §11, item 135); a `request.security(ticker.renko(…))` plot (and Kagi, Line Break, P&F) beside TradingView's (§2f).
+**2. On the Mac, after merging it and pulling `main`** (none of this can be done in the cloud):
+1. Restart `pnpm dev`. There are no new dependencies since P1; run `pnpm install` first only if it hasn't run since then.
+2. Sign git in to GitHub, once, so the Mac can push: `gh auth login` (GitHub.com → HTTPS → Yes, authenticate Git → Login with a web browser). If `gh` is missing: `brew install gh`, or https://cli.github.com.
+3. `pnpm verify`. Everything should pass but the five visual tests (and the five performance tests, which run only after the others). Then look at each `-diff.png` under `apps/web/test-results/visual-…/` (`open apps/web/test-results/visual-*/*-diff.png`), where changed pixels are red: the chart page shows the new buttons and the wider window; the other four should show red only along text and edges. Anything else red: stop, and send that image to the AI.
+4. Renew them and check: `cd apps/web && pnpm exec playwright test visual --update-snapshots && cd ../..`, then `pnpm verify` again, which should pass in full.
+5. Commit the five renewed images on a branch, check the identity, push, and open a pull request:
+   ```
+   git checkout -b claude/visual-baselines
+   git add apps/web/tests/e2e/visual.spec.ts-snapshots
+   TZ=UTC git commit -m "Visual baselines renewed on the Mac: the new buttons, the right toolbar, the Mac's text drawing"
+   git log --all --format='%an <%ae> %ad|%cn <%ce> %cd' --date=format:%z | sort -u
+   git push -u origin claude/visual-baselines
+   gh pr create --fill --base main
+   ```
+   The identity check should print only Debasis with +0000, besides GitHub's own merge commits (+0530, §8).
+6. The performance budgets with Volume and RSI, if step 3 didn't run them: `pnpm exec playwright test perf --no-deps` (in `apps/web`).
+7. `pnpm test:live`: Binance's futures APIs, Bybit and the spot exchanges, which the cloud can't reach.
+8. A read-only check against the running app (AGENTS.md): http://127.0.0.1:5180 opens the app (§2h); the user's OI script on BTCUSDT 1h, its values against TradingView's at a few hours. The first daily load of `BINANCE:BTCUSDTPERP_OI` waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
+9. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d); a strategy's List of Trades and Performance Summary beside TradingView's Strategy Tester on the same symbol and timeframe (§2e); an alert on a script with `alert()` and one with `alertcondition()`, created on both, triggering on the same live bars with the same messages; a Crossing Up price alert just above the live price on both, triggering together, and a Greater Than one made below the price, to see whether TradingView's triggers at once (SPEC §11, item 135); a `request.security(ticker.renko(…))` plot (and Kagi, Line Break, P&F) beside TradingView's (§2f).
 
 **3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123); TradingView's Strategy Tester and a strategy's trade markers in the dark theme (item 128); the Create Alert dialog on a script and on a price, the alert manager with an alert and its log, and an alert's pop-up (items 133 and 135); a Renko, Kagi, Line Break and P&F request plotted on a chart, with the bars' dates (item 130).
 
