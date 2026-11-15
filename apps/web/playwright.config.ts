@@ -47,6 +47,19 @@ const chromium: Project['use'] = {
   launchOptions: { args: ['--force-device-scale-factor=2'] },
 };
 
+/**
+ * The timing budgets are for the browser as you use it, which draws on the GPU. Headless Chromium
+ * draws in software unless told otherwise (`--enable-gpu`, Chromium's "Using GPU Hardware in
+ * Headless Chrome"), and there RSI's line alone, zoomed out to 2,800 bars, takes longer to draw
+ * than a frame: on the Mac on 2026-11-10, a frame every 33.2 ms headless and every 8.3 ms in a
+ * window on the GPU (docs/SPEC.md §5.6). The screenshot tests keep drawing in software, so their
+ * pixels don't change; where there is no GPU (the cloud), Chromium draws in software anyway.
+ */
+const perfChromium: Project['use'] = {
+  ...chromium,
+  launchOptions: { args: ['--force-device-scale-factor=2', '--enable-gpu'] },
+};
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -59,8 +72,15 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: chromium, testIgnore: /perf\.spec\.ts$/ },
-    // Timing budgets run alone, after everything else, so parallel tests can't skew them.
-    { name: 'perf', use: chromium, testMatch: /perf\.spec\.ts$/, dependencies: ['chromium'] },
+    // Timing budgets run after everything else and one at a time, so neither other tests nor each
+    // other can skew them (five at once in windows on 2026-11-10, a first switch took 152 ms).
+    {
+      name: 'perf',
+      use: perfChromium,
+      testMatch: /perf\.spec\.ts$/,
+      dependencies: ['chromium'],
+      workers: 1,
+    },
   ],
   webServer: [
     {
