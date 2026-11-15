@@ -216,3 +216,25 @@ export function paneShares(factors: readonly number[]): number[] {
   if (!(price !== undefined && price > 0)) return factors.slice(1).map(() => NEW_PANE_STRETCH);
   return factors.slice(1).map((factor) => factor / price);
 }
+
+/**
+ * Whether a script, or a built-in on another timeframe, runs again for its requests' data
+ * (IndicatorLayer.refreshRequests): not while something it asks for is still missing, as it draws
+ * nothing then; at once when all of it is in at last; otherwise only once its contexts have
+ * stopped paging back and one of them changed. A history load then runs it once or twice, not
+ * after every page: page by page, the tab froze for seconds (measured 2026-11-15).
+ *
+ * `now` and `seen` are the contexts' data as the feed has them now and as its last run read
+ * them, by its requested keys (null: still missing).
+ */
+export function rerunsForRequests(
+  waiting: boolean,
+  now: readonly unknown[],
+  seen: readonly unknown[],
+  settling: boolean,
+): boolean {
+  if (now.some((data) => data === null)) return false;
+  if (waiting) return true;
+  if (settling) return false;
+  return now.length !== seen.length || now.some((data, i) => data !== seen[i]);
+}

@@ -128,6 +128,11 @@ export interface ChartSessionOptions {
 export const INITIAL_BARS = 1_000;
 export const PAGE_BARS = 1_000;
 export const RESYNC_BARS = 1_000;
+/**
+ * The most one scroll-back page asks for: the gateway's most (MAX_COUNT_BACK). A chart short of
+ * more than a page (a script's warm-up) gets it in one, so scripts run again once, not per page.
+ */
+export const MOST_PAGE_BARS = 5_000;
 /** After a failed page load, wait this long before trying again. */
 export const HISTORY_RETRY_MS = 2_000;
 
@@ -223,8 +228,11 @@ export class ChartSession {
     }
   }
 
-  /** Loads the page of history before the oldest bar on the chart, unless one is in flight. */
-  async loadOlder(): Promise<void> {
+  /**
+   * Loads the page of history before the oldest bar on the chart, unless one is in flight: the
+   * `short` bars the chart lacks, at least a PAGE_BARS page and at most MOST_PAGE_BARS.
+   */
+  async loadOlder(short = PAGE_BARS): Promise<void> {
     const { chart, api } = this.options;
     const first = chart.firstBarTime();
     if (this.disposed || !this.loaded || this.loadingOlder || !this.hasMore || first === null) {
@@ -239,7 +247,7 @@ export class ChartSession {
         symbolId,
         this.options.resolution,
         first,
-        PAGE_BARS,
+        Math.min(MOST_PAGE_BARS, Math.max(PAGE_BARS, Math.ceil(short || 0))),
         this.abort.signal,
         this.hours,
       );

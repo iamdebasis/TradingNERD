@@ -46,8 +46,37 @@ export interface RequestKey {
   readonly adjustment?: 'none' | 'dividends';
 }
 
-export const requestKeyText = (key: RequestKey): string =>
-  `${key.symbol}@${key.timeframe}${key.session ? ':extended' : ''}${key.adjustment ? `:${key.adjustment}` : ''}`;
+/** Each key's text, written once per key object: requests ask for theirs on every bar. */
+const keyTexts = new WeakMap<RequestKey, string>();
+
+export const requestKeyText = (key: RequestKey): string => {
+  let text = keyTexts.get(key);
+  if (text === undefined) {
+    text = `${key.symbol}@${key.timeframe}${key.session ? ':extended' : ''}${key.adjustment ? `:${key.adjustment}` : ''}`;
+    keyTexts.set(key, text);
+  }
+  return text;
+};
+
+/** Timeframe texts read, at most this many kept (a script reads the same few on every bar). */
+const RESOLUTIONS_KEPT = 256;
+const resolutions = new Map<string, Resolution | null>();
+
+/**
+ * A timeframe text's resolution, read once per text: requests read theirs on every bar (40% of
+ * a request-heavy script's time went to reading texts again, measured 2026-11-15). Frozen, as
+ * every caller shares it.
+ */
+export function resolutionOf(text: string): Resolution | null {
+  let resolution = resolutions.get(text);
+  if (resolution === undefined) {
+    const parsed = parseResolution(text);
+    resolution = parsed ? Object.freeze(parsed) : null;
+    if (resolutions.size >= RESOLUTIONS_KEPT) resolutions.clear();
+    resolutions.set(text, resolution);
+  }
+  return resolution;
+}
 
 /** A context's bars, as the app has them. */
 export interface ContextData {
@@ -89,6 +118,11 @@ export interface RequestFeed {
    * request.currency_rate() example does); null when there's no way. Absent: none convert.
    */
   rates?(from: string, to: string): readonly CurrencyLeg[] | null;
+  /**
+   * Whether a context's history is still arriving: its first page loading, or older pages still
+   * to come for the chart. Scripts run again once it's in, not after every page. Absent: never.
+   */
+  settling?(key: RequestKey): boolean;
 }
 
 /** One step of a currency conversion: a pair's daily close, or its inverse. */
@@ -312,14 +346,14 @@ function spanOf(resolution: Resolution): number {
 
 /** A timeframe in TradingView's notation written the standard way ("D" → "1D"), or null. */
 export function canonicalTimeframe(text: string): string | null {
-  const resolution = parseResolution(text);
+  const resolution = resolutionOf(text);
   return resolution ? formatResolution(resolution) : null;
 }
 
 /** Whether bars of `a` are shorter than bars of `b` (two timeframes in TradingView's notation). */
 export function isLower(a: string, b: string): boolean {
-  const ra = parseResolution(a);
-  const rb = parseResolution(b);
+  const ra = resolutionOf(a);
+  const rb = resolutionOf(b);
   return ra !== null && rb !== null && spanOf(ra) < spanOf(rb);
 }
 
@@ -329,7 +363,7 @@ export function timesOf(
   symbol: ScriptSymbol,
   timeframe: string,
 ): { opens: Float64Array; closes: Float64Array } {
-  const resolution = parseResolution(timeframe) ?? { count: 1, unit: 'day' };
+  const resolution = resolutionOf(timeframe) ?? { count: 1, unit: 'day' };
   const opens = new Float64Array(bars.length);
   for (let i = 0; i < bars.length; i++) opens[i] = openOf(bars[i] as Bar);
   return { opens, closes: closesOf(bars, symbol, resolution) };
@@ -600,6 +634,21 @@ function project(captured: readonly Value[], length: number, k: number): Float64
  * Every context one load of a script uses, shared by its runs (the script's own and the warm-up
  * checks', and requests inside requests): each context runs once however many runs read it.
  */
+/** A request call's texts and timeframe, as ContextStore.run works them out (asked()). */
+interface SiteRequest {
+  readonly key: RequestKey;
+  readonly type: string | null;
+  readonly inputs: ChartTypeInputs | null;
+  readonly currency: string;
+  readonly gaps: boolean;
+  readonly lookahead: boolean;
+  readonly calcBars: number | null;
+  readonly text: string;
+  readonly resolution: Resolution | null;
+  readonly call: string;
+  readonly id: string;
+}
+
 export class ContextStore {
   readonly feed: RequestFeed;
   readonly compile: (plan: ContextPlan) => CompiledProgram;
@@ -616,6 +665,8 @@ export class ContextStore {
   private readonly runs = new Map<string, ContextRun>();
   /** Each unique request: Pine's limit counts them. */
   private readonly unique = new Set<string>();
+  /** Each call site's last request, worked out: reused while the call asks for the same. */
+  private readonly sites = new WeakMap<RequestSite, SiteRequest>();
 
   constructor(
     feed: RequestFeed,
@@ -657,12 +708,9 @@ export class ContextStore {
     inputs: ChartTypeInputs | null = null,
   ): ContextRun | 'missing' | 'invalid' | 'no rate' {
     const currency = (options.currency ?? '').toUpperCase();
-    const made = type ? `#${type}${inputs ? JSON.stringify(sortedInputs(inputs)) : ''}` : '';
-    const text = `${requestKeyText(key)}${made}${currency ? `$${currency}` : ''}`;
+    const { text, resolution, call, id } = this.asked(site, key, options, type, inputs, currency);
     this.used.set(text, key);
-    const resolution = parseResolution(key.timeframe);
     if (!resolution) return 'invalid';
-    const call = `${site.shared ?? site.id}|${text}|${options.gaps}|${options.lookahead}|${options.calcBars}`;
     if (!this.unique.has(call)) {
       this.unique.add(call);
       if (this.unique.size > MAX_REQUESTS) {
@@ -688,7 +736,6 @@ export class ContextStore {
     }
     if (type === 'heikinashi') data = this.heikinAshi(text, data);
     else if (type !== null) data = this.nonStandard(text, data, type, inputs ?? {});
-    const id = `${site.shared ?? site.id}|${text}|${options.calcBars}`;
     let run = this.runs.get(id);
     if (!run) {
       const warmup = type === 'heikinashi' ? HEIKIN_ASHI_WARMUP : 0;
@@ -697,6 +744,51 @@ export class ContextStore {
     }
     run.ensure(data);
     return run;
+  }
+
+  /**
+   * A call's texts and timeframe: worked out when the call first asks, and again only when what
+   * it asks changes. A call asks on every bar, nearly always the same.
+   */
+  private asked(
+    site: RequestSite,
+    key: RequestKey,
+    options: SecurityOptions,
+    type: string | null,
+    inputs: ChartTypeInputs | null,
+    currency: string,
+  ): SiteRequest {
+    const last = this.sites.get(site);
+    if (
+      last &&
+      last.key === key &&
+      last.type === type &&
+      last.inputs === inputs &&
+      last.currency === currency &&
+      last.gaps === options.gaps &&
+      last.lookahead === options.lookahead &&
+      last.calcBars === options.calcBars
+    ) {
+      return last;
+    }
+    const made = type ? `#${type}${inputs ? JSON.stringify(sortedInputs(inputs)) : ''}` : '';
+    const text = `${requestKeyText(key)}${made}${currency ? `$${currency}` : ''}`;
+    const owner = site.shared ?? site.id;
+    const next: SiteRequest = {
+      key,
+      type,
+      inputs,
+      currency,
+      gaps: options.gaps,
+      lookahead: options.lookahead,
+      calcBars: options.calcBars,
+      text,
+      resolution: resolutionOf(key.timeframe),
+      call: `${owner}|${text}|${options.gaps}|${options.lookahead}|${options.calcBars}`,
+      id: `${owner}|${text}|${options.calcBars}`,
+    };
+    this.sites.set(site, next);
+    return next;
   }
 
   /**
@@ -859,6 +951,44 @@ export class ContextStore {
  * A runtime's view of the store: the request calls of one run (the script's own, a check's, or a
  * context's) ask it for their values on the bar being run.
  */
+/** A request's context, its non-standard type and that type's inputs (RequestBroker.key()). */
+export interface Asking {
+  readonly key: RequestKey;
+  readonly type: string | null;
+  readonly inputs: ChartTypeInputs | null;
+}
+
+/** Contexts a broker keeps worked out, at most: a script asks for few, a dynamic one for more. */
+const KEYS_KEPT = 256;
+
+/**
+ * The context a request asks for: "" and syminfo.tickerid are the run's own symbol and
+ * timeframe, with its hours; a ticker id's settings (ticker.new, ticker.modify) its hours,
+ * adjustment and type. Frozen, as a broker hands the same one to every bar's call.
+ */
+function askingFor(symbol: string, timeframe: string, own: ScriptSymbol): Asking | null {
+  const id = parseTickerId(symbol);
+  const sym = id.symbol.trim().toUpperCase() || own.tickerid.toUpperCase();
+  const tf = timeframe.trim() || own.timeframe;
+  const canonical = canonicalTimeframe(tf);
+  if (!canonical) return null;
+  const inherits = sym === own.tickerid.toUpperCase();
+  const session = id.session ?? (inherits ? own.session : undefined);
+  const adjustment =
+    id.adjustment === 'none' || id.adjustment === 'dividends' ? id.adjustment : undefined;
+  const inputs = id.type && id.type !== 'heikinashi' ? (id.inputs ?? {}) : null;
+  return Object.freeze({
+    key: Object.freeze({
+      symbol: sym,
+      timeframe: canonical,
+      ...(session === 'extended' ? { session: 'extended' as const } : {}),
+      ...(adjustment ? { adjustment } : {}),
+    }),
+    type: id.type ?? null,
+    inputs: inputs ? Object.freeze(inputs) : null,
+  });
+}
+
 export class RequestBroker {
   private readonly store: ContextStore;
   /**
@@ -868,6 +998,15 @@ export class RequestBroker {
   unsettledUntil = -1;
   private chartResolution: Resolution | null = null;
   private chartTimeframe = '';
+  /**
+   * Each symbol text's contexts, by timeframe text, for the run's own symbol (`keysFor`): a call
+   * reads its texts on every bar, nearly always the same ones (key()).
+   */
+  private readonly keys = new Map<string, Map<string, Asking | null>>();
+  private keysFor: ScriptSymbol | null = null;
+  private keysKept = 0;
+  /** Each call site's sealed() text for its last key. */
+  private readonly sealedTexts = new WeakMap<RequestSite, { key: RequestKey; text: string }>();
 
   constructor(store: ContextStore) {
     this.store = store;
@@ -926,7 +1065,7 @@ export class RequestBroker {
     const { key, type, inputs } = asking;
     this.checkType(site, type, inputs);
     this.sealed(site, key, rt);
-    const resolution = parseResolution(key.timeframe);
+    const resolution = resolutionOf(key.timeframe);
     if (resolution && spanOf(resolution) > spanOf(this.resolution(rt))) {
       if (options.ignoreInvalidTimeframe) return requestNa(site.base, site.items);
       throw new PineRuntimeError(
@@ -962,7 +1101,12 @@ export class RequestBroker {
 
   /** "scripts must request all required datasets while executing on historical bars". */
   private sealed(site: RequestSite, key: RequestKey, rt: Runtime): void {
-    const asked = `${site.shared ?? site.id}|${requestKeyText(key)}`;
+    let sealed = this.sealedTexts.get(site);
+    if (!sealed || sealed.key !== key) {
+      sealed = { key, text: `${site.shared ?? site.id}|${requestKeyText(key)}` };
+      this.sealedTexts.set(site, sealed);
+    }
+    const asked = sealed.text;
     if (rt.index < rt.realtimeFrom) this.store.history.add(asked);
     else if (rt.realtimeFrom > 0 && !this.store.history.has(asked)) {
       throw new PineRuntimeError(
@@ -1001,34 +1145,30 @@ export class RequestBroker {
   }
 
   /**
-   * The context asked for: "" and syminfo.tickerid are this run's own symbol and timeframe, with
-   * its hours; a ticker id's settings (ticker.new, ticker.modify) its hours, adjustment and type.
+   * The context a symbol and timeframe text ask for (askingFor()), worked out once per pair of
+   * texts for the run's own symbol: a call reads its texts on every bar, nearly always the same.
    */
-  key(
-    symbol: string,
-    timeframe: string,
-    rt: Runtime,
-  ): { key: RequestKey; type: string | null; inputs: ChartTypeInputs | null } | null {
+  key(symbol: string, timeframe: string, rt: Runtime): Asking | null {
     const own = rt.symbol;
-    const id = parseTickerId(symbol ?? '');
-    const sym = id.symbol.trim().toUpperCase() || own.tickerid.toUpperCase();
-    const tf = (timeframe ?? '').trim() || own.timeframe;
-    const canonical = canonicalTimeframe(tf);
-    if (!canonical) return null;
-    const inherits = sym === own.tickerid.toUpperCase();
-    const session = id.session ?? (inherits ? own.session : undefined);
-    const adjustment =
-      id.adjustment === 'none' || id.adjustment === 'dividends' ? id.adjustment : undefined;
-    return {
-      key: {
-        symbol: sym,
-        timeframe: canonical,
-        ...(session === 'extended' ? { session: 'extended' as const } : {}),
-        ...(adjustment ? { adjustment } : {}),
-      },
-      type: id.type ?? null,
-      inputs: id.type && id.type !== 'heikinashi' ? (id.inputs ?? {}) : null,
-    };
+    if (own !== this.keysFor || this.keysKept >= KEYS_KEPT) {
+      this.keys.clear();
+      this.keysFor = own;
+      this.keysKept = 0;
+    }
+    const symbolText = symbol ?? '';
+    const timeframeText = timeframe ?? '';
+    let byTimeframe = this.keys.get(symbolText);
+    if (!byTimeframe) {
+      byTimeframe = new Map();
+      this.keys.set(symbolText, byTimeframe);
+    }
+    let asking = byTimeframe.get(timeframeText);
+    if (asking === undefined) {
+      asking = askingFor(symbolText, timeframeText, own);
+      byTimeframe.set(timeframeText, asking);
+      this.keysKept++;
+    }
+    return asking;
   }
 
   /** A non-standard type's settings that can't make bars stop the script, as a bad argument does. */
@@ -1043,7 +1183,7 @@ export class RequestBroker {
       return this.chartResolution;
     }
     this.chartTimeframe = rt.symbol.timeframe;
-    this.chartResolution = parseResolution(rt.symbol.timeframe) ?? { count: 1, unit: 'day' };
+    this.chartResolution = resolutionOf(rt.symbol.timeframe) ?? { count: 1, unit: 'day' };
     return this.chartResolution;
   }
 

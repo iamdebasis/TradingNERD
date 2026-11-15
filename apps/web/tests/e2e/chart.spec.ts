@@ -172,6 +172,26 @@ test('scrolling back loads older history, page by page, until the listing', asyn
   expect((await chartState(page)).firstBarTime).toBe(market.bars[0]?.time);
 });
 
+test('with a script on the chart, scrolling back asks for the most bars a page holds', async ({
+  page,
+  market,
+}) => {
+  // Each page of history runs the chart's scripts again over every bar: fewer, bigger pages.
+  await page.addInitScript(() => {
+    const script = { source: '//@version=6\nindicator("Close")\nplot(close)', scriptId: null };
+    const list = [{ id: 'script-1', kind: 'script', hidden: false, settings: {}, script }];
+    localStorage.setItem(
+      'tn.chart.indicators',
+      JSON.stringify({ version: 2, list, folded: false }),
+    );
+  });
+  await openChart(page);
+  await chartCall(page, 'scrollBars', -900);
+  await expect.poll(async () => (await chartState(page)).barCount).toBe(2_500);
+  expect(market.barRequests[1]?.get('countBack')).toBe('5000');
+  expect(market.barRequests).toHaveLength(2); // the rest of history in one page
+});
+
 test('after the connection drops, it reconnects and refills recent bars', async ({
   page,
   market,

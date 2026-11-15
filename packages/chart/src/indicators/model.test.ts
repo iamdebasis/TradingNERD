@@ -12,6 +12,7 @@ import {
   paneShares,
   plotShown,
   plotStart,
+  rerunsForRequests,
   stackLabels,
   withLevels,
   withOpacity,
@@ -153,5 +154,38 @@ describe('panes', () => {
   it("keeps an indicator pane's height as a share of the price pane's", () => {
     expect(paneShares([1, 0.25])).toEqual([0.25]);
     expect(paneShares([0.8, 0.4, 0.2])).toEqual([0.5, 0.25]);
+  });
+});
+
+/**
+ * A script runs again for its requests' data once a history load is in, not after every page:
+ * page by page, the tab froze for seconds (the user's VuManChu B, measured 2026-11-15).
+ */
+describe("a script's runs as its requests' data arrives", () => {
+  const hours = { bars: 1 };
+  const days = { bars: 2 };
+  const moreDays = { bars: 3 };
+
+  it('waits while something it asks for is still missing: it draws nothing yet', () => {
+    expect(rerunsForRequests(true, [hours, null], [null, null], false)).toBe(false);
+    expect(rerunsForRequests(false, [hours, null], [hours, days], false)).toBe(false);
+  });
+
+  it('runs at once when everything it waited for is in, though older pages are still coming', () => {
+    expect(rerunsForRequests(true, [hours, days], [null, null], true)).toBe(true);
+  });
+
+  it('waits while a context still pages back, then runs once if one changed', () => {
+    expect(rerunsForRequests(false, [hours, moreDays], [hours, days], true)).toBe(false);
+    expect(rerunsForRequests(false, [hours, moreDays], [hours, days], false)).toBe(true);
+    expect(rerunsForRequests(false, [hours, days], [hours, days], false)).toBe(false);
+  });
+
+  it('runs when it asks for a context its last run did not', () => {
+    expect(rerunsForRequests(false, [hours, days], [hours], false)).toBe(true);
+  });
+
+  it("counts a context that doesn't exist as in: the script then shows its error", () => {
+    expect(rerunsForRequests(true, ['invalid'], [null], false)).toBe(true);
   });
 });

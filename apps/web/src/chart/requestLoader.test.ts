@@ -186,6 +186,34 @@ describe("RequestLoader: the data scripts' requests ask for (docs/SPEC.md §6.18
     expect(deeper.history).toBe(first.history + 1);
   });
 
+  it("tells while a context's history is still arriving, so scripts run once it's in", async () => {
+    const series = { 'BINANCE:ETHUSDT@1D': days(20_000) };
+    const { api } = fakeApi(series);
+    const { feed } = fakeFeed();
+    const loader = new RequestLoader({
+      api,
+      feed,
+      background: '#0F0F0F',
+      onHistory: () => {},
+      onLive: () => {},
+    });
+    const bars = series['BINANCE:ETHUSDT@1D'];
+    expect(loader.settling(ETH)).toBe(false);
+    loader.want([ETH], [ETH], { firstBarTime: (bars[19_500] as Bar).time, timeframe: '1D' });
+    // Its first page is loading.
+    expect(loader.settling(ETH)).toBe(true);
+    await settle();
+    expect(loader.settling(ETH)).toBe(false);
+    // The chart reaches further back: older pages are to come until WARMUP_BARS before it.
+    const deeper = { firstBarTime: (bars[10_000] as Bar).time, timeframe: '1D' };
+    loader.want([], [ETH], deeper);
+    await settle();
+    expect(loader.settling(ETH)).toBe(true);
+    loader.want([], [ETH], deeper);
+    await settle();
+    expect(loader.settling(ETH)).toBe(false);
+  });
+
   it('calls a symbol that doesn’t exist invalid, and tries a failed call again later', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.UTC(2026, 10, 7));

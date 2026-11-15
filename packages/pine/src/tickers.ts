@@ -161,13 +161,39 @@ const settingsOf = (values: readonly string[], from: number): Partial<TickerId> 
 const SETTINGS_PARAMS = ['session', 'adjustment', 'backadjustment', 'settlement_as_close'] as const;
 
 /** A ticker id of a non-standard type: the symbol's own settings kept, its type's replaced. */
+const typedId = (symbol: string, type: string, inputs: ChartTypeInputs | null): string => {
+  const { inputs: _old, ...id } = parseTickerId(symbol);
+  return formatTickerId({ ...id, type, ...(inputs ? { inputs } : {}) });
+};
+
+/** Ticker ids made without inputs, by type, then symbol text; at most this many a type. */
+const TYPED_IDS_KEPT = 256;
+const typedIds = new Map<string, Map<string, string>>();
+
+/**
+ * typedId(), made once per type and symbol text when there are no inputs (Heikin Ashi): a script
+ * makes the same one on every bar, for its request.security() calls to read (measured
+ * 2026-11-15: 6% of a request-heavy script's time).
+ */
 const chartTypeId = (
   symbol: string | undefined,
   type: string,
   inputs: ChartTypeInputs | null,
 ): string => {
-  const { inputs: _old, ...id } = parseTickerId(symbol ?? '');
-  return formatTickerId({ ...id, type, ...(inputs ? { inputs } : {}) });
+  const text = symbol ?? '';
+  if (inputs !== null) return typedId(text, type, inputs);
+  let bySymbol = typedIds.get(type);
+  if (!bySymbol) {
+    bySymbol = new Map();
+    typedIds.set(type, bySymbol);
+  }
+  let id = bySymbol.get(text);
+  if (id === undefined) {
+    id = typedId(text, type, null);
+    if (bySymbol.size >= TYPED_IDS_KEPT) bySymbol.clear();
+    bySymbol.set(text, id);
+  }
+  return id;
 };
 
 /**

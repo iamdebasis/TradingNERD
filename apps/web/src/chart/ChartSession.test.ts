@@ -11,6 +11,7 @@ import {
   HISTORY_RETRY_MS,
   INITIAL_BARS,
   type LegendView,
+  MOST_PAGE_BARS,
   PAGE_BARS,
 } from './ChartSession';
 import { type ChartSettings, DEFAULT_CHART_SETTINGS } from './chartSettings';
@@ -310,6 +311,23 @@ describe('ChartSession', () => {
     ]);
     await session.loadOlder(); // the exchange said there's no more
     expect(requests).toHaveLength(3);
+  });
+
+  it("asks for all the bars the chart is short of in one page, up to the gateway's most", async () => {
+    const { session, requests } = setup(history(20_000));
+    await session.start();
+    // Short of 2,750 bars (a script's warm-up): one page of them, so scripts run again once.
+    await session.loadOlder(2_750);
+    // Never under a page, never over the gateway's most; nonsense asks for a page.
+    await session.loadOlder(10);
+    await session.loadOlder(99_999);
+    await session.loadOlder(Number.NaN);
+    expect(requests.slice(1).map((request) => request.countBack)).toEqual([
+      2_750,
+      PAGE_BARS,
+      MOST_PAGE_BARS,
+      PAGE_BARS,
+    ]);
   });
 
   it('pauses paging after a failure instead of hammering the gateway', async () => {
