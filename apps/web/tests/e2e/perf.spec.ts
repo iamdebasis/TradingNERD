@@ -9,6 +9,21 @@ import { expect, openChart, test } from './fixtures';
  */
 test.use({ realClock: true });
 
+/**
+ * What the browser draws with, printed once: a GPU's name, or SwiftShader when it draws in
+ * software, where the drawing budgets don't hold (playwright.config.ts, the perf project).
+ */
+test.beforeAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  const renderer = await page.evaluate(() => {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const info = gl?.getExtension('WEBGL_debug_renderer_info');
+    return gl && info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : 'no WebGL';
+  });
+  console.log(`Renderer: ${renderer}`);
+  await page.close();
+});
+
 const row = (page: Page, ticker: string) =>
   page
     .getByRole('complementary', { name: 'Watchlist' })
