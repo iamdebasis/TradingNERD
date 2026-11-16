@@ -50,9 +50,11 @@ export {
 } from './drawings.ts';
 export { KEYWORDS, versionIn } from './lexer.ts';
 export {
+  type AlertResults,
   type FromWorker,
   RemoteRun,
   type RemoteRunOptions,
+  type ResultFor,
   type RunResults,
   ScriptHost,
   type ScriptHostOptions,

@@ -643,6 +643,14 @@ export class ScriptRun {
     return taken;
   }
 
+  /**
+   * Each alertcondition()'s condition by bar, by its place (1, 0, or NaN where it hasn't run): what
+   * an alert's worker sends back (remote.ts). The arrays run past the last bar, as `values` do.
+   */
+  get conditions(): readonly Float64Array[] {
+    return this.main?.outputs.conditions ?? [];
+  }
+
   /** An alertcondition()'s condition on bar `bar` (by its place); null where it hasn't run. */
   conditionOn(index: number, bar: number): boolean | null {
     const value = this.main?.outputs.conditions[index]?.[bar];

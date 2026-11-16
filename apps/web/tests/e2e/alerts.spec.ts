@@ -272,3 +272,91 @@ test('a Greater Than price alert, Every time, triggers again a minute on, and ed
   await edit.getByRole('button', { name: 'Save' }).click();
   await expect(row).toContainText('XRPUSDT Greater Than 1.7000');
 });
+
+test('an alert on a heavy script runs in a worker of its own: the page never waits on it, and Stop stops its worker', async ({
+  page,
+  market,
+}) => {
+  // The page's long tasks, and the alerts' script workers (named "Pine alert") made and stopped.
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __long: number[];
+      __alertWorkers: { made: number; stopped: number };
+    };
+    w.__long = [];
+    new PerformanceObserver((entries) => {
+      for (const entry of entries.getEntries()) w.__long.push(entry.duration);
+    }).observe({ type: 'longtask' });
+    w.__alertWorkers = { made: 0, stopped: 0 };
+    const Original = window.Worker;
+    window.Worker = class extends Original {
+      private readonly alert: boolean;
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        this.alert = options?.name === 'Pine alert';
+        if (this.alert) w.__alertWorkers.made++;
+      }
+      override terminate(): void {
+        if (this.alert) w.__alertWorkers.stopped++;
+        super.terminate();
+      }
+    };
+  });
+  const alertWorkers = () =>
+    page.evaluate(() => (window as unknown as { __alertWorkers: unknown }).__alertWorkers);
+  const longTasks = () =>
+    page.evaluate(() => (window as unknown as { __long: number[] }).__long.splice(0));
+  await openChart(page);
+  // Seconds of the engine's work over the alert's bars: one long task of seconds in the page.
+  await addScript(
+    page,
+    [
+      '//@version=6',
+      'indicator("Heavy")',
+      'float s = 0.0',
+      'for i = 0 to 4000',
+      '    s += math.sin(i * close)',
+      'plot(s, "Sum")',
+      'alertcondition(close > 2, "Above 2", "Heavy above 2 at {{close}}")',
+      '',
+    ].join('\n'),
+  );
+  // The chart's own copy calculates in its worker first (step 2).
+  await expect
+    .poll(async () => (await chartState(page)).indicators[0]?.calculating, { timeout: 60_000 })
+    .toBe(false);
+  await page.getByRole('banner').getByRole('button', { name: 'Alert', exact: true }).click();
+  const create = dialog(page);
+  await choose(page, 'Source', 'Heavy');
+  await expect(create.getByRole('button', { name: 'Condition' })).toHaveText('Above 2');
+  // Not choose(): "Once per bar" is also the start of "Once per bar close".
+  await create.getByRole('button', { name: 'Trigger' }).click();
+  await page
+    .getByRole('listbox', { name: 'Trigger' })
+    .getByRole('option', { name: 'Once per bar', exact: true })
+    .click();
+  await expect(create.getByRole('button', { name: 'Trigger' })).toHaveText('Once per bar');
+  await longTasks();
+  await create.getByRole('button', { name: 'Create' }).click();
+  await expect.poll(alertWorkers).toEqual({ made: 1, stopped: 0 });
+  // Live bars above 2 until its worker has run over the history and taken one: it triggers once.
+  await expect.poll(() => market.streams('bars')).toBe(2);
+  for (let i = 0; i < 60 && (await toasts(page).count()) === 0; i++) {
+    await market.sendBar(live(2.5 + i / 1000));
+    await page.waitForTimeout(1000);
+  }
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(toasts(page).first()).toContainText('Heavy above 2 at 2.5');
+  // Seconds of the engine's work, and no task of the page's of 200 ms or more meanwhile.
+  expect(Math.max(0, ...(await longTasks()))).toBeLessThan(200);
+  // Stopped from the Alerts panel, its worker stops at once.
+  await page
+    .getByRole('navigation', { name: 'Panels' })
+    .getByRole('button', { name: 'Alerts' })
+    .click();
+  const row = panel(page).getByRole('listitem').filter({ hasText: 'Heavy' });
+  await row.hover();
+  await row.getByRole('button', { name: 'Stop' }).click();
+  await expect(row).toContainText('Stopped manually');
+  await expect.poll(alertWorkers).toEqual({ made: 1, stopped: 1 });
+});

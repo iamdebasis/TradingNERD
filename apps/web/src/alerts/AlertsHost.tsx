@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toChartTheme } from '../chart/chartTheme';
 import { RequestLoader } from '../chart/requestLoader';
+import { alertScripts } from '../chart/scriptRunner';
 import { marketApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
 import { librariesStore } from '../pine/librariesStore';
@@ -20,7 +21,8 @@ const BACKGROUND = toChartTheme(darkTheme).background;
 
 /**
  * Runs the alerts while the app is open (AlertRunner: scripts on a request loader of its own on
- * the gateway, price alerts on the gateway's live bars), and shows their pop-ups. When one
+ * the gateway, each in a worker of its own; price alerts on the gateway's live bars), and shows
+ * their pop-ups. When one
  * triggers: a log entry, a pop-up and a sound as its notifications ask. Scripts that import
  * libraries compile again when the libraries change.
  */
@@ -38,6 +40,8 @@ export function AlertsHost() {
           onLive,
         }),
       compile: (source) => compileCached(source, librariesStore.compileOptions()),
+      // Each alert's copy of its script runs in a worker of its own: an alert never holds the page.
+      runner: alertScripts,
       live: gateway,
       onFire: (alert, message, time) => {
         alertStore.fire(alert, message, time);

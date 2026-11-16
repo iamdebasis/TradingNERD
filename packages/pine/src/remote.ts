@@ -1,5 +1,6 @@
 import { type Bar, libraryPath } from '@tradingnerd/core';
 import type { BarChange } from '@tradingnerd/indicators';
+import type { AlertEvent } from './alerts.ts';
 import { type DrawingSnapshot, EMPTY_DRAWINGS } from './drawings.ts';
 import type { ScriptError } from './execution.ts';
 import {
@@ -17,6 +18,7 @@ import {
   contextFromWire,
   packBars,
   packedCount,
+  shiftAlerts,
   shiftDrawings,
   shiftError,
   shiftLogs,
@@ -61,6 +63,25 @@ export interface RunResults {
   readonly logsWritten: number;
 }
 
+/**
+ * What an alert reads of its script's run (apps/web alerts, docs/SPEC.md §6.22): the alert()
+ * events since it last took them, and each alertcondition()'s condition by bar. A ScriptRun has
+ * them, and so does a RemoteRun made for an alert.
+ */
+export interface AlertResults {
+  takeAlerts(): AlertEvent[];
+  conditionOn(index: number, bar: number): boolean | null;
+}
+
+/**
+ * What a result was for, as the page sent it: a load over this many bars, the last one forming
+ * or not; or a change to the bars, with the bars from `from` to the end as they were sent (an
+ * alert's message reads the bar its run saw, though a newer tick has come since).
+ */
+export type ResultFor =
+  | { kind: 'load'; length: number; live: boolean }
+  | { kind: 'update'; change: BarChange; from: number; bars: readonly Bar[] };
+
 // ---- the messages ----
 
 /** The script to run: its code, the libraries it may import, its inputs and its symbol. */
@@ -71,6 +92,8 @@ export interface StartMessage {
   libraries: Readonly<Record<string, string>>;
   inputs: readonly Value[];
   symbol: WireSymbol;
+  /** An alert runs it: its alert() calls make events, and its alertcondition() values come back. */
+  alerts: boolean;
 }
 
 /** The contexts its requests read, as the chart's feed has them now. */
@@ -122,7 +145,12 @@ export interface ResultMessage {
   plotColors: (Float64Array | null)[];
   backgrounds: Float64Array[];
   fillColors: (Float64Array | null)[];
-  /** Per changed bar, its value in each output (plots, changing plot colors, backgrounds, changing fill colors). */
+  /** An alert's run: each alertcondition()'s condition by bar (1, 0 or NaN), whole as the values. */
+  conditions: Float64Array[];
+  /**
+   * Per changed bar, its value in each output (plots, changing plot colors, backgrounds,
+   * changing fill colors, and an alert's conditions).
+   */
   points: Float64Array;
   plotStarts: number[];
   backgroundStarts: number[];
@@ -136,6 +164,8 @@ export interface ResultMessage {
   strategy: StrategyState | null | 'same';
   /** Pine Logs: all of them afresh, or those logged since the last result. */
   logs: { fresh: boolean; entries: LogEntry[]; written: number };
+  /** An alert's run: the alert() events this load or update made, oldest first. */
+  alerts: AlertEvent[];
 }
 
 export type FromWorker =
@@ -145,17 +175,22 @@ export type FromWorker =
   /** Something stopped the worker's run other than a Pine runtime error. */
   | { kind: 'failed'; id: number; message: string };
 
-/** Each output array of a run in a fixed order: plots, changing plot colors, backgrounds, changing fill colors. */
+/**
+ * Each output array of a run in a fixed order: plots, changing plot colors, backgrounds, changing
+ * fill colors, and an alert's conditions (none for the chart's).
+ */
 function outputArrays(run: {
   values: readonly Float64Array[];
   plotColors: readonly (Float64Array | null)[];
   backgrounds: readonly Float64Array[];
   fillColors: readonly (Float64Array | null)[];
+  conditions: readonly Float64Array[];
 }): Float64Array[] {
   const out = [...run.values];
   for (const colors of run.plotColors) if (colors) out.push(colors);
   out.push(...run.backgrounds);
   for (const colors of run.fillColors) if (colors) out.push(colors);
+  out.push(...run.conditions);
   return out;
 }
 
@@ -223,6 +258,8 @@ export class ScriptHost {
   private readonly post: (message: FromWorker, transfer: ArrayBuffer[]) => void;
   /** Why the script can't run here, if its compile failed. */
   private startError: string | null = null;
+  /** An alert runs it: its events and conditions go back with each result. */
+  private alerting = false;
   private sentDrawings: DrawingSnapshot | null = null;
   private sentStrategy: StrategyState | null | undefined = undefined;
   private sentLogs = 0;
@@ -269,6 +306,8 @@ export class ScriptHost {
         symbolFromWire(message.symbol),
         this.feed,
       );
+      this.alerting = message.alerts;
+      if (this.alerting) this.run.watchAlerts();
     } catch (error) {
       this.startError = error instanceof Error ? error.message : String(error);
     }
@@ -318,7 +357,15 @@ export class ScriptHost {
     const whole = changed === 'all';
     // Copies as long as the bars: the run's own arrays run past them and go on changing.
     const cut = (array: Float64Array) => array.slice(0, length);
-    const arrays = outputArrays(run);
+    // An alert's run also sends its conditions; the chart's has no use for them.
+    const conditions = this.alerting ? run.conditions : [];
+    const arrays = outputArrays({
+      values: run.values,
+      plotColors: run.plotColors,
+      backgrounds: run.backgrounds,
+      fillColors: run.fillColors,
+      conditions,
+    });
     let points = new Float64Array(0);
     if (!whole) {
       points = new Float64Array(changed.length * arrays.length);
@@ -340,6 +387,7 @@ export class ScriptHost {
       plotColors: whole ? run.plotColors.map((colors) => colors && cut(colors)) : [],
       backgrounds: whole ? run.backgrounds.map(cut) : [],
       fillColors: whole ? run.fillColors.map((colors) => colors && cut(colors)) : [],
+      conditions: whole ? conditions.map(cut) : [],
       points,
       plotStarts: [...run.plotStarts],
       backgroundStarts: [...run.backgroundStarts],
@@ -351,6 +399,8 @@ export class ScriptHost {
       drawings: run.drawings === this.sentDrawings ? null : run.drawings,
       strategy: run.strategy === this.sentStrategy ? 'same' : run.strategy,
       logs: { fresh, entries: logged > 0 ? run.logs.slice(-logged) : [], written },
+      // A run afresh makes none: its realtime bar's calls were the earlier run's (ScriptRun).
+      alerts: this.alerting ? run.takeAlerts() : [],
     };
     this.sentDrawings = run.drawings;
     this.sentStrategy = run.strategy;
@@ -408,6 +458,8 @@ export interface RemoteRunOptions {
   feed?: RequestFeed;
   /** The code of each library the script may import, by its path. */
   libraries?: Readonly<Record<string, string>>;
+  /** An alert runs it (watchAlerts): its alert() events and alertcondition() values come back. */
+  alerts?: boolean;
 }
 
 /** Room for this many bars past the last one, so live bars rarely need new arrays (as Execution). */
@@ -434,7 +486,7 @@ interface SentContext {
  * after it. When older bars load before the chart's bars, the copy moves by them (and so does
  * each result on its way), so what it drew stays on its bars until the run over them is done.
  */
-export class RemoteRun implements RunResults {
+export class RemoteRun implements RunResults, AlertResults {
   readonly program: ScriptProgram;
   readonly inputs: readonly Value[];
   readonly symbol: ScriptSymbol;
@@ -442,6 +494,8 @@ export class RemoteRun implements RunResults {
   plotColors: (Float64Array | null)[] = [];
   backgrounds: Float64Array[] = [];
   fillColors: (Float64Array | null)[] = [];
+  /** An alert's run: each alertcondition()'s condition by bar (1, 0 or NaN); none for the chart's. */
+  conditions: Float64Array[] = [];
   plotStarts: number[] = [];
   backgroundStarts: number[] = [];
   fillStarts: number[] = [];
@@ -459,8 +513,11 @@ export class RemoteRun implements RunResults {
   length = 0;
   /** Whether its results are for the chart's bars: none before the first, or after a refill. */
   ready = false;
-  /** Called after it took in a result: 'all' when every output may have changed, else these bars. */
-  onResult: ((changed: 'all' | readonly number[]) => void) | null = null;
+  /**
+   * Called after it took in a result: 'all' when every output may have changed, else these bars;
+   * and what the result was for (none for a failure).
+   */
+  onResult: ((changed: 'all' | readonly number[], ran?: ResultFor) => void) | null = null;
   private readonly link: WorkerLink;
   private readonly feed: RequestFeed | undefined;
   private readonly keys: RequestKeys | null;
@@ -476,6 +533,10 @@ export class RemoteRun implements RunResults {
   private readonly shifts = new Map<number, number>();
   /** Results of messages sent before this one are let go: the bars they were for were replaced. */
   private keepFrom = 0;
+  /** What each load and update on its way was for, to tell with its result. */
+  private readonly sentFor = new Map<number, ResultFor>();
+  /** An alert's run: the alert() events that came, not taken yet. */
+  private events: AlertEvent[] = [];
   private readonly sent = new Map<string, SentContext>();
   private disposed = false;
 
@@ -493,6 +554,7 @@ export class RemoteRun implements RunResults {
         libraries: options.libraries ?? {},
         inputs: this.inputs,
         symbol: wireSymbol(options.symbol),
+        alerts: options.alerts === true,
       },
       [],
     );
@@ -500,6 +562,19 @@ export class RemoteRun implements RunResults {
 
   get waiting(): boolean {
     return this.missing.length > 0;
+  }
+
+  /** An alert's run: the alert() events since the last take, oldest first (ScriptRun.takeAlerts). */
+  takeAlerts(): AlertEvent[] {
+    const taken = this.events;
+    this.events = [];
+    return taken;
+  }
+
+  /** An alertcondition()'s condition on bar `bar`, by its place; null where it hasn't run. */
+  conditionOn(index: number, bar: number): boolean | null {
+    const value = this.conditions[index]?.[bar];
+    return value === undefined || Number.isNaN(value) ? null : value === 1;
   }
 
   /** Whether a load or an update hasn't been answered yet. */
@@ -539,6 +614,13 @@ export class RemoteRun implements RunResults {
     const packed = packBars(bars, from);
     const id = this.nextId++;
     this.shifts.set(id, 0);
+    // The bars as sent, copied: an alert's message reads the bar its run saw.
+    this.sentFor.set(id, {
+      kind: 'update',
+      change,
+      from,
+      bars: bars.slice(from).map((bar) => ({ ...bar })),
+    });
     this.link.post({ kind: 'update', id, change, index, from, bars: packed }, [
       packed.buffer as ArrayBuffer,
     ]);
@@ -559,6 +641,8 @@ export class RemoteRun implements RunResults {
     this.plotColors = [];
     this.backgrounds = [];
     this.fillColors = [];
+    this.conditions = [];
+    this.events = [];
     this.plotStarts = [];
     this.backgroundStarts = [];
     this.fillStarts = [];
@@ -574,6 +658,8 @@ export class RemoteRun implements RunResults {
     if (this.disposed) return;
     const shift = this.shifts.get(message.id) ?? 0;
     this.shifts.delete(message.id);
+    const sentFor = this.sentFor.get(message.id);
+    this.sentFor.delete(message.id);
     if (message.id === this.loading) this.loading = null;
     let changed: 'all' | readonly number[] | null = null;
     if (message.kind === 'resync') {
@@ -585,7 +671,15 @@ export class RemoteRun implements RunResults {
       changed = message.kind === 'result' ? this.take(message, shift) : this.fail(message.message);
     }
     if (this.loading === null && this.queued) this.sendLoad();
-    if (changed) this.onResult?.(changed);
+    if (!changed) return;
+    // What the result was for, on the bars as they are now (older ones may have loaded since).
+    const ran =
+      message.kind !== 'result' || !sentFor
+        ? undefined
+        : sentFor.kind === 'load'
+          ? { ...sentFor, length: sentFor.length + shift }
+          : { ...sentFor, from: sentFor.from + shift };
+    this.onResult?.(changed, ran);
   }
 
   /**
@@ -595,6 +689,7 @@ export class RemoteRun implements RunResults {
   crashed(message: string): void {
     if (this.disposed) return;
     this.shifts.clear();
+    this.sentFor.clear();
     this.loading = null;
     this.queued = false;
     this.onResult?.(this.fail(message));
@@ -615,6 +710,7 @@ export class RemoteRun implements RunResults {
     const id = this.nextId++;
     this.loading = id;
     this.shifts.set(id, 0);
+    this.sentFor.set(id, { kind: 'load', length: this.bars.length, live: this.live });
     this.link.post(
       { kind: 'load', id, bars: packed, fromListing: this.fromListing, live: this.live },
       [packed.buffer as ArrayBuffer],
@@ -627,9 +723,11 @@ export class RemoteRun implements RunResults {
       this.plotColors = r.plotColors.map((colors) => colors && shiftValues(colors, k));
       this.backgrounds = r.backgrounds.map((colors) => shiftValues(colors, k));
       this.fillColors = r.fillColors.map((colors) => colors && shiftValues(colors, k));
+      this.conditions = r.conditions.map((condition) => shiftValues(condition, k));
     } else {
       this.write(r.changed, r.points, k, r.length + k);
     }
+    if (r.alerts.length > 0) this.events.push(...shiftAlerts(r.alerts, k));
     this.length = r.length + k;
     this.plotStarts = shiftStarts(r.plotStarts, k);
     this.backgroundStarts = shiftStarts(r.backgroundStarts, k);
@@ -659,6 +757,7 @@ export class RemoteRun implements RunResults {
     this.plotColors = this.plotColors.map((colors) => colors && room(colors, length));
     this.backgrounds = this.backgrounds.map((colors) => room(colors, length));
     this.fillColors = this.fillColors.map((colors) => colors && room(colors, length));
+    this.conditions = this.conditions.map((condition) => room(condition, length));
     const arrays = outputArrays(this);
     changed.forEach((bar, c) => {
       arrays.forEach((array, j) => {
@@ -680,6 +779,8 @@ export class RemoteRun implements RunResults {
     this.plotColors = this.plotColors.map((colors) => colors && shiftValues(colors, k));
     this.backgrounds = this.backgrounds.map((colors) => shiftValues(colors, k));
     this.fillColors = this.fillColors.map((colors) => colors && shiftValues(colors, k));
+    this.conditions = this.conditions.map((condition) => shiftValues(condition, k));
+    this.events = shiftAlerts(this.events, k);
     if (this.ready) this.length += k;
     this.plotStarts = shiftStarts(this.plotStarts, k);
     this.backgroundStarts = shiftStarts(this.backgroundStarts, k);
