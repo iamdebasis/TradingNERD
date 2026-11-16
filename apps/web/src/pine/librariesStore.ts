@@ -36,6 +36,7 @@ export class LibrariesStore {
   private readonly listeners = new Set<() => void>();
   private readonly api: LibrariesApi;
   private byPath = new Map<string, string>();
+  private byCode: Readonly<Record<string, string>> = {};
   private options: LibraryOptions;
 
   constructor(api: LibrariesApi = librariesApi) {
@@ -57,6 +58,14 @@ export class LibrariesStore {
   /** The libraries' code and revision, for compileCached: the same object until they change. */
   compileOptions(): LibraryOptions {
     return this.options;
+  }
+
+  /**
+   * Each library's code by its path, as plain data: what a script's worker compiles with
+   * (docs/SPEC.md §6.23). The same object until they change.
+   */
+  codes(): Readonly<Record<string, string>> {
+    return this.byCode;
   }
 
   /** Loads the libraries from the gateway; without it, scripts compile without any. */
@@ -97,6 +106,7 @@ export class LibrariesStore {
       libraryPath(a).localeCompare(libraryPath(b), 'en', { sensitivity: 'base' }),
     );
     this.byPath = new Map(sorted.map((item) => [libraryPath(item), item.source]));
+    this.byCode = Object.fromEntries(this.byPath);
     const revision = ++lastRevision;
     this.options = { resolveLibrary: this.resolve, revision: String(revision) };
     this.value = { libraries: sorted, revision, error };

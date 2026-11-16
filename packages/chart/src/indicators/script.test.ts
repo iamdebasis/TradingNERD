@@ -1,12 +1,21 @@
 import type { Bar } from '@tradingnerd/core';
 import { defaultSettings, RSI, RSI_PINE, sanitizeSettings } from '@tradingnerd/indicators';
-import { compileScript, DEFAULT_SYMBOL, type ScriptProgram } from '@tradingnerd/pine';
-import { describe, expect, it } from 'vitest';
+import {
+  compileScript,
+  DEFAULT_SYMBOL,
+  type FromWorker,
+  RemoteRun,
+  ScriptHost,
+  type ScriptProgram,
+  type ToWorker,
+} from '@tradingnerd/pine';
+import { afterEach, describe, expect, it } from 'vitest';
 import { formatIndicatorValue } from './model';
 import {
   inputId,
   type ScriptContext,
   ScriptLayerRun,
+  type ScriptRunner,
   scriptDefaultInputs,
   scriptDefinition,
   scriptInputs,
@@ -320,5 +329,124 @@ bgcolor(color.red, offset = -shift)`);
     const after = scriptDefinition(p, inputs, CONTEXT, run.run.offsets);
     expect(after.plots.map((plot) => plot.look?.offset)).toEqual([13, 0]);
     expect(after.backgrounds?.map((background) => background.offset)).toEqual([-13]);
+  });
+});
+
+/** A runner whose workers are ScriptHosts over Node's MessageChannel (it copies as browsers do). */
+function channelRunner() {
+  const closed: number[] = [];
+  const runs: RemoteRun[] = [];
+  const runner: ScriptRunner = {
+    run: (options) => {
+      const { port1, port2 } = new MessageChannel();
+      const host = new ScriptHost((message, transfer) => port2.postMessage(message, transfer));
+      port2.onmessage = (event) => host.receive(event.data as ToWorker);
+      const run = new RemoteRun(
+        {
+          post: (message, transfer) => port1.postMessage(message, transfer),
+          close: () => {
+            closed.push(runs.indexOf(run));
+            port1.close();
+            port2.close();
+          },
+        },
+        options,
+      );
+      port1.onmessage = (event) => run.receive(event.data as FromWorker);
+      runs.push(run);
+      return run;
+    },
+  };
+  return { runner, runs, closed };
+}
+
+const opened: ScriptLayerRun[] = [];
+afterEach(() => {
+  for (const run of opened.splice(0)) run.dispose();
+});
+
+/** The next result a worker's run takes in, and the bars it said changed. */
+function nextResult(run: ScriptLayerRun): Promise<'all' | readonly number[]> {
+  return new Promise((resolve) => {
+    run.onResult = resolve;
+  });
+}
+
+describe('A script run in a worker of its own (docs/SPEC.md §6.23)', () => {
+  const p = script('plot(ta.sma(close, 5))\nplot(bar_index)');
+
+  it('has no results until its worker answers, then the page’s run’s', async () => {
+    const { runner } = channelRunner();
+    const run = new ScriptLayerRun(p, {}, CONTEXT, null, undefined, runner);
+    opened.push(run);
+    // Its worker starts with its first bars.
+    expect(run.remote).toBeNull();
+    expect(run.ready).toBe(false);
+    run.setListing(true);
+    const answered = nextResult(run);
+    run.setBars(bars(50));
+    expect(run.remote).not.toBeNull();
+    expect(run.ready).toBe(false);
+    expect(run.calculating).toBe(true);
+    expect(run.length).toBe(0);
+    expect(await answered).toBe('all');
+    expect(run.ready).toBe(true);
+    expect(run.calculating).toBe(false);
+    const page = new ScriptLayerRun(p, {}, CONTEXT, null);
+    page.setListing(true);
+    page.setBars(bars(50));
+    expect(run.values.map((v) => Array.from(v.subarray(0, 50)))).toEqual(
+      page.values.map((v) => Array.from(v.subarray(0, 50))),
+    );
+    expect(run.run.plotStarts).toEqual([0, 0]);
+  });
+
+  it('gives no changed bars on an update: they come with the worker’s answer', async () => {
+    const { runner } = channelRunner();
+    const run = new ScriptLayerRun(p, {}, CONTEXT, null, undefined, runner);
+    opened.push(run);
+    run.setListing(true);
+    const loaded = nextResult(run);
+    const list = bars(50);
+    run.setBars(list);
+    await loaded;
+    const updated = nextResult(run);
+    list.push(bars(51)[50] as Bar);
+    expect(run.update(list, 'new', 50)).toEqual([]);
+    expect(await updated).toEqual([49, 50]);
+    expect(run.values[1]?.[50]).toBe(50);
+  });
+
+  it('moves its results with older bars, and lets them go when the bars are replaced', async () => {
+    const { runner } = channelRunner();
+    const run = new ScriptLayerRun(p, {}, CONTEXT, null, undefined, runner);
+    opened.push(run);
+    run.setListing(true);
+    const loaded = nextResult(run);
+    run.setBars(bars(30));
+    await loaded;
+    run.prepended(10);
+    expect(run.length).toBe(40);
+    expect(run.values[1]?.[10]).toBe(0);
+    run.replaced();
+    expect(run.ready).toBe(false);
+    expect(run.values).toEqual([]);
+  });
+
+  it('runs in the page when the runner gives no worker, and stops its worker when let go', () => {
+    const page = new ScriptLayerRun(p, {}, CONTEXT, null, undefined, { run: () => null });
+    page.setListing(true);
+    page.setBars(bars(10));
+    expect(page.remote).toBeNull();
+    expect(page.ready).toBe(true);
+    expect(page.values[1]?.[9]).toBe(9);
+    const { runner, runs, closed } = channelRunner();
+    // Let go before its first bars (replaced as the chart learns its symbol): it started none.
+    new ScriptLayerRun(p, {}, CONTEXT, null, undefined, runner).dispose();
+    expect(runs).toHaveLength(0);
+    const run = new ScriptLayerRun(p, {}, CONTEXT, null, undefined, runner);
+    run.setBars(bars(10));
+    run.dispose();
+    expect(closed).toEqual([0]);
   });
 });

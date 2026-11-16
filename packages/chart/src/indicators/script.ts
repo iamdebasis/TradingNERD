@@ -18,10 +18,14 @@ import {
   colorCss,
   colorHex,
   colorOpacity,
+  EMPTY_DRAWINGS,
   type InputDef,
   type OutputRef,
+  type RemoteRun,
+  type RemoteRunOptions,
   type RequestFeed,
   type RequestKey,
+  type RunResults,
   type ScriptDescription,
   type ScriptMark,
   type ScriptPlot,
@@ -470,16 +474,55 @@ export function scriptDefaultInputs(program: ScriptProgram): Record<string, Inpu
 }
 
 /**
+ * Where the chart's scripts run (docs/SPEC.md §6.23): each in a worker of its own (the app's), so
+ * the page never waits on one. Without a runner, or when it gives none, a script runs in the page,
+ * as the tests run them.
+ */
+export interface ScriptRunner {
+  run(options: RemoteRunOptions): RemoteRun | null;
+}
+
+/** A run not started yet: nothing to draw. */
+const NOT_STARTED: RunResults = Object.freeze({
+  values: [],
+  plotColors: [],
+  backgrounds: [],
+  fillColors: [],
+  plotStarts: [],
+  backgroundStarts: [],
+  fillStarts: [],
+  error: null,
+  missing: [],
+  requested: [],
+  waiting: false,
+  length: 0,
+  offsets: { plots: [], backgrounds: [] },
+  drawings: EMPTY_DRAWINGS,
+  strategy: null,
+  logs: [],
+  logsWritten: 0,
+});
+
+/**
  * A script's run, read by the indicator layer as it reads a built-in's (IndicatorRun): values by
  * plot, with the script's own extras (each bar's colors, its backgrounds) and its warm-up starts.
+ * In a worker, its results come later, through the layer's onResult; until the first, it has none.
  */
 export class ScriptLayerRun {
-  readonly run: ScriptRun;
   readonly symbol: unknown;
   /** Columns colored by direction are a built-in's (Volume's): a script colors its own. */
   readonly growing: readonly boolean[] = [];
+  /** Told when its worker's results came: 'all', or the bars that changed. */
+  onResult: ((changed: 'all' | readonly number[]) => void) | null = null;
   private fromListing = false;
   private readonly scriptSymbol: ScriptSymbol;
+  private local: ScriptRun | null = null;
+  private worker: RemoteRun | null = null;
+  /**
+   * Starts its worker, the first time it has bars: a run made and replaced before (the chart's
+   * symbol isn't known yet when its scripts are restored) starts none.
+   */
+  private readonly start: (() => void) | null;
 
   constructor(
     program: ScriptProgram,
@@ -487,10 +530,45 @@ export class ScriptLayerRun {
     context: ScriptContext,
     symbol: unknown,
     feed?: RequestFeed,
+    runner?: ScriptRunner,
   ) {
-    this.run = new ScriptRun(program, scriptInputs(program, inputs), context.symbol, feed);
+    const values = scriptInputs(program, inputs);
+    const inPage = () => new ScriptRun(program, values, context.symbol, feed);
+    this.start = runner
+      ? () => {
+          const options = { program, inputs: values, symbol: context.symbol };
+          this.worker = runner.run(feed ? { ...options, feed } : options);
+          if (this.worker) this.worker.onResult = (changed) => this.onResult?.(changed);
+          // A page without workers runs it here.
+          else this.local = inPage();
+        }
+      : null;
+    if (!runner) this.local = inPage();
     this.symbol = symbol;
     this.scriptSymbol = context.symbol;
+  }
+
+  /** What the chart reads of its run: the page's run, its worker's copy, or none yet. */
+  get run(): RunResults {
+    return this.worker ?? this.local ?? NOT_STARTED;
+  }
+
+  /** Its worker's end, once it runs in one. */
+  get remote(): RemoteRun | null {
+    return this.worker;
+  }
+
+  /**
+   * Whether it has results for the chart's bars: always in the page; in a worker, not before its
+   * first, nor after the bars were replaced (it draws nothing meanwhile).
+   */
+  get ready(): boolean {
+    return this.worker ? this.worker.ready : this.local !== null;
+  }
+
+  /** In a worker, without results for the chart's bars yet or with messages unanswered. */
+  get calculating(): boolean {
+    return this.worker ? !this.worker.ready || this.worker.pending : this.local === null;
   }
 
   /** Whether its requests' data hasn't all loaded yet: it draws nothing meanwhile. */
@@ -521,14 +599,37 @@ export class ScriptLayerRun {
 
   /** A run afresh: the last bar is the realtime one only while it's still forming. */
   setBars(bars: readonly Bar[]): void {
-    this.run.setBars(
-      bars,
-      this.fromListing,
-      stillForming(this.scriptSymbol, bars.at(-1), Date.now()),
-    );
+    if (!this.worker && !this.local) this.start?.();
+    const live = stillForming(this.scriptSymbol, bars.at(-1), Date.now());
+    if (this.worker) this.worker.setBars(bars, this.fromListing, live);
+    else this.local?.setBars(bars, this.fromListing, live);
   }
 
+  /** The bars that changed, or 'all'; in a worker none yet, as they come with its result. */
   update(bars: readonly Bar[], change: BarChange, index: number): number[] | 'all' {
-    return this.run.update(bars, change, index);
+    if (!this.worker && !this.local) {
+      this.setBars(bars);
+      return this.worker ? [] : 'all';
+    }
+    if (this.worker) {
+      this.worker.update(bars, change, index);
+      return [];
+    }
+    return (this.local as ScriptRun).update(bars, change, index);
+  }
+
+  /** `count` older bars went before the chart's: a worker's results move with their bars. */
+  prepended(count: number): void {
+    this.worker?.prepended(count);
+  }
+
+  /** The chart's bars were replaced: a worker's results for the old ones go. */
+  replaced(): void {
+    this.worker?.replaced();
+  }
+
+  /** Stops its worker, if it runs in one. */
+  dispose(): void {
+    this.worker?.dispose();
   }
 }

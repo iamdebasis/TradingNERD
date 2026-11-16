@@ -18,6 +18,9 @@ import {
 import { ApiError, type MarketApi } from '../data/api';
 import type { LiveFeed } from '../data/GatewayConnection';
 import { instrumentOf } from './ChartSession';
+import { currencyPath } from './currency';
+
+export { currencyPath };
 
 /**
  * The data scripts' requests ask for (docs/SPEC.md §6.18): each symbol and timeframe a script
@@ -340,40 +343,4 @@ const isIntraday = (resolution: Resolution): boolean =>
 function spanMs(resolution: Resolution): number {
   if (resolution.unit === 'month') return resolution.count * 30 * 86_400_000;
   return resolutionDurationMs(resolution) ?? 0;
-}
-
-/**
- * How a currency converts into the US dollar: a pair we have, read as its price or its inverse
- * (provisional, docs/SPEC.md §11: TradingView takes "the most popular exchange"'s pair; ours are
- * Kraken's, its fiat and stablecoin pairs against the dollar, until rates are compared).
- */
-const IN_USD: Readonly<Record<string, CurrencyLeg>> = {
-  USDT: { symbol: 'KRAKEN:USDTUSD', invert: false },
-  USDC: { symbol: 'KRAKEN:USDCUSD', invert: false },
-  DAI: { symbol: 'KRAKEN:DAIUSD', invert: false },
-  EUR: { symbol: 'KRAKEN:EURUSD', invert: false },
-  GBP: { symbol: 'KRAKEN:GBPUSD', invert: false },
-  AUD: { symbol: 'KRAKEN:AUDUSD', invert: false },
-  JPY: { symbol: 'KRAKEN:USDJPY', invert: true },
-  CAD: { symbol: 'KRAKEN:USDCAD', invert: true },
-  CHF: { symbol: 'KRAKEN:USDCHF', invert: true },
-  BTC: { symbol: 'KRAKEN:XBTUSD', invert: false },
-  ETH: { symbol: 'KRAKEN:ETHUSD', invert: false },
-};
-
-/** The pairs converting `from` into `to`: through the dollar when neither is it; null for none. */
-export function currencyPath(from: string, to: string): CurrencyLeg[] | null {
-  if (from === to) return [];
-  const out: CurrencyLeg[] = [];
-  if (from !== 'USD') {
-    const leg = IN_USD[from];
-    if (!leg) return null;
-    out.push(leg);
-  }
-  if (to !== 'USD') {
-    const leg = IN_USD[to];
-    if (!leg) return null;
-    out.push({ symbol: leg.symbol, invert: !leg.invert });
-  }
-  return out;
 }

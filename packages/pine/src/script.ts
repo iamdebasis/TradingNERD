@@ -749,6 +749,11 @@ export class ScriptRun {
             ),
           );
     for (const check of this.checks) check.all(bars);
+    // A fresh run's drawings and broker count their changes from 0 again: its own are taken
+    // whatever their count, or a reload that changed them as often kept the last load's (a
+    // label on the last bar stayed where it was before older bars loaded).
+    this.drawingsVersion = -1;
+    this.strategyVersion = -1;
     this.adopt();
     this.agreements = this.compare(bars.length);
     this.settle(bars.length);

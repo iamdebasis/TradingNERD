@@ -114,6 +114,32 @@ describe('A script kept live (Pine docs, Execution model)', () => {
     expect(run.update(walk(80), 'tick', 79)).toBe('all');
     expect(run.length).toBe(80);
   });
+
+  it('takes a reload’s own drawings, though they changed as often as the last load’s', () => {
+    // One label on the last bar each load: the same count of changes, on another bar.
+    const p = program(indicator('if barstate.islast\n    label.new(bar_index, close, "last")'));
+    const run = new ScriptRun(p, []);
+    run.setBars(walk(10, 5), false, false);
+    expect(run.drawings.labels.map((label) => label.x)).toEqual([9]);
+    // Five older bars load before them: the label is on the last bar again, now bar 14.
+    run.setBars(walk(15), false, false);
+    expect(run.drawings.labels.map((label) => label.x)).toEqual([14]);
+  });
+
+  it('takes a reload’s own trades, though its broker changed as often as the last load’s', () => {
+    // The broker counts a change on every bar: a reload over as many other bars (a refill after
+    // a reconnect) counts as many.
+    const p = program(
+      '//@version=6\nstrategy("Test", overlay = true)\nif bar_index == last_bar_index - 3\n    strategy.entry("L", strategy.long)',
+    );
+    const run = new ScriptRun(p, []);
+    const first = walk(10, 5);
+    run.setBars(first, false, false);
+    expect(run.strategy?.fills.map((fill) => fill.time)).toEqual([(first[7]?.time ?? 0) * 1000]);
+    const other = walk(10);
+    run.setBars(other, false, false);
+    expect(run.strategy?.fills.map((fill) => fill.time)).toEqual([(other[7]?.time ?? 0) * 1000]);
+  });
 });
 
 describe('The warm-up rule for scripts (docs/SPEC.md §6.17)', () => {
