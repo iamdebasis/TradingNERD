@@ -465,9 +465,12 @@ function runOne(
     // In the app each script runs in a worker of its own: through it, the same results. A script
     // that differs between two runs here (math.random()'s seed and timenow are each load's own)
     // can't be compared: it's counted apart.
-    const again = new ScriptRun(result.program, result.program.defaults(), symbol, CORPUS_FEED);
-    again.setBars(bars, true);
-    if (resultsDiffer(run, again)) varying.push(text);
+    const rerun = () => {
+      const next = new ScriptRun(result.program, result.program.defaults(), symbol, CORPUS_FEED);
+      next.setBars(bars, true);
+      return next;
+    };
+    if (resultsDiffer(run, rerun())) varying.push(text);
     else {
       const differs = workerDiffers(
         run,
@@ -476,7 +479,12 @@ function runOne(
         bars,
         importPaths(text, libraries),
       );
-      if (differs) return { ok: false, stage: 'worker', message: differs };
+      // A script that follows the clock (timenow to a tenth of a second) can agree with itself
+      // twice in a row and differ a moment later: run here again, after the worker's run, and it
+      // differs from its first run too (manual-409, 2026-11-16). Only a worker that differs from
+      // a run that keeps its results is a mismatch.
+      if (differs && resultsDiffer(run, rerun())) varying.push(text);
+      else if (differs) return { ok: false, stage: 'worker', message: differs };
     }
     if (run.error) return { ok: false, stage: 'runtime', message: run.error.message };
     if (run.waiting) {
@@ -528,7 +536,8 @@ function workerDiffers(
       post: (message, transfer) => host.receive(structuredClone(message, { transfer }) as ToWorker),
       close: () => {},
     },
-    { program, inputs: program.defaults(), symbol, feed: CORPUS_FEED, libraries },
+    // As an alert's copy, so its alertcondition() values come back to compare too (step 2b).
+    { program, inputs: program.defaults(), symbol, feed: CORPUS_FEED, libraries, alerts: true },
   );
   try {
     let asked = -1;
@@ -542,14 +551,15 @@ function workerDiffers(
   }
 }
 
-/** The first way two runs' results differ, or null (NaN equal to NaN). */
-function resultsDiffer(local: ScriptRun, remote: RemoteRun): string | null {
+/** The first way two runs' results differ, or null (NaN equal to NaN): the page's and another. */
+function resultsDiffer(local: ScriptRun, remote: RemoteRun | ScriptRun): string | null {
   if (remote.length !== local.length) return `length ${remote.length} vs ${local.length}`;
   const outputs: [string, readonly (Float64Array | null)[], readonly (Float64Array | null)[]][] = [
     ['plot', local.values, remote.values],
     ['plot color', local.plotColors, remote.plotColors],
     ['background', local.backgrounds, remote.backgrounds],
     ['fill color', local.fillColors, remote.fillColors],
+    ['alertcondition', local.conditions, remote.conditions],
   ];
   for (const [what, mine, theirs] of outputs) {
     if (mine.length !== theirs.length) return `${what}s: ${theirs.length} vs ${mine.length}`;

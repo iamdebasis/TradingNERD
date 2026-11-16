@@ -1,6 +1,6 @@
 import type { Bar } from '@tradingnerd/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type FromWorker, RemoteRun, ScriptHost, type ToWorker } from './remote.ts';
+import { type FromWorker, RemoteRun, type ResultFor, ScriptHost, type ToWorker } from './remote.ts';
 import type { ContextData, RequestFeed } from './requests.ts';
 import { DEFAULT_SYMBOL, type LogEntry, type ScriptSymbol } from './runtime.ts';
 import { compileScript, type ScriptProgram, ScriptRun } from './script.ts';
@@ -31,6 +31,7 @@ interface Options {
   symbol?: ScriptSymbol;
   feed?: RequestFeed;
   libraries?: Record<string, string>;
+  alerts?: boolean;
 }
 
 /** A script's run in a worker of its own, and what the worker was sent. */
@@ -56,14 +57,19 @@ function inWorker(p: ScriptProgram, options: Options = {}) {
       symbol: options.symbol ?? DEFAULT_SYMBOL,
       ...(options.feed ? { feed: options.feed } : {}),
       ...(options.libraries ? { libraries: options.libraries } : {}),
+      ...(options.alerts ? { alerts: true } : {}),
     },
   );
   const results: ('all' | readonly number[])[] = [];
-  run.onResult = (changed) => results.push(changed);
+  const ran: (ResultFor | undefined)[] = [];
+  run.onResult = (changed, what) => {
+    results.push(changed);
+    ran.push(what);
+  };
   port1.on('message', (message) => run.receive(message as FromWorker));
   opened.push(run);
   const loads = () => received.filter((message) => message.kind === 'load').length;
-  return { run, received, results, loads };
+  return { run, received, results, ran, loads };
 }
 
 /** Until the worker has answered everything. */
@@ -284,6 +290,121 @@ function fives(minutes: readonly Bar[]): Bar[] {
   }
   return out;
 }
+
+/** alert() calls of each frequency and two alertcondition()s, as an alert runs them. */
+const ALERTING = indicator(
+  [
+    'up = close > open',
+    'alertcondition(up, "Up", "An up bar")',
+    'alertcondition(close > ta.sma(close, 5), "Above", "Above its mean")',
+    'if up',
+    '    alert("up " + str.tostring(close), alert.freq_all)',
+    'if barstate.isconfirmed',
+    '    alert("closed", alert.freq_once_per_bar_close)',
+    'alert("any")',
+    'plot(close)',
+  ].join('\n'),
+);
+
+/** Every bar's alertcondition() conditions, by condition. */
+const conditionsOf = (
+  run: { conditionOn(index: number, bar: number): boolean | null },
+  length: number,
+) => [0, 1].map((index) => Array.from({ length }, (_, bar) => run.conditionOn(index, bar)));
+
+describe('An alert’s run in a worker', () => {
+  it('gives the alert() events and alertcondition() values the page’s run gives, live bar by live bar', async () => {
+    const p = program(ALERTING);
+    const bars = walk(50);
+    bars[49] = forming(walkBar(49), 1);
+    const local = new ScriptRun(p, []);
+    local.watchAlerts();
+    local.setBars(bars, false, true);
+    const { run, ran } = inWorker(p, { alerts: true });
+    run.setBars(bars, false, true);
+    await settled(run);
+    // A run afresh doesn't alert: its realtime bar's calls were the earlier run's.
+    expect(local.takeAlerts()).toEqual([]);
+    expect(run.takeAlerts()).toEqual([]);
+    expect(conditionsOf(run, 50)).toEqual(conditionsOf(local, 50));
+    expect(ran[0]).toEqual({ kind: 'load', length: 50, live: true });
+    const step = async (change: 'tick' | 'new', index: number) => {
+      local.update(bars, change, index);
+      run.update(bars, change, index);
+      await settled(run);
+      const events = run.takeAlerts();
+      expect(events).toEqual(local.takeAlerts());
+      expect(conditionsOf(run, bars.length)).toEqual(conditionsOf(local, bars.length));
+      return events;
+    };
+    for (let tick = 2; tick <= 4; tick++) {
+      bars[49] = forming(walkBar(49), tick);
+      expect((await step('tick', 49)).length).toBeGreaterThan(0);
+    }
+    bars[49] = walkBar(49);
+    bars.push(forming(walkBar(50), 1));
+    const closed = await step('new', 50);
+    // The closing run of bar 49 made its once-per-close event; the new bar's first run its own.
+    expect(closed.filter((event) => event.freq === 'once_per_bar_close').map((e) => e.bar)).toEqual(
+      [49],
+    );
+    expect(closed.some((event) => event.bar === 50)).toBe(true);
+    // Each live result said what it ran on: the change and the bars as they were sent.
+    expect(ran.slice(1).map((what) => what?.kind === 'update' && what.change)).toEqual([
+      'tick',
+      'tick',
+      'tick',
+      'new',
+    ]);
+    const opened = ran[4] as Extract<ResultFor, { kind: 'update' }>;
+    expect(opened.from).toBe(49);
+    expect(opened.bars).toEqual([walkBar(49), forming(walkBar(50), 1)]);
+  });
+
+  it('tells each result the bars it ran on, though newer ticks came before it was answered', async () => {
+    const p = program(ALERTING);
+    const bars = walk(30);
+    const { run, ran } = inWorker(p, { alerts: true });
+    run.setBars(bars, false, true);
+    await settled(run);
+    // Three ticks sent at once: the bars move on before the first is answered.
+    for (let tick = 1; tick <= 3; tick++) {
+      bars[29] = forming(walkBar(29), tick);
+      run.update(bars, 'tick', 29);
+    }
+    await settled(run);
+    expect(
+      ran.slice(1).map((what) => (what?.kind === 'update' ? what.bars[0]?.close : null)),
+    ).toEqual([1, 2, 3].map((tick) => forming(walkBar(29), tick).close));
+  });
+
+  it('a chart’s run sends no conditions or events; an alert’s move with older bars', async () => {
+    const p = program(ALERTING);
+    const bars = walk(30);
+    const chart = inWorker(p);
+    chart.run.setBars(bars, false, true);
+    await settled(chart.run);
+    bars[29] = forming(walkBar(29), 1);
+    chart.run.update(bars, 'tick', 29);
+    await settled(chart.run);
+    expect(chart.run.conditions).toEqual([]);
+    expect(chart.run.conditionOn(0, 29)).toBeNull();
+    expect(chart.run.takeAlerts()).toEqual([]);
+
+    const alert = inWorker(p, { alerts: true });
+    alert.run.setBars(bars, false, true);
+    await settled(alert.run);
+    bars[29] = forming(walkBar(29), 2);
+    alert.run.update(bars, 'tick', 29);
+    await settled(alert.run);
+    const before = conditionsOf(alert.run, 30);
+    alert.run.prepended(5);
+    const events = alert.run.takeAlerts();
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((event) => event.bar === 34)).toBe(true);
+    expect(conditionsOf(alert.run, 35).map((list) => list.slice(5))).toEqual(before);
+  });
+});
 
 describe('A script’s requests in a worker', () => {
   const REQUEST = indicator(

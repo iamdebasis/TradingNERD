@@ -5,6 +5,7 @@ import {
   sessionClock,
   UTC_CLOCK,
 } from '@tradingnerd/core';
+import type { AlertEvent } from './alerts.ts';
 import type { DrawingSnapshot, LineObject } from './drawings.ts';
 import type { ScriptError } from './execution.ts';
 import type { ContextData } from './requests.ts';
@@ -211,6 +212,10 @@ export function shiftStrategy(state: StrategyState, k: number): StrategyState {
 /** Pine Logs entries, each on the bar it was logged on. */
 export const shiftLogs = (logs: readonly LogEntry[], k: number): LogEntry[] =>
   k === 0 ? [...logs] : logs.map((entry) => ({ ...entry, bar: moved(entry.bar, k) }));
+
+/** An alert's alert() events, each on the bar it ran on. */
+export const shiftAlerts = (events: readonly AlertEvent[], k: number): AlertEvent[] =>
+  k === 0 ? [...events] : events.map((event) => ({ ...event, bar: moved(event.bar, k) }));
 
 /** A runtime error, on the bar it stopped on. */
 export const shiftError = (error: ScriptError | null, k: number): ScriptError | null =>
