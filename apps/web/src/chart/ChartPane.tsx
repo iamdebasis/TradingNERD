@@ -131,7 +131,7 @@ export function ChartPane({
     const created = new ChartController(container.current, {
       theme: chartTheme,
       onHover: (info) => session.current?.hover(info),
-      onNeedHistory: () => void session.current?.loadOlder(),
+      onNeedHistory: (short) => void session.current?.loadOlder(short),
       onGesture: (setting) => gestureSettings.gestured(setting),
       onPaneHeights: (heights) => indicatorStore.setPaneHeights(heights),
       onLayout: () => setPanes(created.paneLayout()),

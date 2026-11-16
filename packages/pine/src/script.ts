@@ -737,8 +737,10 @@ export class ScriptRun {
     this.main.all(bars);
     // A run afresh doesn't alert: its realtime bar's calls were the earlier run's.
     this.main.runtime.alerts = [];
+    // While a request's data is still loading the script draws nothing (settle()), so its check
+    // runs wait for the run that has the data: three runs saved on each load that can't draw.
     this.checks =
-      fromListing || bars.length < 2 || this.main.error
+      fromListing || bars.length < 2 || this.main.error || store.missing.size > 0
         ? []
         : CHECKS.map((check) =>
             make(

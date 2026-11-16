@@ -119,6 +119,19 @@ export class RequestLoader implements RequestFeed {
     return false;
   }
 
+  /**
+   * Whether a context's history is still arriving: its first page loading, or older pages still
+   * to come for the chart (loadOlder's own test). Its scripts run again once it's in.
+   */
+  settling(key: RequestKey): boolean {
+    const entry = this.entries.get(requestKeyText(key));
+    if (!entry) return false;
+    if (entry.state === 'loading') return true;
+    const { data, info } = entry;
+    if (entry.state !== 'ready' || !entry.hasMore || !data || !info) return false;
+    return this.short(data.bars, entry.key.timeframe);
+  }
+
   dispose(): void {
     this.disposed = true;
     for (const [text, entry] of this.entries) this.drop(text, entry);

@@ -66,6 +66,7 @@ import {
   PRICE_PANE_STRETCH,
   paneShares,
   plotStart,
+  rerunsForRequests,
   VOLUME_MARGINS,
   withLevels,
   withOpacity,
@@ -157,6 +158,8 @@ class IndicatorView {
   tickPrices: readonly number[] = [];
   /** The libraries' revision a script was compiled with. */
   librariesRevision = '';
+  /** The request data its last run read, by its requested keys (refreshRequests compares). */
+  contextsSeen: readonly unknown[] = [];
 
   constructor(
     indicator: ChartIndicator,
@@ -559,8 +562,9 @@ export class IndicatorLayer {
   }
 
   /**
-   * A requested context's data changed: the scripts that request run again, afresh after a page
-   * of its history arrived ('history'), or just their live bar after a live update ('live').
+   * A requested context's data changed: the scripts that request run again, afresh after its
+   * history arrived ('history'), or just their live bar after a live update ('live'). Afresh only
+   * as rerunsForRequests says: once all they ask for is in, then once its pages stop coming.
    */
   refreshRequests(kind: 'history' | 'live'): void {
     const last = this.bars.length - 1;
@@ -569,6 +573,12 @@ export class IndicatorLayer {
       if (!run || view.indicator.hidden || view.compileError) continue;
       if (run.requested.length === 0) continue;
       if (kind === 'history' || run.waiting || last < 0) {
+        const feed = this.feed;
+        if (feed) {
+          const settling = run.requested.some((key) => feed.settling?.(key) ?? false);
+          const now = this.contextsOf(run);
+          if (!rerunsForRequests(run.waiting, now, view.contextsSeen, settling)) continue;
+        }
         this.runBars(view);
         this.refreshStarts(view);
         this.push(view);
@@ -709,6 +719,11 @@ export class IndicatorLayer {
    * Bars at the start of the chart some drawn plot still waits on (the warm-up rule): older
    * history is fetched until they're settled or the listing is reached.
    */
+  /** Whether a Pine script is on the chart and shown: each new page of bars runs it again. */
+  hasScripts(): boolean {
+    return this.views.some((view) => view.script !== null && !view.indicator.hidden);
+  }
+
   waitingBars(): number {
     let waiting = 0;
     for (const view of this.views) {
@@ -893,6 +908,14 @@ export class IndicatorLayer {
   private runBars(view: IndicatorView): void {
     view.script?.setListing(this.fromListing);
     view.run.setBars(this.bars);
+    const requesting = view.requesting;
+    if (requesting) view.contextsSeen = this.contextsOf(requesting);
+  }
+
+  /** The data a run's requested contexts have in the feed now, by its keys (null: missing). */
+  private contextsOf(run: ScriptLayerRun | TimeframedRun): unknown[] {
+    const feed = this.feed;
+    return run.requested.map((key) => feed?.data(key) ?? null);
   }
 
   /** Creates the series that draw an indicator, in pane `paneIndex`, and hands them its values. */

@@ -70,6 +70,13 @@ import { zoomRange } from './zoom';
 
 /** TradingView defaults: 6 px bars and a right margin of 10 bars. */
 export const DEFAULT_BAR_SPACING = 6;
+/**
+ * Bars asked for at least, per page of older history, with a Pine script on the chart: each page
+ * runs the scripts again over every bar, so fewer, bigger pages (zooming out on 4h with the
+ * user's VuManChu B, measured 2026-11-15: 39 s of the tab blocked with 1,000-bar pages, 23 s
+ * with these).
+ */
+export const SCRIPT_PAGE_BARS = 5_000;
 export const DEFAULT_RIGHT_OFFSET = 10;
 /** TradingView's default price margins: 10% above the highest bar, 8% below the lowest. */
 const SCALE_MARGINS = { top: 0.1, bottom: 0.08 };
@@ -153,8 +160,11 @@ export interface ChartControllerOptions {
   theme: ChartTheme;
   /** The bar under the cursor, or null once the cursor leaves the pane. */
   onHover?: (info: HoverInfo | null) => void;
-  /** Called when less than two screens of history remain to the left of the view. */
-  onNeedHistory?: () => void;
+  /**
+   * Called when less than two screens of history remain to the left of the view, with how many
+   * bars short it is (indicators' warm-up included), so they can come in one page.
+   */
+  onNeedHistory?: (bars: number) => void;
   /** Each gesture setting a wheel or trackpad gesture used (see WheelOptions.onGesture). */
   onGesture?: (setting: TuningNumber) => void;
   /**
@@ -812,7 +822,12 @@ export class ChartController {
     if (!range || this.bars.length === 0) return;
     // Bars an indicator still waits on count as history not loaded yet (the warm-up rule).
     const loaded = range.from - this.indicators.waitingBars();
-    if (loaded < (range.to - range.from) * 2) this.options.onNeedHistory?.();
+    const wanted = (range.to - range.from) * 2;
+    if (loaded < wanted) {
+      const short = Math.ceil(wanted - loaded);
+      const scripts = this.indicators.hasScripts();
+      this.options.onNeedHistory?.(scripts ? Math.max(short, SCRIPT_PAGE_BARS) : short);
+    }
   }
 
   /** The pane at a chart y (CSS px from the chart's top): its scale's series and the y in it. */

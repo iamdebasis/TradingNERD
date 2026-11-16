@@ -8,6 +8,8 @@ import {
   ScriptRun,
   type ScriptSymbol,
 } from './index.ts';
+import { RequestBroker, requestKeyText, resolutionOf } from './requests.ts';
+import type { Runtime } from './runtime.ts';
 
 /**
  * request.security() as TradingView's Pine docs describe it (Other timeframes and data;
@@ -1030,5 +1032,74 @@ plot(request.security(syminfo.tickerid, "D", close, currency = currency.USDT))`)
     );
     expect(ignores.error).toBeNull();
     expect(plotOf(ignores, 0)[5]).toBeNaN();
+  });
+});
+
+/**
+ * A request call reads its symbol and timeframe texts on every bar, nearly always the same ones:
+ * they're read once (40% of a request-heavy script's time went to reading them again, measured
+ * 2026-11-15 on the user's VuManChu B).
+ */
+describe('request texts read once', () => {
+  it('reads a timeframe text once: the same frozen resolution each time, none for a bad one', () => {
+    const hour = resolutionOf('60');
+    expect(hour).toEqual({ count: 60, unit: 'minute' });
+    expect(resolutionOf('60')).toBe(hour);
+    expect(Object.isFrozen(hour)).toBe(true);
+    expect(resolutionOf('1D')).toEqual({ count: 1, unit: 'day' });
+    expect(resolutionOf('7X')).toBeNull();
+  });
+
+  it("writes a key's text once per key, the same as an equal key's", () => {
+    const key = { symbol: 'BINANCE:BTCUSDT', timeframe: '60', session: 'extended' as const };
+    expect(requestKeyText(key)).toBe('BINANCE:BTCUSDT@60:extended');
+    expect(requestKeyText(key)).toBe(requestKeyText({ ...key }));
+  });
+
+  it("works out a symbol and timeframe text once for the run's own symbol, afresh for another", () => {
+    const broker = new RequestBroker(null as never);
+    const btc = { symbol: CHART } as unknown as Runtime;
+    const hour = broker.key('', '60', btc);
+    expect(hour?.key).toEqual({ symbol: 'BINANCE:BTCUSDT', timeframe: '60' });
+    expect(broker.key('', '60', btc)).toBe(hour);
+    expect(Object.isFrozen(hour)).toBe(true);
+    expect(Object.isFrozen(hour?.key)).toBe(true);
+    expect(broker.key('', '7X', btc)).toBeNull();
+    // The same texts on another symbol's run ask for that symbol.
+    expect(broker.key('', '60', { symbol: ETH } as unknown as Runtime)?.key.symbol).toBe(
+      'COINBASE:ETHUSD',
+    );
+  });
+
+  it("keeps each symbol's Heikin Ashi ticker apart when made once per symbol text", () => {
+    const code = v6('plot(request.security(ticker.heikinashi(syminfo.tickerid), "60", close))');
+    const result = compileScript(code);
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const symbols = [CHART, ETH].map((symbol) => {
+      const r = new ScriptRun(result.program, result.program.defaults(), symbol, FEED);
+      r.setBars(HOURS, true);
+      return r.requested.map((key) => key.symbol);
+    });
+    expect(symbols).toEqual([['BINANCE:BTCUSDT'], ['COINBASE:ETHUSD']]);
+  });
+});
+
+describe("a script waiting on a request's data", () => {
+  it('runs once, without its check runs, as it draws nothing until the data is in', () => {
+    let asked = 0;
+    const feed: RequestFeed = {
+      data: () => {
+        asked++;
+        return null;
+      },
+    };
+    const result = compileScript(v6('plot(request.security(syminfo.tickerid, "D", close))'));
+    if (!result.ok) throw new Error(result.errors[0]?.message);
+    const r = new ScriptRun(result.program, result.program.defaults(), CHART, feed);
+    r.setBars(HOURS, false);
+    expect(r.waiting).toBe(true);
+    expect(r.plotStarts).toEqual([Number.POSITIVE_INFINITY]);
+    // One run asks once a bar; its three check runs would ask about four times as often.
+    expect(asked).toBe(HOURS.length);
   });
 });
