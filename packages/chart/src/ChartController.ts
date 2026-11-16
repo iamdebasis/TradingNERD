@@ -27,6 +27,7 @@ import {
   createChart,
   type IChartApi,
   type ISeriesApi,
+  LineSeries,
   LineStyle,
   type Logical,
   type LogicalRange,
@@ -45,6 +46,7 @@ import {
   type ScriptStrategy,
 } from './indicators/IndicatorLayer';
 import { type ChartIndicator, paneAt } from './indicators/model';
+import type { ScriptRunner } from './indicators/script';
 import { installKeyboard } from './interaction/keyboard';
 import { installVerticalDrag } from './interaction/verticalDrag';
 import { TimeViewport } from './interaction/viewport';
@@ -174,6 +176,16 @@ export interface ChartControllerOptions {
   onPaneHeights?: (heights: Record<string, number>) => void;
   /** The panes moved or resized (see paneLayout), e.g. so their legends follow. */
   onLayout?: () => void;
+  /**
+   * Runs each Pine script in a worker of its own (docs/SPEC.md §6.23), so the page never waits
+   * on one; without it, scripts run in the page.
+   */
+  scriptRunner?: ScriptRunner;
+  /**
+   * A script's results came from its worker and were drawn: its errors, logs, strategy, requests
+   * and legend values may have changed.
+   */
+  onScripts?: () => void;
 }
 
 /** A snapshot of the chart's state for tests and diagnostics. */
@@ -243,6 +255,16 @@ function indexOfTime(bars: readonly Bar[], time: number): number {
 export class ChartController {
   private readonly chart: IChartApi;
   private readonly series: ISeriesApi<'Candlestick'>;
+  /**
+   * An invisible series holding one empty point at the first bar's time, so the candles are never
+   * the only series with data. Setting a lone series' data again over the same times, Lightweight
+   * Charts 5.2.1 rebuilds its map of time points but keeps its sorted list of the old ones; a script's
+   * series given its data after that, then the candles set again (barcolor()'s colors), dropped the
+   * last bar's place to 0 and every frame threw "Value is null" (reproduced on the library alone,
+   * 2026-11-16; 5.3.0 fixes it in replaceTimeScalePoints). Scripts in workers made it likely: their
+   * series wait empty while the candles are set (docs/SPEC.md §11, item 139).
+   */
+  private readonly anchor: ISeriesApi<'Line'>;
   private readonly theme: ChartTheme;
   private readonly options: ChartControllerOptions;
   private readonly font: string;
@@ -352,6 +374,13 @@ export class ChartController {
       priceLineVisible: false,
       lastValueVisible: false,
     });
+    this.anchor = this.chart.addSeries(LineSeries, {
+      visible: false,
+      priceScaleId: '',
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
 
     const axis = { tickYs: () => this.tickYs(), background: theme.background };
     this.sessionShade = new SessionShadePrimitive(() => this.bars);
@@ -365,7 +394,10 @@ export class ChartController {
     this.series.attachPrimitive(this.extendedPrice);
     this.series.attachPrimitive(this.lastPrice);
     this.series.attachPrimitive(this.crosshair);
-    this.indicators = new IndicatorLayer(this.chart, theme, this.font, this.series);
+    this.indicators = new IndicatorLayer(this.chart, theme, this.font, this.series, {
+      ...(options.scriptRunner ? { runner: options.scriptRunner } : {}),
+      onScripts: () => this.scriptsChanged(),
+    });
 
     const onCrosshairMove = (param: MouseEventParams<Time>) => this.onCrosshairMove(param);
     this.chart.subscribeCrosshairMove(onCrosshairMove);
@@ -490,7 +522,7 @@ export class ChartController {
     if (fresh.length === 0 && fromListing === this.fromListing) return;
     this.bars = [...fresh, ...this.bars];
     this.fromListing = fromListing;
-    this.setSeriesData();
+    this.setSeriesData(fresh.length);
   }
 
   /** Replaces everything from the first of `recent` onward, e.g. to refill a gap after a reconnect. */
@@ -896,8 +928,11 @@ export class ChartController {
     return left > 0 ? formatCountdown(left) : null;
   }
 
-  /** Hands every bar to the series at its local time, each after the one before. */
-  private setSeriesData(): void {
+  /**
+   * Hands every bar to the series at its local time, each after the one before. `prepended`: how
+   * many older bars went before the bars it had (a page of history), else none (a refill).
+   */
+  private setSeriesData(prepended = 0): void {
     const times: number[] = [];
     const candles: CandlestickData<Time>[] = [];
     for (const bar of this.bars) {
@@ -906,10 +941,23 @@ export class ChartController {
       candles.push(toCandle(bar, time));
     }
     this.displayTimes = times;
+    // At the candles' first time, before them: they never take the lone series' shortcut.
+    const first = candles[0];
+    this.anchor.setData(first ? [{ time: first.time }] : []);
     this.series.setData(candles);
     this.recolored = false;
-    this.indicators.setBars(this.bars, this.displayTimes, this.fromListing);
+    this.indicators.setBars(this.bars, this.displayTimes, this.fromListing, prepended);
     this.recolorBars();
+  }
+
+  /**
+   * A script's results came from its worker and were drawn: its barcolor() colors go on the
+   * bars, its warm-up may want older history, and the app reads the scripts again.
+   */
+  private scriptsChanged(): void {
+    this.recolorBars();
+    this.checkHistory(this.chart.timeScale().getVisibleLogicalRange());
+    this.options.onScripts?.();
   }
 
   /**

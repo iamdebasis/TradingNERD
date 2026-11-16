@@ -50,6 +50,16 @@ export {
 } from './drawings.ts';
 export { KEYWORDS, versionIn } from './lexer.ts';
 export {
+  type FromWorker,
+  RemoteRun,
+  type RemoteRunOptions,
+  type RunResults,
+  ScriptHost,
+  type ScriptHostOptions,
+  type ToWorker,
+  type WorkerLink,
+} from './remote.ts';
+export {
   alignBar,
   type ContextData,
   type CurrencyLeg,

@@ -71,7 +71,13 @@ import {
   withLevels,
   withOpacity,
 } from './model';
-import { type RunOffsets, type ScriptContext, ScriptLayerRun, scriptDefinition } from './script';
+import {
+  type RunOffsets,
+  type ScriptContext,
+  ScriptLayerRun,
+  type ScriptRunner,
+  scriptDefinition,
+} from './script';
 import { builtinTimeframe, TimeframedRun } from './timeframed';
 
 /** The overlay scale Volume and its MA share at the bottom of the price pane. */
@@ -160,6 +166,10 @@ class IndicatorView {
   librariesRevision = '';
   /** The request data its last run read, by its requested keys (refreshRequests compares). */
   contextsSeen: readonly unknown[] = [];
+  /** Whether a script was stopped when last drawn: a change either way draws it whole. */
+  stopped = false;
+  /** Its run went on in the view built in its place (the same code and inputs): it isn't stopped. */
+  runKept = false;
 
   constructor(
     indicator: ChartIndicator,
@@ -258,6 +268,16 @@ export interface IndicatorDebugState {
   trades: { fills: number; painted: number; closed: number; open: number } | null;
   /** What stopped a script, if anything did. */
   error: string | null;
+  /** A script in a worker that has no results for the chart's bars yet, or messages unanswered. */
+  calculating: boolean;
+}
+
+/** How the layer runs scripts, and who hears when a worker's results were drawn. */
+export interface IndicatorLayerOptions {
+  /** Runs each script in a worker of its own (docs/SPEC.md §6.23); without one, in the page. */
+  runner?: ScriptRunner;
+  /** A script's results came from its worker and were drawn: the scripts' state may have changed. */
+  onScripts?: () => void;
 }
 
 /** One indicator's values on a bar, in its definition's plot order (NaN where none shows). */
@@ -345,6 +365,8 @@ export class IndicatorLayer {
   private libraries: ScriptLibraries = { revision: '' };
   /** Where scripts' requests get their data (the app's loader); none: they wait. */
   private feed: RequestFeed | undefined;
+  private readonly runner: ScriptRunner | undefined;
+  private readonly onScripts: (() => void) | undefined;
 
   /**
    * `priceSeries`: the chart's own bars, on the price pane's scale. An overlay script's drawings
@@ -355,11 +377,14 @@ export class IndicatorLayer {
     theme: ChartTheme,
     font: string,
     priceSeries: ISeriesApi<SeriesType> | null = null,
+    options: IndicatorLayerOptions = {},
   ) {
     this.priceSeries = priceSeries;
     this.chart = chart;
     this.theme = theme;
     this.font = font;
+    this.runner = options.runner;
+    this.onScripts = options.onScripts;
   }
 
   /** The chart's symbol, and what scripts know of it; runs start over with it at the next setBars. */
@@ -386,10 +411,17 @@ export class IndicatorLayer {
         next.push(old);
         continue;
       }
-      // A script that stops compiling (a library removed) stays where it was.
-      const view = this.createView(indicator, old?.definition.placement);
-      // A hidden indicator isn't computed: showing it again builds it afresh.
-      if (this.bars.length > 0 && !indicator.hidden && !view.compileError) {
+      // A script that stops compiling (a library removed) stays where it was. One that computes
+      // what it did (its style alone changed, or the offsets its run worked out) keeps its run:
+      // it isn't run again, and what a worker gave it so far is drawn at once.
+      const keep = old && this.computesSame(old, indicator) ? old : null;
+      const view = this.createView(indicator, old?.definition.placement, keep?.run);
+      if (keep) {
+        keep.runKept = true;
+        view.contextsSeen = keep.contextsSeen;
+        this.takeOffsets(view);
+      } else if (this.bars.length > 0 && !indicator.hidden && !view.compileError) {
+        // A hidden indicator isn't computed: showing it again builds it afresh.
         this.runBars(view);
         this.takeOffsets(view);
       }
@@ -428,6 +460,25 @@ export class IndicatorLayer {
   }
 
   /**
+   * Whether a script's new state computes what its view's run does: the same code, inputs and
+   * libraries on the same symbol, shown before and now. Its look may differ.
+   */
+  private computesSame(old: IndicatorView, indicator: ChartIndicator): boolean {
+    const source = indicator.script?.source;
+    return (
+      old.script !== null &&
+      old.program !== null &&
+      indicator.kind === 'script' &&
+      !old.indicator.hidden &&
+      !indicator.hidden &&
+      old.indicator.script?.source === source &&
+      sameJson(old.indicator.settings.inputs, indicator.settings.inputs) &&
+      old.run.symbol === this.symbol &&
+      !(old.librariesRevision !== this.libraries.revision && IMPORTS.test(source ?? ''))
+    );
+  }
+
+  /**
    * A script that imports, compiled with libraries that have changed since; or one whose run
    * worked out offsets its series don't have.
    */
@@ -458,15 +509,26 @@ export class IndicatorLayer {
     return true;
   }
 
-  /** New bars throughout: every run computed afresh, as Pine reloads a script. */
-  setBars(bars: readonly Bar[], times: readonly number[], fromListing: boolean): void {
+  /**
+   * New bars throughout: every run computed afresh, as Pine reloads a script. `prepended`: they
+   * are the bars before with that many older ones before them (a page of history), so what a
+   * worker drew stays on its bars until its run over them all is done; any other change of bars
+   * (a refill) takes what it drew away until then.
+   */
+  setBars(
+    bars: readonly Bar[],
+    times: readonly number[],
+    fromListing: boolean,
+    prepended = 0,
+  ): void {
     this.bars = bars;
     this.times = times;
     this.fromListing = fromListing;
     for (const view of this.views) {
       if (view.indicator.hidden || view.compileError) continue;
-      if (view.run.symbol !== this.symbol)
-        view.run = this.makeRun(view.indicator, view.definition, view.program);
+      if (view.run.symbol !== this.symbol) this.renew(view);
+      else if (prepended > 0) view.script?.prepended(prepended);
+      else view.script?.replaced();
       this.runBars(view);
       // Offsets its run worked out afresh that its series don't have: it's built again below.
       if (view.script && this.offsetsDiffer(view)) {
@@ -507,6 +569,8 @@ export class IndicatorLayer {
     const stopped = view.error !== null;
     const before = view.starts;
     const changed = view.run.update(this.bars, change, index);
+    // A worker's result is drawn when it comes (scriptResult).
+    if (view.script?.remote) return;
     // A script's warm-up starts can move with a new bar, as a built-in's on another timeframe
     // can; a stopped script draws nothing.
     if (view.requesting) this.refreshStarts(view);
@@ -530,7 +594,7 @@ export class IndicatorLayer {
     this.feed = feed;
     for (const view of this.views) {
       if (!view.requesting || view.indicator.hidden || view.compileError) continue;
-      view.run = this.makeRun(view.indicator, view.definition, view.program);
+      this.renew(view);
       this.runBars(view);
       this.refreshStarts(view);
       this.push(view);
@@ -551,12 +615,15 @@ export class IndicatorLayer {
     return { used: [...used.values()], missing: [...missing.values()] };
   }
 
-  /** The scripts waiting for their requests' data, by id: their legend rows say so. */
+  /**
+   * The scripts with nothing to draw yet, by id, their legend rows saying so: waiting for their
+   * requests' data, or in a worker calculating over the chart's bars for the first time.
+   */
   waiting(): Set<string> {
     const ids = new Set<string>();
     for (const view of this.views) {
       if (view.indicator.hidden || view.compileError || view.error !== null) continue;
-      if (view.requesting?.waiting) ids.add(view.indicator.id);
+      if (view.requesting?.waiting || view.script?.ready === false) ids.add(view.indicator.id);
     }
     return ids;
   }
@@ -580,6 +647,8 @@ export class IndicatorLayer {
           if (!rerunsForRequests(run.waiting, now, view.contextsSeen, settling)) continue;
         }
         this.runBars(view);
+        // A worker's result is drawn when it comes (scriptResult).
+        if (view.script?.remote) continue;
         this.refreshStarts(view);
         this.push(view);
         this.barColorChanges = 'all';
@@ -831,6 +900,7 @@ export class IndicatorLayer {
         painted: view.drawings?.paintedCounts() ?? { labels: 0, lines: 0, boxes: 0, tables: 0 },
       },
       error: view.error,
+      calculating: !view.indicator.hidden && (view.script?.calculating ?? false),
     }));
   }
 
@@ -839,10 +909,14 @@ export class IndicatorLayer {
     this.views = [];
   }
 
-  /** A view for an indicator: a built-in's definition, or a script's compiled code. */
+  /**
+   * A view for an indicator: a built-in's definition, or a script's compiled code. `run`: the
+   * run a script's earlier view had, kept when the script computes the same (computesSame).
+   */
   private createView(
     indicator: ChartIndicator,
     placement?: IndicatorDefinition['placement'],
+    run?: LayerRun,
   ): IndicatorView {
     if (indicator.kind !== 'script') {
       const definition = indicatorDefinition(indicator.kind);
@@ -872,10 +946,55 @@ export class IndicatorLayer {
       indicator,
       definition,
       program,
-      this.makeRun(indicator, definition, program),
+      run ?? this.makeRun(indicator, definition, program),
     );
     view.librariesRevision = this.libraries.revision;
+    this.attach(view);
     return view;
+  }
+
+  /** A worker's results for a view's script come to scriptResult. */
+  private attach(view: IndicatorView): void {
+    const script = view.script;
+    if (script) script.onResult = (changed) => this.scriptResult(view, changed);
+  }
+
+  /** A fresh run for a view (another symbol, another feed): the old one's worker stops. */
+  private renew(view: IndicatorView): void {
+    view.script?.dispose();
+    view.run = this.makeRun(view.indicator, view.definition, view.program);
+    this.attach(view);
+  }
+
+  /**
+   * A script's results came from its worker: drawn as a run in the page's are when it's done,
+   * after a run afresh ('all') or a live change (the bars that changed). Offsets it worked out
+   * that its series don't have build it again, with the same run.
+   */
+  private scriptResult(view: IndicatorView, changed: 'all' | readonly number[]): void {
+    if (!this.views.includes(view) || view.indicator.hidden) return;
+    if (changed === 'all') {
+      if (this.offsetsDiffer(view)) {
+        view.offsetsMoved = true;
+        this.set(this.views.map((item) => item.indicator));
+      } else {
+        this.refreshStarts(view);
+        this.push(view);
+      }
+      this.barColorChanges = 'all';
+    } else {
+      const before = view.starts;
+      this.refreshStarts(view);
+      const moved = view.starts.some((start, p) => start !== before[p]);
+      const all = moved || (view.error !== null) !== view.stopped;
+      this.noteBarColors(view, all ? 'all' : changed);
+      if (all || this.needsFullPush(view)) this.push(view);
+      else {
+        for (const i of changed) this.pushPoint(view, i);
+        this.refreshDecorations(view);
+      }
+    }
+    this.onScripts?.();
   }
 
   private makeRun(
@@ -884,12 +1003,14 @@ export class IndicatorLayer {
     program: ScriptProgram | null,
   ): LayerRun {
     if (program) {
+      // A hidden script isn't run (showing it builds it afresh): no worker for it.
       return new ScriptLayerRun(
         program,
         indicator.settings.inputs,
         this.context,
         this.symbol,
         this.feed,
+        indicator.hidden ? undefined : this.runner,
       );
     }
     if (definition.kind === 'script') {
@@ -1160,6 +1281,8 @@ export class IndicatorLayer {
   }
 
   private teardown(view: IndicatorView): void {
+    // Its worker stops, unless its run went on in the view built in its place.
+    if (!view.runKept) view.script?.dispose();
     // Its series take their levels and primitives with them; an emptied pane closes.
     for (const series of view.series) this.chart.removeSeries(series);
     view.series = [];
@@ -1439,6 +1562,7 @@ export class IndicatorLayer {
   /** Its fills, backgrounds, value labels and trackprice lines, after its values changed. */
   private refreshDecorations(view: IndicatorView): void {
     const stopped = view.error !== null;
+    view.stopped = stopped;
     view.fill?.update(stopped ? [] : this.fills(view));
     view.background?.update(stopped ? [] : this.backgrounds(view));
     view.labels?.update(stopped ? [] : this.valueLabels(view));

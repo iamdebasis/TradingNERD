@@ -1430,6 +1430,8 @@ export interface ChartState {
     trades: { fills: number; painted: number; closed: number; open: number } | null;
     /** What stopped a script, if anything did. */
     error: string | null;
+    /** A script in a worker without results for the chart's bars yet, or messages unanswered. */
+    calculating: boolean;
   }[];
   /** The chart's bars a script's barcolor() colors: each one's index and body color. */
   barColors: { index: number; color: string }[];

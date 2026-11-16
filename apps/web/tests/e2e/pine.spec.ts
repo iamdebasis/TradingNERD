@@ -16,6 +16,13 @@ const indicatorsDialog = (page: Page) =>
 const row = (page: Page, id: string) => page.locator(`[data-indicator="${id}"]`);
 const indicatorsOf = async (page: Page) => (await chartState(page)).indicators;
 
+/** Until each script on the chart has its worker's results for the bars (docs/SPEC.md §6.23). */
+async function calculated(page: Page): Promise<void> {
+  await expect
+    .poll(async () => (await indicatorsOf(page)).every((item) => !item.calculating))
+    .toBe(true);
+}
+
 /** The code the editor holds now, as the page keeps it. */
 async function code(page: Page): Promise<string> {
   return page.evaluate(() => {
@@ -240,6 +247,7 @@ test('My scripts lists the saved scripts in the Indicators dialog, and a click a
   await indicatorsDialog(page).getByRole('button', { name: 'Close' }).click();
   // An overlay: on the price pane, its row in the main legend.
   await expect.poll(async () => (await indicatorsOf(page))[0]?.pane).toBe(0);
+  await calculated(page);
   const [average] = await indicatorsOf(page);
   expect(average?.kind).toBe('script');
   expect(average?.plots[0]?.points).toBeGreaterThan(0);
@@ -493,6 +501,7 @@ test('a plotcandle is drawn from where its open, high, low and close have all se
   );
   await editor(page).getByRole('button', { name: 'Add to chart' }).click();
   await expect.poll(async () => (await indicatorsOf(page))[0]?.plots.length).toBe(2);
+  await calculated(page);
   const state = await chartState(page);
   const [candles, ema] = state.indicators[0]?.plots ?? [];
   expect(ema?.start).toBeGreaterThan(0);

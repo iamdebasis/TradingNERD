@@ -40,6 +40,7 @@ export {
   inputId,
   plotId,
   type ScriptContext,
+  type ScriptRunner,
   scriptDefaultInputs,
   scriptDefinition,
   scriptInputs,

@@ -28,8 +28,14 @@ import {
   compileScript,
   convertToV6,
   DEFAULT_SYMBOL,
+  type FromWorker,
+  RemoteRun,
   type RequestFeed,
+  ScriptHost,
+  type ScriptProgram,
   ScriptRun,
+  type ScriptSymbol,
+  type ToWorker,
 } from '../../packages/pine/src/index.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -446,11 +452,31 @@ function runOne(
     });
     if (!result.ok)
       return { ok: false, stage: 'compile', message: result.errors[0]?.message ?? '?' };
-    let run = new ScriptRun(result.program, result.program.defaults(), DEFAULT_SYMBOL, CORPUS_FEED);
-    run.setBars(BARS, true);
+    let symbol: ScriptSymbol = DEFAULT_SYMBOL;
+    let bars: readonly Bar[] = BARS;
+    let run = new ScriptRun(result.program, result.program.defaults(), symbol, CORPUS_FEED);
+    run.setBars(bars, true);
     if (run.error && /timeframe/i.test(run.error.message) && /chart/i.test(run.error.message)) {
-      run = new ScriptRun(result.program, result.program.defaults(), HOURLY, CORPUS_FEED);
-      run.setBars(HOURS, true);
+      symbol = HOURLY;
+      bars = HOURS;
+      run = new ScriptRun(result.program, result.program.defaults(), symbol, CORPUS_FEED);
+      run.setBars(bars, true);
+    }
+    // In the app each script runs in a worker of its own: through it, the same results. A script
+    // that differs between two runs here (math.random()'s seed and timenow are each load's own)
+    // can't be compared: it's counted apart.
+    const again = new ScriptRun(result.program, result.program.defaults(), symbol, CORPUS_FEED);
+    again.setBars(bars, true);
+    if (resultsDiffer(run, again)) varying.push(text);
+    else {
+      const differs = workerDiffers(
+        run,
+        result.program,
+        symbol,
+        bars,
+        importPaths(text, libraries),
+      );
+      if (differs) return { ok: false, stage: 'worker', message: differs };
     }
     if (run.error) return { ok: false, stage: 'runtime', message: run.error.message };
     if (run.waiting) {
@@ -464,6 +490,116 @@ function runOne(
       message: String((error as Error).message ?? error).slice(0, 200),
     };
   }
+}
+
+/** The scripts whose two runs in the page differ (math.random(), timenow): not compared. */
+const varying: string[] = [];
+
+/** The code of each library a script imports, by its path as the app keeps them ("user/name/1"). */
+function importPaths(text: string, libraries: ReadonlyMap<string, string>): Record<string, string> {
+  const paths: Record<string, string> = {};
+  for (const [, publisher, name, version] of withLibraries(text, libraries).matchAll(IMPORT)) {
+    const code = libraries.get(name as string);
+    if (code !== undefined) paths[`${publisher}/${name}/${version}`] = code;
+  }
+  return paths;
+}
+
+/**
+ * The script again through a worker's two ends (docs/SPEC.md §6.23), each message copied as a
+ * worker's are (structuredClone: V8's serializer, as Chrome's workers use): what differs from the
+ * run in the page, or null. Its contexts reach the worker as the app sends them, so it loads
+ * again while its requests name more (as the app runs a script again once their data is in).
+ */
+function workerDiffers(
+  local: ScriptRun,
+  program: ScriptProgram,
+  symbol: ScriptSymbol,
+  bars: readonly Bar[],
+  libraries: Record<string, string>,
+): string | null {
+  let remote: RemoteRun | null = null;
+  const host = new ScriptHost(
+    (message, transfer) => remote?.receive(structuredClone(message, { transfer }) as FromWorker),
+    { rates: CORPUS_FEED.rates },
+  );
+  remote = new RemoteRun(
+    {
+      post: (message, transfer) => host.receive(structuredClone(message, { transfer }) as ToWorker),
+      close: () => {},
+    },
+    { program, inputs: program.defaults(), symbol, feed: CORPUS_FEED, libraries },
+  );
+  try {
+    let asked = -1;
+    for (let load = 0; load < 6 && remote.requested.length !== asked; load++) {
+      asked = remote.requested.length;
+      remote.setBars(bars, true);
+    }
+    return resultsDiffer(local, remote);
+  } finally {
+    remote.dispose();
+  }
+}
+
+/** The first way two runs' results differ, or null (NaN equal to NaN). */
+function resultsDiffer(local: ScriptRun, remote: RemoteRun): string | null {
+  if (remote.length !== local.length) return `length ${remote.length} vs ${local.length}`;
+  const outputs: [string, readonly (Float64Array | null)[], readonly (Float64Array | null)[]][] = [
+    ['plot', local.values, remote.values],
+    ['plot color', local.plotColors, remote.plotColors],
+    ['background', local.backgrounds, remote.backgrounds],
+    ['fill color', local.fillColors, remote.fillColors],
+  ];
+  for (const [what, mine, theirs] of outputs) {
+    if (mine.length !== theirs.length) return `${what}s: ${theirs.length} vs ${mine.length}`;
+    for (let i = 0; i < mine.length; i++) {
+      const a = mine[i];
+      const b = theirs[i];
+      if (!a || !b) {
+        if (a !== b && (a ?? b)?.length) return `${what} ${i}: one has none`;
+        continue;
+      }
+      for (let bar = 0; bar < local.length; bar++) {
+        const x = a[bar] as number;
+        const y = b[bar] as number;
+        if (!(x === y || (Number.isNaN(x) && Number.isNaN(y)))) {
+          return `${what} ${i} on bar ${bar}: ${y} vs ${x}`;
+        }
+      }
+    }
+  }
+  const json = (value: unknown) => JSON.stringify(value);
+  const untimed = (logs: ScriptRun['logs']) =>
+    logs.map((entry) => (entry.realtime ? { ...entry, time: 0 } : entry));
+  const bare = (objects: readonly object[]) =>
+    objects.map((object) => ({ ...object, id: 0 }) as object);
+  const drawings = (d: ScriptRun['drawings']) => [
+    bare(d.labels),
+    bare(d.lines),
+    bare(d.boxes),
+    bare(d.tables),
+    bare(d.polylines),
+    d.linefills.map((fill) => [fill.color, bare([fill.line1, fill.line2])]),
+  ];
+  const parts: [string, unknown, unknown][] = [
+    [
+      'starts',
+      [local.plotStarts, local.backgroundStarts, local.fillStarts],
+      [remote.plotStarts, remote.backgroundStarts, remote.fillStarts],
+    ],
+    ['offsets', local.offsets, remote.offsets],
+    ['error', local.error?.message ?? null, remote.error?.message ?? null],
+    ['missing', local.missing, remote.missing],
+    ['requested', local.requested, remote.requested],
+    ['drawings', drawings(local.drawings), drawings(remote.drawings)],
+    ['strategy', local.strategy, remote.strategy],
+    ['logs', untimed(local.logs), untimed(remote.logs)],
+  ];
+  for (const [what, mine, theirs] of parts) {
+    if (json(mine) !== json(theirs)) return `${what} differ`;
+  }
+  return null;
 }
 
 /**
@@ -520,6 +656,9 @@ function report(scripts: Script[]): void {
       kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
     }
   }
+  console.log(
+    `Through a worker as in the app: every script that runs gives the same results, but the ${varying.length} that differ from run to run in the page too (math.random(), timenow), which aren't compared`,
+  );
   // The manual's error examples should stop here as they do on TradingView.
   const errors = results.filter((r) => r.script.deliberate);
   const accepted = errors.filter((r) => r.ok);

@@ -28,6 +28,7 @@ import { chartSettings, useChartSettings } from './chartSettings';
 import { toChartTheme } from './chartTheme';
 import { Legend } from './Legend';
 import { RequestLoader } from './requestLoader';
+import { workerScripts } from './scriptRunner';
 
 const chartTheme = toChartTheme(darkTheme);
 
@@ -128,6 +129,21 @@ export function ChartPane({
 
   useEffect(() => {
     if (!container.current) return;
+    // A script's worker answered: its legend row, errors, logs, Strategy Tester and requests
+    // follow, once per frame however many answered.
+    let scriptsFrame = 0;
+    const scriptsChanged = () => {
+      if (scriptsFrame) return;
+      scriptsFrame = requestAnimationFrame(() => {
+        scriptsFrame = 0;
+        values.refresh();
+        const now = created.indicatorErrors();
+        setErrors((before) => (sameErrors(before, now) ? before : now));
+        logsStore.setScripts(created.scriptLogs());
+        strategyStore.setStrategies(created.scriptStrategies());
+        sync.current();
+      });
+    };
     const created = new ChartController(container.current, {
       theme: chartTheme,
       onHover: (info) => session.current?.hover(info),
@@ -135,6 +151,8 @@ export function ChartPane({
       onGesture: (setting) => gestureSettings.gestured(setting),
       onPaneHeights: (heights) => indicatorStore.setPaneHeights(heights),
       onLayout: () => setPanes(created.paneLayout()),
+      scriptRunner: workerScripts,
+      onScripts: scriptsChanged,
     });
     values.chart = created;
     // The user's gesture settings (the top bar's Gestures popup), now and as they change.
@@ -146,6 +164,7 @@ export function ChartPane({
     if (import.meta.env.DEV) window.__tradingNerd = { ...window.__tradingNerd, chart: created };
     return () => {
       stopSettings();
+      cancelAnimationFrame(scriptsFrame);
       values.chart = null;
       created.destroy();
       setChart(null);

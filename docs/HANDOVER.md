@@ -2,18 +2,18 @@
 
 The state of the work, for whoever picks it up next, human or AI. Update it at every hand-over. The rules are in [../AGENTS.md](../AGENTS.md); the decisions and their reasons in [SPEC.md](SPEC.md).
 
-**Last updated:** 15 November 2026 (scripts with requests freezing the tab as history loads: step 1 of the fix; the perf tests on the GPU merged as pull request #12), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
+**Last updated:** 16 November 2026 (scripts freezing the tab, step 2: Pine scripts on the chart in workers of their own; step 1 merged as pull request #13), by the AI Lead Architect, Lead Delivery Engineer and UI Lead (Claude).
 
 ## 1. Where things stand
 
 | | |
 |---|---|
-| Branches | `main` is at `5284b53` (pull request #12 (https://github.com/iamdebasis/TradingNERD/pull/12) merged on 15 November: the perf tests on the GPU; #11 on 10 November: the Mac's second run; #10 the same day: the Mac's visual baselines; #9: the hand-over of the Mac's first run; #8: the gateway's own address; #7: price alerts; #6 on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
-| Merged | **Pull request #12** (https://github.com/iamdebasis/TradingNERD/pull/12), the perf tests on the GPU, one at a time (§2k), merged on 15 November: `main` is at `5284b53`. **Pull request #11** (https://github.com/iamdebasis/TradingNERD/pull/11), the Mac's second run (§2j): the Bitstamp polling test, two live tests and the gateway asking a dropped connection again, merged on 10 November. **Pull request #10** (https://github.com/iamdebasis/TradingNERD/pull/10), the five visual baselines renewed on the Mac (§2j), merged on 10 November. **Pull request #9** (https://github.com/iamdebasis/TradingNERD/pull/9), the hand-over of the Mac's first run (§2i), merged on 10 November. **Pull request #8** (https://github.com/iamdebasis/TradingNERD/pull/8), the gateway's own address sending a browser on to the app (§2h), merged on 10 November. **Pull request #7** (https://github.com/iamdebasis/TradingNERD/pull/7), price alerts (§2g), merged on 10 November. **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
-| Under way | **Scripts freezing the tab, step 1** (§2l): request texts read once, scripts run again once per history load rather than per page, bigger pages with a script on the chart, on `claude/keen-allen-7wubfe` from `main` at `5284b53`, for its own pull request. Step 2, scripts off the main thread, to plan next |
-| Waiting on the Mac | After this change merges: `pnpm verify` (the perf tests' "Renderer:" line should name the Mac's GPU, not SwiftShader), the user's VuManChu B on 1D and 4h, `pnpm test:live`, the hand checks (§9) |
+| Branches | `main` is at `ca62c84` (pull request #13 (https://github.com/iamdebasis/TradingNERD/pull/13) merged on 16 November: scripts freezing the tab, step 1; #12 on 15 November: the perf tests on the GPU; #11 on 10 November: the Mac's second run; #10 the same day: the Mac's visual baselines; #9: the hand-over of the Mac's first run; #8: the gateway's own address; #7: price alerts; #6 on 9 November: Pine for any script, steps 1 to 4; #5 before it, the hand-over of 8 November; #4, P2 and P4; #3, P1, the Pine Editor), protected by a ruleset; it was brought level with `m7-us-stocks` on 26 October. New work comes from `claude/…` branches as pull requests, which the user merges on GitHub (AGENTS.md, "Git"). `m7-us-stocks` is kept as a historical branch, and no new work happens there. Six older milestone branches (`m1-chart` … `m6-feel-performance`) aren't on GitHub |
+| Merged | **Pull request #13** (https://github.com/iamdebasis/TradingNERD/pull/13), scripts freezing the tab, step 1 (§2l), merged on 16 November: `main` is at `ca62c84`. **Pull request #12** (https://github.com/iamdebasis/TradingNERD/pull/12), the perf tests on the GPU, one at a time (§2k), merged on 15 November. **Pull request #11** (https://github.com/iamdebasis/TradingNERD/pull/11), the Mac's second run (§2j): the Bitstamp polling test, two live tests and the gateway asking a dropped connection again, merged on 10 November. **Pull request #10** (https://github.com/iamdebasis/TradingNERD/pull/10), the five visual baselines renewed on the Mac (§2j), merged on 10 November. **Pull request #9** (https://github.com/iamdebasis/TradingNERD/pull/9), the hand-over of the Mac's first run (§2i), merged on 10 November. **Pull request #8** (https://github.com/iamdebasis/TradingNERD/pull/8), the gateway's own address sending a browser on to the app (§2h), merged on 10 November. **Pull request #7** (https://github.com/iamdebasis/TradingNERD/pull/7), price alerts (§2g), merged on 10 November. **Pull request #6** (https://github.com/iamdebasis/TradingNERD/pull/6), Pine like TradingView's for any script, merged on 9 November: steps 1 to 4 (compatibility with older versions, §2c; drawings, §2d; strategies and the Strategy Tester, §2e; alerts on scripts and the non-standard data, §2f). **Pull request #5** (https://github.com/iamdebasis/TradingNERD/pull/5), the hand-over of P2 and P4, on 8 November |
+| Under way | **Scripts freezing the tab, step 2** (§2m): Pine scripts on the chart run in workers of their own, so the page never waits on them, on `claude/keen-allen-7wubfe` from `main` at `ca62c84`, for its own pull request. Next: alerts' scripts in workers too (step 2b), then a requested context's run kept when its data didn't change (step 3) |
+| Waiting on the Mac | After this change merges: `pnpm verify` (the perf tests' "Renderer:" line should name the Mac's GPU, not SwiftShader), the user's VuManChu B on 1D and 4h, scrolled and zoomed back, `pnpm test:live`, the hand checks (§9) |
 | Home | https://github.com/iamdebasis/TradingNERD, public |
-| Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's), P4 (other symbols and timeframes, open interest), Pine for any script (compatibility with older versions, drawings, strategies and the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), price alerts and the gateway's own address; all merged on GitHub |
+| Committed | M0–M8e (chart, intervals, watchlists, search, exchanges, feel, US stocks, several watchlists), M9a–M9e (CRYPTOCAP, formulas, Bitstamp, kept history, older market caps), A1, A2, A6 (accuracy steps), I1 with its gaps (indicators: Volume and RSI), P1 (the Pine Editor), P2 (real Pine scripts, the editor as TradingView's), P4 (other symbols and timeframes, open interest), Pine for any script (compatibility with older versions, drawings, strategies and the Strategy Tester, alerts on scripts, Renko, Line Break, Kagi and Point & Figure data), price alerts, the gateway's own address and step 1 against scripts freezing the tab; all merged on GitHub |
 | Committed, switched off | **M9f, each coin's older days:** steps 1–2 in `c4f260a`, built and tested, switched off in the charts; its download runs on the user's gateway (§4) |
 | History cleaned (26 October) | Before the first push, every commit was rewritten: the author is **Debasis `<30506767+iamdebasis@users.noreply.github.com>`** (GitHub's private address), with times in UTC; the TradingView name and avatars in two reference screenshots are painted over. Every file, message and moment is otherwise as before. All 1,406 objects were searched afterwards: no personal email, name, home folder, Mac name, time zone or key |
 | Merged: P2 | **P2, real Pine scripts and the editor as TradingView's** (31 October to 2 November), from `main` at `4295233`, committed step by step on the user's YES: step 1 (versions and types, `212fb59`), step 3 (the built-ins on TradingView's own values, `0c80d88`), step 4 (the plotshape family, `074a0a7`), step 5 (libraries, protocol v12, `264218c`), step 6 (the script menu, Version history, help while typing, `f296709`) and step 7 (Pine Logs, Convert code to v6, Move script to bottom, the corpus's last fixes, `e90c080`). The corpus: 478 of 481 manual examples and 199 of 199 community scripts that need only P2 run (99.6%), and the manual's error examples all stop as on TradingView; 671 of 689 plots equal TradingView's (SPEC §4.17). Merged with P4 on 7 November (pull request #4). Provisional: SPEC §11, items 89 to 103 |
@@ -22,6 +22,54 @@ The state of the work, for whoever picks it up next, human or AI. Update it at e
 | Not built | M7c (stock logos); A4 and A5 (overtaken by M9e and M9f) |
 
 What's left for the Mac, for every milestone, is one list: §9. The milestone table is SPEC §8.
+
+## 2m. Scripts freezing the tab, step 2: scripts in workers of their own (16 November)
+
+Step 1 (§2l, merged as pull request #13) made scripts run less often. But a script still ran on the page's own thread, the one that draws and answers clicks: zooming out on a long 4h history with VuManChu B still blocked the tab for 23–27 s in all, in blocks of up to 6.5 s. TradingView runs Pine on its servers, so its page never runs one (SPEC §3, 16 November).
+
+**Changed** (SPEC §3, 16 November; how it's built: §6.23):
+- every Pine script on the chart runs in a worker of its own (a Web Worker: a thread of the browser's beside the page's). The page sends it the bars and its requests' data, and draws what comes back;
+- while a script calculates for the first time, its legend row shows the loading ring where its values go. When older bars load, what it drew stays on its own bars until the run over all of them is in;
+- a script whose look alone changed (a color, a hidden plot) keeps its run and is drawn again at once. A script removed while it calculates stops its worker at once;
+- a browser without workers would run scripts in the page, as before;
+- a fresh run takes its own drawings and trades (before, a reload whose drawings changed as often as the last load's kept the last load's: a label on the last bar stayed where it was before older bars loaded);
+- Lightweight Charts 5.2.1 loses the chart's time points when the candles are its only series with data and are set again, and then throws "Value is null" on every frame. Scripts in workers made that likely (their series wait empty while the candles are set). An invisible series on the first bar's time keeps it from happening. 5.3.0, published 10 November, fixes it; the upgrade waits on your YES (SPEC §11, item 139).
+
+| Measured in the cloud, VuManChu B on 4h: 12,000 bars, with 48,000 1h, 4,000 12h and 2,000 daily ones (16 November, three rounds each, taken in turn on the same machine) | `main` (`ca62c84`, step 1) | With workers |
+|---|---|---|
+| Chart opening, the page blocked | 1.83–2.03 s | 0.52–0.58 s |
+| Its longest single block | 1.24–1.39 s | 0.14–0.17 s |
+| Zoomed out until its history is in, the page blocked | 26.3–26.8 s | 6.7–7.4 s |
+| Its longest single block | 5.2–6.5 s | 0.31–0.46 s |
+| The zoom done: all 60 wheel turns taken and the history in | 27 s | 7–8 s |
+| The script's values over all 12,000 bars | with each page, the page blocked meanwhile | 3.9–4.4 s after the zoom began, 2.3–2.4 s after the last page |
+| A heavy script added from the Pine Editor (4,000 loop steps a bar, 1,000 bars): the page's longest task | 2.1 s | under 0.2 s |
+
+On `main`, two of the three rounds paged back only to 11,000 bars, so its numbers are if anything low.
+
+**What's left of the page's time while zooming** (a Chrome trace and a CPU profile of the same zoom with workers): the script's own 3.9 s are all in its worker now. Of the page's 8.1 s:
+- 5.1 s are Chrome drawing the chart's canvases in software, as the cloud has no GPU;
+- 1.6 s are JavaScript, nearly all of it Lightweight Charts drawing VuManChu B's 34 lines over 12,000 bars;
+- 0.4 s are the canvases copied out for the screen.
+
+With no script, the same zoom has no long task at all. On the Mac the canvases draw on the GPU, so much of the 5.1 s may leave the page's thread there; that's the Mac's to measure (§9).
+
+**The same results:** the corpus, the manual's 1,034 of 1,069 examples and the community's 809 of 854 (as before), gives the same results through a worker's two ends as in the page, but for the 16 whose results differ from one run to the next in the page too (`math.random()`, `timenow`). VuManChu B with data for all four timeframes: the same values through the worker as in the page (hash `fae19f56862687b0` both).
+
+**Not fixed yet:**
+- older bars wait for their values while the worker runs the script again over every bar (zooming out on 4h with VuManChu B, 2.3–2.4 s after the last page, in the cloud); keeping a requested context's run when its data didn't change is step 3 (SPEC §11, item 138);
+- the page's own drawing of a script's many lines, above;
+- alerts' scripts still run in the page: an alert running VuManChu B costs 1.5 s at its start and when its history changes. Moving them to workers is step 2b (item 140);
+- a script that runs very long runs on in its worker, the page free, until it's removed; TradingView stops a calculation after 20 to 40 s depending on the plan (item 141).
+
+**Checks (cloud):**
+- typecheck and lint clean;
+- the unit tests pass: core 350, indicators 78, Pine 437 (23 new), chart 109 (4 new), web 230, gateway 576. The engine's two new tests fail without their fix;
+- the corpus as above;
+- the browser suite without its visual and performance tests: 231 of 235. The 4 failures are the cloud's known pixel and font checks (§6), which pass on the Mac;
+- `workers.spec.ts`'s heavy-script test fails with the script run in the page (one task of 2.1 s). `pine.spec.ts`'s marks test fails without the invisible series (the marks are never drawn).
+
+The real check against your running app is the Mac's (§9).
 
 ## 2l. Scripts freezing the tab, step 1 (15 November)
 
@@ -44,7 +92,7 @@ The user's VuManChu B froze the tab ("Page Unresponsive" in the browser), with t
 | The same, zoomed out until its history is in, blocked | 77–95 s | 23–24 s |
 | Its longest single block | 8.1–8.5 s | 4.3–4.4 s |
 
-The values are identical: the corpus's 1,965 scripts' outcomes, and every value of VuManChu B's with data for all four timeframes. **Not fixed yet:** zooming out on a long 4h history still blocks the tab for seconds at a time, since each page of the chart's own history runs the scripts again over every bar. The fix is step 2: scripts off the main thread, in a Web Worker (SPEC §11, item 138).
+The values are identical: the corpus's 1,965 scripts' outcomes, and every value of VuManChu B's with data for all four timeframes. **Not fixed yet:** zooming out on a long 4h history still blocks the tab for seconds at a time, since each page of the chart's own history runs the scripts again over every bar. Step 2 took the scripts off the page's thread, into workers of their own (§2m).
 
 **Checks (cloud):** typecheck and lint clean; the unit tests pass (core 350, indicators 78, Pine 414, chart 105, web 230, gateway 576), the new ones failing without their changes; the corpus unchanged; the browser suite without its visual and performance tests 227 of 232, the 5 failures the cloud's known 4 pixel and font checks and Symbol Search's Enter under load (passes 3 of 3 alone).
 
@@ -325,10 +373,10 @@ Built on the user's YES of 27 October, from `main` at `6c403cb`, and merged on 3
 - **Start:** `pnpm dev`, then open http://127.0.0.1:5173 (the gateway's own address, http://127.0.0.1:5180, sends you there too).
 - **Keys,** each in its dialog: CoinGecko (coin logos and CRYPTOCAP), Alpaca (US stocks), Live Coin Watch (older market caps).
 - **Before every delivery:** `pnpm verify`, then a read-only check against the running app (AGENTS.md).
-- **Test counts on 10 November:**
-  - core 350, indicators 78, pine 409, chart 100, web 228;
+- **Test counts on 16 November:**
+  - core 350, indicators 78, pine 437, chart 109, web 230;
   - gateway 576 (plus 77 that need the live internet);
-  - browser 249 (13 visual, 5 performance among them);
+  - browser 253 (13 visual, 5 performance among them);
   - lint and typecheck clean.
 - **Known flaky tests:** none in the unit tests since 10 November (Bitstamp's polling test was fixed: §2j). In the cloud, the gestures test's 1 px flick and Symbol Search's Enter under load now and then.
 - **The perf tests** draw on the GPU, one at a time, and print the renderer they drew with (§2k). In the cloud they draw in software and miss some budgets, as before.
@@ -364,7 +412,7 @@ The full list is SPEC §11; these are the ones that matter most.
   - TradingView-style self-widening watchlist columns (item 53);
   - a separate data folder for the browser tests' own gateway (item 57);
   - M7c stock logos.
-- **GitHub's merge commits:** merging on GitHub made `9324baa` (pull request #1), `6c403cb` (#2), `4295233` (#3), `684091e` (#4) and every merge since (#5 to #11, `1e891e1` the latest), with GitHub as committer and +0530, the time zone the 26 October rewrite took out. They're public on `main`, so the identity check (AGENTS.md, "Git") prints a second line, which no push of ours adds. How merges should go is the user's call, from the options given on 26 October: fast-forward `main` from the Mac with a bypass of the ruleset for the user alone, accept GitHub's commits in the docs, or try merging from a browser set to UTC (GitHub doesn't document which time zone it stamps).
+- **GitHub's merge commits:** merging on GitHub made `9324baa` (pull request #1), `6c403cb` (#2), `4295233` (#3), `684091e` (#4) and every merge since (#5 to #13, `ca62c84` the latest), with GitHub as committer and +0530, the time zone the 26 October rewrite took out. They're public on `main`, so the identity check (AGENTS.md, "Git") prints a second line, which no push of ours adds. How merges should go is the user's call, from the options given on 26 October: fast-forward `main` from the Mac with a bypass of the ruleset for the user alone, accept GitHub's commits in the docs, or try merging from a browser set to UTC (GitHub doesn't document which time zone it stamps).
 - **Free limits that can change:** CoinGecko's 10,000 calls a month, Live Coin Watch's 10,000 requests a day. CoinDesk reportedly ended its free plan in 2026.
 - **Indicators (I1):** every look not measured from a screenshot is provisional (SPEC §11, items 62–63 and 70); TradingView's tick volume for TOTAL isn't ours (item 68); the sentence-case title waits on the user (item 73). RSI's Timeframe came with P4 (item 71), the Source code button with P1 (item 72).
 - **Pine (P1, P2):** the editor's look is provisional until the screenshots in SPEC §11, item 74; the built-in RSI's smoothed MA waits on the user (item 76); P2's provisional looks are items 89 to 103.
@@ -372,29 +420,35 @@ The full list is SPEC §11; these are the ones that matter most.
 - **The Mac's visual baselines:** renewed on the Mac and merged as pull request #10 (§2j). Popups at fractional positions blend their edge pixel with the chart (the Gestures popup): snapping them to whole pixels waits for the next visual change.
 - **Pushing from the Mac:** works since 10 November (`gh auth login`); #10 was pushed from it.
 - **Performance:** the perf tests now draw on the GPU (§2k); whether the Mac's headless browser takes it waits on its next `pnpm verify` (the "Renderer:" line). Drawing RSI's gradient fills only where they show is for later (SPEC §11, item 137).
-- **Scripts on long histories:** zooming out or scrolling back far with a request-heavy script still blocks the tab for seconds at a time, as each page of the chart's own history runs it again over every bar (§2l; SPEC §11, item 138). Step 2, scripts off the main thread, is the fix.
+- **Scripts on long histories:** since step 2 they run in workers of their own, and the page never waits on them (§2m). What's left:
+  - older bars wait for their values while the worker runs the script again over every bar (2.3–2.4 s on 4h with VuManChu B, in the cloud): step 3 (SPEC §11, item 138);
+  - the page's own drawing of a script's many lines, 6.7–7.4 s in all while zooming out with VuManChu B in the cloud, in steps under 0.5 s, most of it Chrome drawing in software for want of a GPU; the Mac's numbers are to measure (item 138);
+  - alerts' scripts still run in the page: step 2b (item 140);
+  - Lightweight Charts 5.3.0 fixes the bug the invisible series works around; the upgrade waits on your YES (item 139).
 - **Open interest's archive pass** runs once per gateway start, so points Binance's live API left out fill in at the next start after Binance publishes that day (SPEC §11, item 136).
 - **Price alerts:** whether Greater Than and Less Than trigger at once when the price is already past the value, and how often Every time triggers, wait on a check against TradingView (SPEC §11, item 135); the dialog's look waits on a screenshot.
 - **Step 4 (alerts, non-standard data):** alerts run only while the app is open and live in this browser (SPEC §11, item 133); the non-standard bars' undocumented choices (item 130); a strategy's last bar of a session closes when the next opens (item 131); the alert UI and its defaults wait on screenshots (item 133, SPEC §7.7).
 
 ## 9. Next steps, in order
 
-**1. This change's pull request** (scripts freezing the tab, step 1: §2l); the user merges it on GitHub. #12, the perf tests on the GPU, was merged on 15 November; #11, #10 and #9 on 10 November.
+**1. This change's pull request** (scripts freezing the tab, step 2: §2m); the user merges it on GitHub. #13, step 1, was merged on 16 November; #12, the perf tests on the GPU, on 15 November; #11, #10 and #9 on 10 November.
 
 **2. On the Mac, after merging it and pulling `main`** (none of this can be done in the cloud):
 1. Restart `pnpm dev`. There are no new dependencies since P1; run `pnpm install` first only if it hasn't run since then.
-2. The user's VuManChu B, one copy, on XRPUSDT 1D and on a 4h chart, scrolled back: no "Page Unresponsive"; on 4h, short stops while history pages in remain until step 2 (§2l).
+2. The user's VuManChu B, one copy and then two, on XRPUSDT 1D and on a 4h chart, scrolled and zoomed far back: no "Page Unresponsive" and no stops of seconds. While a copy calculates the first time its legend row shows the loading ring, and older bars get its values a few seconds after they appear (§2m). If the chart still stutters while zooming, say how much: in the cloud, drawing its 34 lines in software still blocks the page 7 s in all, in steps under 0.5 s, and the Mac draws on its GPU.
 3. `pnpm verify`. It should pass in full. The perf tests now draw on the GPU, one at a time: their "Renderer:" line should name the Mac's GPU (Apple's, through ANGLE's Metal renderer), not SwiftShader. If it says SwiftShader, send the output: the fallback is to run the perf tests in a window, which drew every 8.3 ms on 10 November. A visual test that fails: look at its `-diff.png` under `apps/web/test-results/visual-…/` before anything else.
 4. `pnpm test:live`: the gateway half, then the web half, which runs only after the gateway half passes. A failure there: send its output.
 5. A read-only check against the running app (AGENTS.md): http://127.0.0.1:5180 opens the app (§2h); the user's OI script on BTCUSDT 1h, its values against TradingView's at a few hours. The first daily load of `BINANCE:BTCUSDTPERP_OI` waits about 2.5 minutes while Binance's archive downloads into `data/oi/`; later loads are instant.
 6. The hand checks against TradingView: I1's H1–H7 (SPEC §9, with the screenshots in SPEC §11, item 62); P1's (SPEC §5.16, "Done when": RSI's copy reads as the built-in, a script of the user's runs as on TradingView); P2's 10 scripts, and the user's Ichimoku with `JollyWizard/lib_hlm/1` pasted through "Add library…" (SPEC §5.17); the user's VuManChu B on BTCUSDT 4h (§2c); a drawing script's labels, lines, boxes and tables beside TradingView's (§2d); a strategy's List of Trades and Performance Summary beside TradingView's Strategy Tester on the same symbol and timeframe (§2e); an alert on a script with `alert()` and one with `alertcondition()`, created on both, triggering on the same live bars with the same messages; a Crossing Up price alert just above the live price on both, triggering together, and a Greater Than one made below the price, to see whether TradingView's triggers at once (SPEC §11, item 135); a `request.security(ticker.renko(…))` plot (and Kagi, Line Break, P&F) beside TradingView's (§2f).
 
-**3. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123); TradingView's Strategy Tester and a strategy's trade markers in the dark theme (item 128); the Create Alert dialog on a script and on a price, the alert manager with an alert and its log, and an alert's pop-up (items 133 and 135); a Renko, Kagi, Line Break and P&F request plotted on a chart, with the bars' dates (item 130).
+**3. Scripts, what's left of the fix** (each planned with its own YES): step 2b, alerts' scripts in workers too (SPEC §11, item 140); step 3, a requested context's run kept when its data didn't change, so older bars get their values sooner (item 138); Lightweight Charts 5.3.0, which fixes the bug the invisible series works around, with the visual baselines checked on the Mac (item 139).
 
-**4. M9f** (on the Mac: the download runs on its gateway, and the ruler needs macOS's `sips`):
+**4. Screenshots from TradingView that would settle the provisional looks and units:** plotshape at each size (SPEC §11, item 89); the Pine Logs pane, the editor at the bottom and Convert code to v6 (items 101 to 103); a script loading another symbol and an `input.symbol` field (item 107); the open interest symbols with a value at a date (item 113), which would also show how TradingView's header fits a long name (item 118); a script's labels, boxes and tables, to measure their sizes and padding (item 123); TradingView's Strategy Tester and a strategy's trade markers in the dark theme (item 128); the Create Alert dialog on a script and on a price, the alert manager with an alert and its log, and an alert's pop-up (items 133 and 135); a Renko, Kagi, Line Break and P&F request plotted on a chart, with the bars' dates (item 130).
+
+**5. M9f** (on the Mac: the download runs on its gateway, and the ruler needs macOS's `sips`):
 1. Size step 2b and tell the user how many requests it needs.
 2. Let the download finish, then run `tools/accuracy/check.sh`.
 3. Report the result year by year, then ask YES to switch M9f on in the charts.
 4. Update SPEC (§5.14 status, §8, §11) and this file, then ask YES to commit, and again to push and open a pull request.
 
-**5. Then the plan's next milestones** (SPEC §8): the channel and Moving price conditions, and indicator, drawing and watchlist alerts; the chart types themselves (Renko and the rest on the chart); the strategies' Properties tab and `calc_on_order_fills` (SPEC §11, item 129); the open items P2 and P4 left (SPEC §11, items 100, 111 and 122); Phase 3 (Kraken's history files); and the user's list above.
+**6. Then the plan's next milestones** (SPEC §8): the channel and Moving price conditions, and indicator, drawing and watchlist alerts; the chart types themselves (Renko and the rest on the chart); the strategies' Properties tab and `calc_on_order_fills` (SPEC §11, item 129); the open items P2 and P4 left (SPEC §11, items 100, 111 and 122); Phase 3 (Kraken's history files); and the user's list above.
