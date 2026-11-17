@@ -283,6 +283,9 @@ const currencyRateCall: Handler = (c, call, scope) => {
   const from = (args.string('from') as Compiled).ev;
   const to = (args.string('to') as Compiled).ev;
   const ignore = args.foldedAs('ignore_invalid_currency', 'bool', false);
+  // Its rates come from other contexts: a request's context run that reads them runs again on
+  // every load (requests.ts, ContextRun.keepable).
+  c.readsRates = true;
   return {
     base: 'float',
     qual: SERIES,

@@ -442,6 +442,17 @@ export class ContextRun {
   live = false;
   /** The currency its prices are in (syminfo.currency inside it). */
   currency = '';
+  /** Its prices are another currency's, converted at rates from other contexts (ContextStore.run). */
+  converted = false;
+  /**
+   * Its code reads no clock and makes no requests of its own: no request.*() call inside, nor
+   * request.currency_rate() (from its last run afresh).
+   */
+  private plain = false;
+  /** Its last run was afresh, with no live update since: it's what a fresh run gives. */
+  private fresh = false;
+  /** Kept from the script's last load: its data's next change runs it afresh (keep()). */
+  private kept = false;
   private main: Execution | null = null;
   private checks: Execution[] = [];
   private data: ContextData | null = null;
@@ -467,6 +478,35 @@ export class ContextRun {
     this.warmup = warmup;
   }
 
+  /**
+   * Whether the script's next load can keep this run (ContextStore.begin), as what a fresh run
+   * would give: it last ran afresh and its data hasn't changed since (a live update's values
+   * aren't a fresh run's: varip, barstate.isrealtime); its code reads no clock (timenow, an
+   * unseeded math.random()) and makes no requests of its own; its prices weren't converted to
+   * another currency (their rates come from other contexts); and no run of it stopped on an
+   * error (the time limit's can come out otherwise). Its data's version and history then say all
+   * that can change what it gives.
+   */
+  get keepable(): boolean {
+    const main = this.main;
+    return (
+      main !== null &&
+      this.fresh &&
+      this.plain &&
+      !this.converted &&
+      main.error === null &&
+      this.checks.every((check) => check.error === null)
+    );
+  }
+
+  /**
+   * The script's next load keeps it (ContextStore.begin): there, unchanged data keeps it as it
+   * is, and any change runs it afresh, as that load would have, not as a live update.
+   */
+  keep(): void {
+    this.kept = true;
+  }
+
   get error(): ScriptError | null {
     return this.main?.error ?? null;
   }
@@ -486,14 +526,18 @@ export class ContextRun {
   ensure(data: ContextData): void {
     const before = this.data;
     const main = this.main;
+    const kept = this.kept;
+    this.kept = false;
     if (main && before && before.version === data.version && before.history === data.history) {
       return;
     }
     this.data = data;
     const lastFrom = this.from;
     const bars = this.window(data);
-    const incremental = main && before && before.history === data.history && this.from === lastFrom;
+    const incremental =
+      !kept && main && before && before.history === data.history && this.from === lastFrom;
     if (incremental && bars.length >= main.length && main.length > 0) {
+      this.fresh = false;
       if (bars.length === main.length) {
         for (const run of this.runs()) run.tick(bars);
       } else {
@@ -528,9 +572,12 @@ export class ContextRun {
   }
 
   private full(bars: readonly Bar[], data: ContextData): void {
+    // Fresh only once it's done: a run cut short by a crash is never kept.
+    this.fresh = false;
     const realtimeFrom = data.live ? Math.max(0, bars.length - 1) : bars.length;
     const make = (start: number, changed: readonly Bar[]) => {
       const program = this.store.compile(this.plan);
+      this.plain = !program.readsClock && !program.readsRates && program.requests.length === 0;
       const execution = new Execution(
         program,
         this.store.inputs,
@@ -565,6 +612,7 @@ export class ContextRun {
       // Made bars trusted from `data.warmup` on: what the code remembers counts from there.
       this.settledFrom = Math.max(this.settledFrom + (data.warmup ?? 0), this.warmup);
     }
+    this.fresh = true;
   }
 
   private times(bars: readonly Bar[], data: ContextData): void {
@@ -631,8 +679,10 @@ function project(captured: readonly Value[], length: number, k: number): Float64
 }
 
 /**
- * Every context one load of a script uses, shared by its runs (the script's own and the warm-up
- * checks', and requests inside requests): each context runs once however many runs read it.
+ * Every context a script's loads use, shared by each load's runs (the script's own and the
+ * warm-up checks', and requests inside requests): each context runs once however many runs read
+ * it. It lasts from one load to the next (ScriptRun.load: begin(), end()), so a context whose run
+ * can't come out differently keeps it (docs/SPEC.md §6.18, step 3).
  */
 /** A request call's texts and timeframe, as ContextStore.run works them out (asked()). */
 interface SiteRequest {
@@ -655,16 +705,20 @@ export class ContextStore {
   readonly inputs: readonly Value[];
   /** The chart's symbol: syminfo.main_tickerid and timeframe.main_period inside a request. */
   readonly main: ScriptSymbol;
-  readonly clock: RunClock;
-  /** Contexts asked for that the feed hasn't loaded yet, by their text. */
+  /** The load's clock (timenow, math.random()'s seed), the same for all of its runs. */
+  clock: RunClock;
+  /** Contexts this load asked for that the feed hasn't loaded yet, by their text. */
   readonly missing = new Map<string, RequestKey>();
-  /** Every context asked for, by its text. */
+  /** Every context this load asked for, by its text. */
   readonly used = new Map<string, RequestKey>();
   /** Each request's contexts asked for on the chart's history: realtime bars may read only these. */
   readonly history = new Set<string>();
   private readonly runs = new Map<string, ContextRun>();
-  /** Each unique request: Pine's limit counts them. */
+  /** Each unique request this load made: Pine's limit counts them. */
   private readonly unique = new Set<string>();
+  /** The runs this load asked for, by id, and the made bars' texts: the rest go at its end. */
+  private readonly runsAsked = new Set<string>();
+  private readonly madeAsked = new Set<string>();
   /** Each call site's last request, worked out: reused while the call asks for the same. */
   private readonly sites = new WeakMap<RequestSite, SiteRequest>();
 
@@ -680,6 +734,37 @@ export class ContextStore {
     this.inputs = inputs;
     this.main = main;
     this.clock = clock;
+  }
+
+  /**
+   * A new load of the script, with its own clock: what it asks for starts empty, and the runs of
+   * the last load that a fresh run would give again stay (ContextRun.keepable). One whose data
+   * then turns out unchanged is used as it is; any change runs it afresh (ContextRun.ensure). A
+   * context that had live updates, reads the clock, makes requests of its own or is converted to
+   * another currency runs afresh, as every one did before step 3.
+   */
+  begin(clock: RunClock): void {
+    this.clock = clock;
+    this.missing.clear();
+    this.used.clear();
+    this.history.clear();
+    this.unique.clear();
+    this.runsAsked.clear();
+    this.madeAsked.clear();
+    for (const [id, run] of this.runs) {
+      if (run.keepable) run.keep();
+      else this.runs.delete(id);
+    }
+  }
+
+  /** The load is done: runs and made bars it didn't ask for go (a context no longer read). */
+  end(): void {
+    for (const id of this.runs.keys()) if (!this.runsAsked.has(id)) this.runs.delete(id);
+    for (const text of this.made.keys()) if (!this.madeAsked.has(text)) this.made.delete(text);
+    for (const text of this.remade.keys()) if (!this.madeAsked.has(text)) this.remade.delete(text);
+    for (const text of this.converted.keys()) {
+      if (!this.madeAsked.has(text)) this.converted.delete(text);
+    }
   }
 
   /** Bars made from the feed's (Heikin Ashi's and the rest), by the key's text, with their source. */
@@ -728,12 +813,14 @@ export class ContextStore {
     if (fed === 'invalid') return 'invalid';
     if (type !== null && type !== 'heikinashi' && !CHART_TYPES.includes(type)) return 'invalid';
     let data = fed;
-    if (currency && currency !== fed.symbol.currency.toUpperCase()) {
+    const converting = currency !== '' && currency !== fed.symbol.currency.toUpperCase();
+    if (converting) {
       const converted = this.convert(text, fed, currency);
       if (converted === 'missing' || converted === 'no rate')
         return converted === 'missing' ? 'missing' : 'no rate';
       data = converted;
     }
+    if (type !== null || converting) this.madeAsked.add(text);
     if (type === 'heikinashi') data = this.heikinAshi(text, data);
     else if (type !== null) data = this.nonStandard(text, data, type, inputs ?? {});
     let run = this.runs.get(id);
@@ -742,6 +829,8 @@ export class ContextStore {
       run = new ContextRun(this, site.plan, resolution, options.calcBars, warmup);
       this.runs.set(id, run);
     }
+    this.runsAsked.add(id);
+    run.converted = converting;
     run.ensure(data);
     return run;
   }

@@ -718,14 +718,19 @@ export class ScriptRun {
     this.ownListing = fromListing;
     // One clock and seed for the whole load: the check runs must see what the main run sees.
     const clock: RunClock = { now: Date.now(), seed: (Math.random() * 2 ** 31) | 0 };
-    // The contexts its requests use, shared by all its runs (requests.ts).
-    const store = new ContextStore(
-      this.feed,
-      (plan) => this.program.contextProgram(plan),
-      this.inputs,
-      this.symbol,
-      clock,
-    );
+    // The contexts its requests use, shared by all its runs, and kept from the last load where
+    // their runs can't come out differently: a context whose data didn't change isn't run again
+    // when older chart bars load (requests.ts, ContextStore.begin; docs/SPEC.md §6.18, step 3).
+    const store =
+      this.store ??
+      new ContextStore(
+        this.feed,
+        (plan) => this.program.contextProgram(plan),
+        this.inputs,
+        this.symbol,
+        clock,
+      );
+    store.begin(clock);
     this.store = store;
     const make = (start: number, changed: readonly Bar[]) => {
       const execution = new Execution(
@@ -757,6 +762,8 @@ export class ScriptRun {
             ),
           );
     for (const check of this.checks) check.all(bars);
+    // The contexts this load didn't ask for go.
+    store.end();
     // A fresh run's drawings and broker count their changes from 0 again: its own are taken
     // whatever their count, or a reload that changed them as often kept the last load's (a
     // label on the last bar stayed where it was before older bars loaded).

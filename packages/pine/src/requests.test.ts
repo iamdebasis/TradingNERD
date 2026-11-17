@@ -1,5 +1,5 @@
 import type { Bar } from '@tradingnerd/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type ContextData,
   compileScript,
@@ -8,7 +8,7 @@ import {
   ScriptRun,
   type ScriptSymbol,
 } from './index.ts';
-import { RequestBroker, requestKeyText, resolutionOf } from './requests.ts';
+import { ContextRun, RequestBroker, requestKeyText, resolutionOf } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 /**
@@ -1101,5 +1101,198 @@ describe("a script waiting on a request's data", () => {
     expect(r.plotStarts).toEqual([Number.POSITIVE_INFINITY]);
     // One run asks once a bar; its three check runs would ask about four times as often.
     expect(asked).toBe(HOURS.length);
+  });
+});
+
+/**
+ * A reload of the same script run (older chart bars, another context's new history) keeps each
+ * requested context's run that a fresh run would give again: its data unchanged since it last ran
+ * afresh, its code reading no clock and making no requests of its own, its prices not converted
+ * (docs/SPEC.md §6.18, step 3). Nothing a script shows tells a kept run from a fresh one, so these
+ * count the contexts that ran afresh, and compare what the script shows with a fresh run's.
+ */
+describe('Reloads keep the contexts a fresh run would give again (step 3)', () => {
+  /** The contexts that ran afresh while `work` ran, as "TICKERID@timeframe", in order. */
+  function ranAfresh(work: () => void): string[] {
+    const full = vi.spyOn(
+      ContextRun.prototype as unknown as { full(bars: readonly Bar[], data: ContextData): void },
+      'full',
+    );
+    try {
+      work();
+      return full.mock.calls.map(([, data]) => `${data.symbol.tickerid}@${data.symbol.timeframe}`);
+    } finally {
+      full.mockRestore();
+    }
+  }
+
+  /** What a run shows: each plot's values, where each is drawn from, its error. */
+  const shown = (r: ScriptRun) => ({
+    plots: r.values.map((_, p) => plotOf(r, p)),
+    starts: r.plotStarts,
+    error: r.error,
+  });
+
+  /** Tether's dollar rate by day (Kraken's pair), as the currency tests'. */
+  const PAIR: ScriptSymbol = {
+    ...DEFAULT_SYMBOL,
+    ticker: 'USDTUSD',
+    tickerid: 'KRAKEN:USDTUSD',
+    currency: 'USD',
+  };
+  const RATES = context(
+    PAIR,
+    DAYS.map((d, i) => bar(d.time, 1.001 + i * 0.001)),
+    '1D',
+  );
+  const WITH_RATES: RequestFeed = {
+    data: (key) =>
+      key.symbol === 'KRAKEN:USDTUSD' && key.timeframe === '1D' ? RATES : FEED.data(key),
+    rates: (from, to) =>
+      from === 'USDT' && to === 'USD' ? [{ symbol: 'KRAKEN:USDTUSD', invert: false }] : null,
+  };
+
+  it('runs no context again whose data is unchanged when older chart bars load, and shows what a fresh run does', () => {
+    // Not from the listing: each context's warm-up checks are kept with it.
+    const unlisted = feedOf({
+      'BINANCE:BTCUSDT@1D': context(CHART, DAYS, '1D', { fromListing: false }),
+      'COINBASE:ETHUSD@60': context(ETH, OTHER, '60', { fromListing: false }),
+    });
+    const code = v6(`plot(request.security(syminfo.tickerid, "D", ta.sma(close, 2)))
+plot(request.security("COINBASE:ETHUSD", "60", ta.ema(close, 5)))`);
+    const r = run(code, unlisted, HOURS.slice(24));
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([]);
+    expect(shown(r)).toEqual(shown(run(code, unlisted, HOURS)));
+  });
+
+  it('runs a context afresh when its data changed: its live bar moved, or its history', () => {
+    let daily = context(CHART, DAYS, '1D');
+    let eth = context(ETH, OTHER, '60');
+    const feed: RequestFeed = {
+      data: (key) =>
+        key.timeframe === '1D' ? daily : key.symbol === 'COINBASE:ETHUSD' ? eth : FEED.data(key),
+    };
+    const code = v6(`plot(request.security(syminfo.tickerid, "D", close))
+plot(request.security("COINBASE:ETHUSD", "60", close))`);
+    const r = run(code, feed, HOURS.slice(24));
+    daily = {
+      ...daily,
+      bars: [...DAYS.slice(0, -1), { ...(DAYS[2] as Bar), close: 180 }],
+      version: 2,
+    };
+    eth = { ...eth, version: 2, history: 2 };
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([
+      'BINANCE:BTCUSDT@1D',
+      'COINBASE:ETHUSD@60',
+    ]);
+    expect(shown(r)).toEqual(shown(run(code, feed, HOURS)));
+  });
+
+  it("shows a fresh run's values after a context's live updates, not theirs (barstate.isrealtime, varip)", () => {
+    // Day 1 is forming on the chart's last hour; then day 2 opens. Its live update ran day 1 as
+    // realtime, where a fresh run has it as history: the manual's non-repainting request reads
+    // barstate.isrealtime inside (Pine docs, Repainting), and a varip counts updates.
+    let daily = context(CHART, DAYS.slice(0, 2), '1D');
+    const feed: RequestFeed = {
+      data: (key) => (key.timeframe === '1D' ? daily : FEED.data(key)),
+    };
+    const code = v6(`updates() =>
+    varip int n = 0
+    n += 1
+    n
+plot(request.security(syminfo.tickerid, "D", barstate.isrealtime ? 1 : 0))
+plot(request.security(syminfo.tickerid, "D", updates()))`);
+    const r = run(code, feed, HOURS.slice(0, 48));
+    daily = { ...daily, bars: [...DAYS.slice(0, 2), HOURS[48] as Bar], version: 2 };
+    const hours = HOURS.slice(0, 49);
+    expect(r.update(hours, 'new', 48)).not.toBe('all');
+    expect(ranAfresh(() => r.setBars(hours, true))).toEqual([
+      'BINANCE:BTCUSDT@1D',
+      'BINANCE:BTCUSDT@1D',
+    ]);
+    const fresh = run(code, feed, hours);
+    expect(plotOf(fresh, 0)[47]).toBe(0);
+    expect(plotOf(fresh, 1)[47]).toBe(2);
+    expect(shown(r)).toEqual(shown(fresh));
+  });
+
+  it('runs a context again on every load when its code reads the clock: timenow, math.random() without a seed', () => {
+    const code = v6(`plot(request.security(syminfo.tickerid, "D", timenow))
+plot(request.security("COINBASE:ETHUSD", "60", math.random()))
+plot(request.security(syminfo.tickerid, "60", math.random(0, 1, 7)))`);
+    const r = run(code, FEED, HOURS.slice(24));
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([
+      'BINANCE:BTCUSDT@1D',
+      'COINBASE:ETHUSD@60',
+    ]);
+  });
+
+  it('runs a context again on every load when it makes requests of its own: request.security() inside, request.currency_rate()', () => {
+    // The day's context asks for ETH's hours itself (the inner request inherits the day's
+    // context), and the hours' read Tether's rate: either can change while their own bars don't.
+    const code = v6(`float eth = request.security("COINBASE:ETHUSD", "60", close)
+plot(request.security(syminfo.tickerid, "D", eth))
+plot(request.security(syminfo.tickerid, "60", close * request.currency_rate("USDT", "USD")))`);
+    const r = run(code, WITH_RATES, HOURS.slice(24));
+    expect(r.error).toBeNull();
+    // ETH's own context, the script's and the day's, is kept: it asks for nothing.
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([
+      'BINANCE:BTCUSDT@1D',
+      'BINANCE:BTCUSDT@60',
+    ]);
+    expect(shown(r)).toEqual(shown(run(code, WITH_RATES, HOURS)));
+  });
+
+  it("lets a context go once a load doesn't ask for it: asked again, it runs afresh", () => {
+    // ETH's hours only for the chart's first day.
+    const code = v6(
+      `plot(request.security(time < ${(T0 + DAY) * 1000} ? "COINBASE:ETHUSD" : syminfo.tickerid, "60", close))`,
+    );
+    const r = run(code, FEED, HOURS);
+    expect(ranAfresh(() => r.setBars(HOURS.slice(24), true))).toEqual([]);
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['COINBASE:ETHUSD@60']);
+    expect(shown(r)).toEqual(shown(run(code, FEED, HOURS)));
+  });
+
+  it("keeps Heikin Ashi's and Renko's contexts while their bars are unchanged; a converted currency's runs again", () => {
+    const code = v6(`plot(request.security(ticker.heikinashi(syminfo.tickerid), "60", close))
+plot(request.security(ticker.renko(syminfo.tickerid, "Traditional", 5), "60", close, gaps = barmerge.gaps_on))
+plot(request.security(syminfo.tickerid, "D", close, currency = currency.USD))`);
+    const r = run(code, WITH_RATES, HOURS.slice(24));
+    expect(r.error).toBeNull();
+    // The converted day's rates come from another context: run again each load.
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['BINANCE:BTCUSDT@1D']);
+    expect(shown(r)).toEqual(shown(run(code, WITH_RATES, HOURS)));
+  });
+
+  it('runs a context that stopped on an error again: an error can come out otherwise (the time limit)', () => {
+    const code = v6(
+      'plot(request.security(syminfo.tickerid, "D", array.get(array.new<float>(0), 0)))',
+    );
+    const r = run(code, FEED, HOURS.slice(24));
+    expect(r.error).not.toBeNull();
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['BINANCE:BTCUSDT@1D']);
+  });
+
+  it('follows the live bar after a reload that kept its contexts, as after a fresh load', () => {
+    let daily = context(CHART, DAYS, '1D');
+    const feed: RequestFeed = {
+      data: (key) => (key.timeframe === '1D' ? daily : FEED.data(key)),
+    };
+    const code = v6('plot(request.security(syminfo.tickerid, "D", ta.sma(close, 2)))');
+    const r = run(code, feed, HOURS.slice(24));
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([]);
+    const fresh = run(code, feed, HOURS);
+    // A tick: the chart's live hour and the forming day move to 180.
+    const hours = [...HOURS.slice(0, -1), bar(HOURS[71]?.time as number, 180)];
+    daily = {
+      ...daily,
+      bars: [...DAYS.slice(0, -1), { ...(DAYS[2] as Bar), close: 180 }],
+      version: 2,
+    };
+    expect(r.update(hours, 'tick', 71)).toEqual([71]);
+    expect(fresh.update(hours, 'tick', 71)).toEqual([71]);
+    expect(plotOf(r, 0)[71]).toBe((147 + 180) / 2);
+    expect(shown(r)).toEqual(shown(fresh));
   });
 });

@@ -1772,6 +1772,8 @@ function mathCalls(): Record<string, Handler> {
       const min = args.number('min') ?? (() => 0);
       const max = args.number('max') ?? (() => 1);
       const seed = args.int('seed', SIMPLE);
+      // Without a seed, each load's own sequence: the load's clock.
+      if (!seed) c.readsClock = true;
       const site = randomSite(c);
       let run = -1;
       let count = 0;
