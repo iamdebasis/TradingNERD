@@ -590,6 +590,8 @@ export function makeTickBars(count = 1_500): Bar[] {
 export interface MockMarket {
   /** Daily history served by GET /api/bars (other intervals get makeIntervalBars). */
   bars: Bar[];
+  /** Serves these bars for an interval other than 1D, in place of makeIntervalBars' 1,500. */
+  setIntervalBars(resolution: string, bars: Bar[]): void;
   /** The open list's sections (the one list, unless a test adds more). */
   watchlist: Watchlist;
   /** Every list the page saved, in order. */
@@ -1122,6 +1124,10 @@ class MockGateway implements MockMarket {
   }
 
   /** The history this mock serves for an interval. */
+  setIntervalBars(resolution: string, bars: Bar[]): void {
+    this.series.set(resolution, bars);
+  }
+
   barsFor(resolution: string): Bar[] {
     if (resolution === '1D') return this.bars;
     let bars = this.series.get(resolution);

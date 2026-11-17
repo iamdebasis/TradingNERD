@@ -1165,7 +1165,7 @@ plot(request.security("COINBASE:ETHUSD", "60", ta.ema(close, 5)))`);
     expect(shown(r)).toEqual(shown(run(code, unlisted, HOURS)));
   });
 
-  it('runs a context afresh when its data changed: its live bar moved, or its history', () => {
+  it("runs a context afresh when its history changed; one whose live bar moved follows it, as live updates do, when its code can't tell (3b)", () => {
     let daily = context(CHART, DAYS, '1D');
     let eth = context(ETH, OTHER, '60');
     const feed: RequestFeed = {
@@ -1181,11 +1181,61 @@ plot(request.security("COINBASE:ETHUSD", "60", close))`);
       version: 2,
     };
     eth = { ...eth, version: 2, history: 2 };
-    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([
-      'BINANCE:BTCUSDT@1D',
-      'COINBASE:ETHUSD@60',
-    ]);
+    // The day's close reads nothing a live update gives otherwise: its moved live bar is run
+    // again as a live update would run it. ETH's new history runs it afresh.
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['COINBASE:ETHUSD@60']);
     expect(shown(r)).toEqual(shown(run(code, feed, HOURS)));
+  });
+
+  it('keeps a context after live updates when its code reads nothing they give otherwise, with what a fresh run shows (3b)', () => {
+    // ETH's hours not from the listing, so its warm-up checks count: a tick, then a new hour.
+    let eth = context(ETH, OTHER.slice(0, -1), '60', { fromListing: false });
+    const feed: RequestFeed = {
+      data: (key) => (key.symbol === 'COINBASE:ETHUSD' ? eth : FEED.data(key)),
+    };
+    const code = v6('plot(request.security("COINBASE:ETHUSD", "60", ta.ema(close, 5)))');
+    const r = run(code, feed, HOURS.slice(0, 71));
+    const last = OTHER.at(-2) as Bar;
+    eth = { ...eth, bars: [...OTHER.slice(0, -2), { ...last, close: last.close + 3 }], version: 2 };
+    expect(r.update(HOURS.slice(0, 71), 'tick', 70)).toEqual([70]);
+    eth = { ...eth, bars: OTHER, version: 3 };
+    expect(r.update(HOURS, 'new', 71)).toEqual([70, 71]);
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([]);
+    expect(shown(r)).toEqual(shown(run(code, feed, HOURS)));
+  });
+
+  it('runs a context afresh after live updates when its code reads what they give otherwise: varip, barstate, last_bar_index, last_bar_time, chart.right_visible_bar_time', () => {
+    let daily = context(CHART, DAYS, '1D');
+    const feed: RequestFeed = {
+      data: (key) => (key.timeframe === '1D' ? daily : FEED.data(key)),
+    };
+    // TradingView: "if a script relies on temporary data from realtime bars in its calculations,
+    // it might behave differently after reloading" (Pine docs, Execution model). The last one
+    // reads none of them, and is kept.
+    const code = v6(`updates() =>
+    varip int n = 0
+    n += 1
+    n
+plot(request.security(syminfo.tickerid, "D", updates()))
+plot(request.security(syminfo.tickerid, "D", barstate.isrealtime ? 1 : 0))
+plot(request.security(syminfo.tickerid, "D", barstate.ishistory ? 1 : 0))
+plot(request.security(syminfo.tickerid, "D", barstate.isnew ? 1 : 0))
+plot(request.security(syminfo.tickerid, "D", barstate.islast ? 1 : 0))
+plot(request.security(syminfo.tickerid, "D", barstate.islastconfirmedhistory ? 1 : 0))
+plot(request.security(syminfo.tickerid, "D", last_bar_index))
+plot(request.security(syminfo.tickerid, "D", last_bar_time))
+plot(request.security(syminfo.tickerid, "D", chart.right_visible_bar_time))
+plot(request.security(syminfo.tickerid, "D", close))`);
+    const r = run(code, feed);
+    const hours = [...HOURS.slice(0, -1), bar(HOURS[71]?.time as number, 180)];
+    daily = {
+      ...daily,
+      bars: [...DAYS.slice(0, -1), { ...(DAYS[2] as Bar), close: 180 }],
+      version: 2,
+    };
+    expect(r.update(hours, 'tick', 71)).toEqual([71]);
+    expect(ranAfresh(() => r.setBars(hours, true))).toEqual(Array(9).fill('BINANCE:BTCUSDT@1D'));
+    expect(shown(r)).toEqual(shown(run(code, feed, hours)));
   });
 
   it("shows a fresh run's values after a context's live updates, not theirs (barstate.isrealtime, varip)", () => {
@@ -1227,20 +1277,120 @@ plot(request.security(syminfo.tickerid, "60", math.random(0, 1, 7)))`);
     ]);
   });
 
-  it('runs a context again on every load when it makes requests of its own: request.security() inside, request.currency_rate()', () => {
+  it('keeps a context with a request inside when nothing changed, its inner one still listed (3c); request.currency_rate() runs again', () => {
     // The day's context asks for ETH's hours itself (the inner request inherits the day's
-    // context), and the hours' read Tether's rate: either can change while their own bars don't.
+    // context): asked again at the load, unchanged, both are kept. The hours' read Tether's rate,
+    // which comes from other contexts: run again on every load.
     const code = v6(`float eth = request.security("COINBASE:ETHUSD", "60", close)
 plot(request.security(syminfo.tickerid, "D", eth))
 plot(request.security(syminfo.tickerid, "60", close * request.currency_rate("USDT", "USD")))`);
     const r = run(code, WITH_RATES, HOURS.slice(24));
     expect(r.error).toBeNull();
-    // ETH's own context, the script's and the day's, is kept: it asks for nothing.
-    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([
-      'BINANCE:BTCUSDT@1D',
-      'BINANCE:BTCUSDT@60',
-    ]);
-    expect(shown(r)).toEqual(shown(run(code, WITH_RATES, HOURS)));
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['BINANCE:BTCUSDT@60']);
+    const fresh = run(code, WITH_RATES, HOURS);
+    expect(shown(r)).toEqual(shown(fresh));
+    expect(r.requested).toEqual(fresh.requested);
+  });
+
+  it("follows an inner request's live updates inside another request: the live bar reads its new value", () => {
+    let eth = context(ETH, OTHER, '60');
+    const feed: RequestFeed = {
+      data: (key) => (key.symbol === 'COINBASE:ETHUSD' ? eth : FEED.data(key)),
+    };
+    // ETH ticks while the day's bars don't. TradingView recalculates requests on each realtime
+    // update (Pine docs, Other timeframes and data: Historical and realtime behavior); the day's
+    // live bar kept reading ETH's last hour as it was (found 2026-11-17).
+    const code = v6(`plot(request.security("COINBASE:ETHUSD", "60", close))
+plot(request.security(syminfo.tickerid, "D", request.security("COINBASE:ETHUSD", "60", close)))`);
+    const r = run(code, feed);
+    expect(plotOf(r, 1)[71]).toBe(plotOf(r, 0)[71]);
+    eth = {
+      ...eth,
+      bars: [...OTHER.slice(0, -1), bar(HOURS[71]?.time as number, 2000)],
+      version: 2,
+    };
+    expect(r.update(HOURS, 'tick', 71)).toEqual([71]);
+    expect(plotOf(r, 0)[71]).toBe(2000);
+    expect(plotOf(r, 1)[71]).toBe(2000);
+  });
+
+  it('runs a context with a request inside afresh when the context inside it changed (3c)', () => {
+    let eth = context(ETH, OTHER, '60');
+    const feed: RequestFeed = {
+      data: (key) => (key.symbol === 'COINBASE:ETHUSD' ? eth : FEED.data(key)),
+    };
+    const code = v6(`f() => request.security("COINBASE:ETHUSD", "60", close)
+plot(request.security(syminfo.tickerid, "D", f()))`);
+    const r = run(code, feed, HOURS.slice(24));
+    // ETH's live bar moved between the loads: its own run follows it, and the day's, which read
+    // it, runs afresh.
+    eth = {
+      ...eth,
+      bars: [...OTHER.slice(0, -1), bar(HOURS[71]?.time as number, 2000)],
+      version: 2,
+    };
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['BINANCE:BTCUSDT@1D']);
+    expect(shown(r)).toEqual(shown(run(code, feed, HOURS)));
+  });
+
+  it('runs a context with a request inside afresh at the next load when the one inside it moved while its own bars were closed', () => {
+    // A market closed: the day's last bar isn't live. With lookahead on, its days read the week's
+    // live bar, which moves within the load. Its history stays as it was until the next load,
+    // which runs it afresh (found 2026-11-17: it was kept there, with the week's old close).
+    let week = context(ETH, [bar(T0, 1500)], '1W');
+    const closed = context(CHART, DAYS, '1D', { live: false });
+    const feed: RequestFeed = {
+      data: (key) =>
+        key.symbol === 'COINBASE:ETHUSD' ? week : key.timeframe === '1D' ? closed : FEED.data(key),
+    };
+    const code = v6(
+      'plot(request.security(syminfo.tickerid, "D", request.security("COINBASE:ETHUSD", "W", close, lookahead = barmerge.lookahead_on)))',
+    );
+    const r = run(code, feed, HOURS.slice(24));
+    week = { ...week, bars: [bar(T0, 1800)], version: 2 };
+    expect(r.update(HOURS.slice(24), 'tick', 47)).toEqual([47]);
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual(['BINANCE:BTCUSDT@1D']);
+    expect(plotOf(r, 0)[71]).toBe(1800);
+    expect(shown(r)).toEqual(shown(run(code, feed, HOURS)));
+  });
+
+  it('asks the requests inside a kept context on a live tick as on history: no realtime error, their new value read', () => {
+    let eth = context(ETH, OTHER, '60');
+    const feed: RequestFeed = {
+      data: (key) => (key.symbol === 'COINBASE:ETHUSD' ? eth : FEED.data(key)),
+    };
+    const code = v6(`f() => request.security("COINBASE:ETHUSD", "60", close)
+plot(request.security(syminfo.tickerid, "D", f()))`);
+    const r = run(code, feed, HOURS.slice(24));
+    expect(ranAfresh(() => r.setBars(HOURS, true))).toEqual([]);
+    // "A request on a realtime bar can only use data requested on the chart's history": the
+    // kept day's ETH requests count as asked on its history at this load too.
+    eth = {
+      ...eth,
+      bars: [...OTHER.slice(0, -1), bar(HOURS[71]?.time as number, 2000)],
+      version: 2,
+    };
+    expect(r.update(HOURS, 'tick', 71)).toEqual([71]);
+    expect(r.error).toBeNull();
+    expect(plotOf(r, 0)[71]).toBe(2000);
+  });
+
+  it("counts the requests inside a kept context against Pine's 40, as a fresh run does", () => {
+    // 40 unique requests on the first load: S0 to S37, the day's and ETH's inside it. The older
+    // bars ask for X too: 41, which stops the script, kept day or not.
+    const tops = Array.from(
+      { length: 37 },
+      (_, i) => `plot(request.security("SYM:S${i + 1}", "D", close))`,
+    ).join('\n');
+    const code = v6(`f() => request.security("COINBASE:ETHUSD", "60", close)
+plot(request.security(time < ${(T0 + DAY) * 1000} ? "SYM:X" : "SYM:S0", "D", close))
+${tops}
+plot(request.security(syminfo.tickerid, "D", f()))`);
+    const r = run(code, FEED, HOURS.slice(24));
+    expect(r.error).toBeNull();
+    r.setBars(HOURS, true);
+    expect(r.error?.message).toBe('Script requests too many securities: 41. The limit is 40');
+    expect(run(code, FEED, HOURS).error?.message).toBe(r.error?.message);
   });
 
   it("lets a context go once a load doesn't ask for it: asked again, it runs afresh", () => {
@@ -1293,6 +1443,71 @@ plot(request.security(syminfo.tickerid, "D", close, currency = currency.USD))`);
     expect(r.update(hours, 'tick', 71)).toEqual([71]);
     expect(fresh.update(hours, 'tick', 71)).toEqual([71]);
     expect(plotOf(r, 0)[71]).toBe((147 + 180) / 2);
+    expect(shown(r)).toEqual(shown(fresh));
+  });
+
+  /**
+   * A daily chart whose last two days come in live: a tick, the tick taken back, a new day, and
+   * again. Each stage is one data object with its own version, as the app's loader gives them.
+   */
+  function liveDays(): { days: Bar[]; symbol: ScriptSymbol; stages: ContextData[] } {
+    const days = Array.from({ length: 60 }, (_, i) => {
+      const close = 100 + 10 * Math.sin(i / 4) + i * 0.3;
+      return {
+        time: T0 + i * DAY,
+        open: close - 1,
+        high: close + 2,
+        low: close - 2,
+        close,
+        volume: 10,
+      };
+    });
+    const symbol: ScriptSymbol = { ...CHART, timeframe: '1D' };
+    const n = days.length;
+    const tick = (b: Bar): Bar => ({
+      ...b,
+      close: b.close * 1.001,
+      high: Math.max(b.high, b.close * 1.001),
+    });
+    const base = days.slice(0, n - 2);
+    const bars = [
+      base,
+      [...base.slice(0, -1), tick(base.at(-1) as Bar)],
+      base,
+      days.slice(0, n - 1),
+      [...days.slice(0, n - 2), tick(days[n - 2] as Bar)],
+      days.slice(0, n - 1),
+      days,
+    ];
+    return {
+      days,
+      symbol,
+      stages: bars.map((b, i) => context(symbol, b, '1D', { version: i + 1 })),
+    };
+  }
+
+  it("keeps a Renko context's bar times right when live updates make its bricks again at the same count", () => {
+    // Renko with an ATR box: as days come in the box changes, and its bricks are made again at
+    // other times though as many. A run afresh kept their old times, which the step 3 reload
+    // kept too: older bars showed other bricks' values (the manual's Renko examples, 2026-11-17).
+    const { days, symbol, stages } = liveDays();
+    let stage = 0;
+    const feed: RequestFeed = { data: () => stages[stage] as ContextData };
+    const compiled = compileScript(
+      v6(
+        'plot(request.security(ticker.renko(syminfo.tickerid, "ATR", 10), timeframe.period, low))',
+      ),
+    );
+    if (!compiled.ok) throw new Error(compiled.errors[0]?.message);
+    const { program } = compiled;
+    const r = new ScriptRun(program, program.defaults(), symbol, feed);
+    r.setBars(days, true);
+    for (stage = 1; stage < stages.length; stage++) r.update(days, 'tick', days.length - 1);
+    stage = stages.length - 1;
+    r.setBars(days, true);
+    const fresh = new ScriptRun(program, program.defaults(), symbol, feed);
+    fresh.setBars(days, true);
+    expect(r.error).toBeNull();
     expect(shown(r)).toEqual(shown(fresh));
   });
 });

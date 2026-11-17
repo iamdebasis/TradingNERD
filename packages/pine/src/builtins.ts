@@ -288,12 +288,16 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
       break;
     }
     case 'barstate':
+      // These differ between a live update and history (isfirst and isconfirmed don't).
+      if (LIVE_BARSTATE.has(member)) c.readsLive = true;
       return barstate(member, span);
     case 'timeframe':
       return timeframe(member, span, c.version);
     case 'syminfo':
       return syminfo(member, span);
     case 'chart':
+      // The last bar's time: a live bar's, which history doesn't know of.
+      if (member === 'right_visible_bar_time') c.readsLive = true;
       return chart(member, span);
     case 'scale':
       if (member === 'right' || member === 'left' || member === 'none') {
@@ -376,8 +380,11 @@ export function compileBuiltinName(c: Compiler, name: string, span: Span): Compi
       }
       break;
     default:
-      if (name === 'last_bar_index')
+      if (name === 'last_bar_index') {
+        // The last bar's index, which grows as live bars open.
+        c.readsLive = true;
         return series('int', (rt) => rt.bars.length - 1 - rt.start, span);
+      }
       break;
   }
   if (LATER.some(([pattern]) => pattern.test(name))) {
@@ -390,6 +397,15 @@ function laterMessage(name: string): string {
   const match = LATER.find(([pattern]) => pattern.test(name));
   return match ? match[1] : "isn't supported yet";
 }
+
+/** The barstate.* values a live update gives otherwise than history does (the v6 reference). */
+const LIVE_BARSTATE = new Set([
+  'isrealtime',
+  'ishistory',
+  'isnew',
+  'islast',
+  'islastconfirmedhistory',
+]);
 
 function barstate(member: string, span: Span): Compiled | null {
   // The v6 reference's barstate.*: the last bar is the live one, realtime from the bar that was
