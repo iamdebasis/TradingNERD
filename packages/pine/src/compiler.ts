@@ -396,6 +396,10 @@ export interface CompiledProgram {
   /** Its alertcondition() calls, and how many alert() calls it has (alerts.ts). */
   alertConditions: AlertConditionDef[];
   alertCalls: number;
+  /** Whether it reads the load's clock: timenow, or an unseeded math.random() (Compiler.readsClock). */
+  readsClock: boolean;
+  /** Whether it reads request.currency_rate()'s rates (Compiler.readsRates). */
+  readsRates: boolean;
 }
 
 /** What one statement reads and writes: a request copies the statements its expression needs. */
@@ -600,6 +604,18 @@ export class Compiler {
   alertCalls = 0;
   /** Calls log.info(), log.warning() or log.error() somewhere (the Pine Logs pane lists it). */
   logging = false;
+  /**
+   * Reads the load's clock: timenow ("the script's current time", Pine docs, Time) or an unseeded
+   * math.random() ("a different sequence of values for each script execution", release notes). A
+   * request's context run that does is run again on every load (requests.ts).
+   */
+  readsClock = false;
+  /**
+   * Calls request.currency_rate(): its rates are other contexts' days (requests.ts,
+   * ContextStore.rateAt), a request of its own though it has no context. A request's context run
+   * that does is run again on every load, as one with request.security() inside is.
+   */
+  readsRates = false;
   indicator: IndicatorDecl | null = null;
   readonly warnings: PineDiagnostic[] = [];
   readonly quals = new Map<object, Qual>();
@@ -754,6 +770,8 @@ export class Compiler {
       requests: this.requests,
       alertConditions: this.alertConditions,
       alertCalls: this.alertCalls,
+      readsClock: this.readsClock,
+      readsRates: this.readsRates,
     };
   }
 

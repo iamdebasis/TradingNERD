@@ -102,7 +102,7 @@ export function calendarValue(name: string): ((rt: Runtime, k: number) => number
 }
 
 /** time, time_close, timenow …, and the dayofweek.*, session.* and syminfo time members. */
-export function timeName(_c: Compiler, name: string, span: Span): Compiled | null {
+export function timeName(c: Compiler, name: string, span: Span): Compiled | null {
   const calendar = calendarValue(name);
   if (calendar) return series('int', (rt) => calendar(rt, 0), span);
   switch (name) {
@@ -111,6 +111,8 @@ export function timeName(_c: Compiler, name: string, span: Span): Compiled | nul
     case 'time_tradingday':
       return series('int', (rt) => tradingDay(rt), span);
     case 'timenow':
+      // The load's clock: a request's context run that reads it runs again on every load.
+      c.readsClock = true;
       return series('int', (rt) => rt.now, span);
     case 'last_bar_time':
       return series(

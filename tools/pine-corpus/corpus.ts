@@ -485,6 +485,14 @@ function runOne(
       // a run that keeps its results is a mismatch.
       if (differs && resultsDiffer(run, rerun())) varying.push(text);
       else if (differs) return { ok: false, stage: 'worker', message: differs };
+      else {
+        // A reload of the same run keeps the contexts a fresh run would give again (step 3):
+        // it must show what the fresh run does. One that differs only as the clock does is
+        // counted apart, as above.
+        const reloaded = reloadDiffers(run, result.program, symbol, bars);
+        if (reloaded && resultsDiffer(run, rerun())) varying.push(text);
+        else if (reloaded) return { ok: false, stage: 'reload', message: reloaded };
+      }
     }
     if (run.error) return { ok: false, stage: 'runtime', message: run.error.message };
     if (run.waiting) {
@@ -549,6 +557,53 @@ function workerDiffers(
   } finally {
     remote.dispose();
   }
+}
+
+/**
+ * Whether reloads in one run show what a fresh run does (step 3, docs/SPEC.md §6.18), its
+ * requests' data changing as it does in the app or not at all. As the chart opens: its latest
+ * half, and each context's latest half. Then the older pages are in: all the bars, every
+ * context's history changed, so every context runs afresh. Then the same again: nothing changed,
+ * so each context whose run a fresh run would give again is kept (requests.ts,
+ * ContextStore.begin). And in another run, older chart bars while the contexts stay as they are.
+ * What differs, or null.
+ */
+function reloadDiffers(
+  fresh: ScriptRun,
+  program: ScriptProgram,
+  symbol: ScriptSymbol,
+  bars: readonly Bar[],
+): string | null {
+  const half = <T>(list: readonly T[]): readonly T[] => list.slice(Math.floor(list.length / 2));
+  let opening = true;
+  const halves = new Map<ContextData, ContextData>();
+  const feed: RequestFeed = {
+    rates: CORPUS_FEED.rates,
+    data: (key) => {
+      const data = CORPUS_FEED.data(key);
+      if (!opening || data === null || data === 'invalid') return data;
+      let latest = halves.get(data);
+      if (!latest) {
+        latest = { ...data, bars: half(data.bars), history: 0 };
+        halves.set(data, latest);
+      }
+      return latest;
+    },
+  };
+  const run = new ScriptRun(program, program.defaults(), symbol, feed);
+  run.setBars(half(bars), true);
+  opening = false;
+  run.setBars(bars, true);
+  const paged = resultsDiffer(fresh, run);
+  if (paged) return `after the older pages: ${paged}`;
+  run.setBars(bars, true);
+  const again = resultsDiffer(fresh, run);
+  if (again) return `loaded again: ${again}`;
+  const chartOnly = new ScriptRun(program, program.defaults(), symbol, CORPUS_FEED);
+  chartOnly.setBars(half(bars), true);
+  chartOnly.setBars(bars, true);
+  const older = resultsDiffer(fresh, chartOnly);
+  return older ? `after older chart bars: ${older}` : null;
 }
 
 /** The first way two runs' results differ, or null (NaN equal to NaN): the page's and another. */
@@ -667,7 +722,7 @@ function report(scripts: Script[]): void {
     }
   }
   console.log(
-    `Through a worker as in the app: every script that runs gives the same results, but the ${varying.length} that differ from run to run in the page too (math.random(), timenow), which aren't compared`,
+    `Through a worker as in the app, and reloaded with older bars in the same run: every script that runs gives the same results, but the ${varying.length} that differ from run to run in the page too (math.random(), timenow), which aren't compared`,
   );
   // The manual's error examples should stop here as they do on TradingView.
   const errors = results.filter((r) => r.script.deliberate);
