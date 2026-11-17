@@ -116,6 +116,20 @@ export class RequestLoader implements RequestFeed {
     }
   }
 
+  /**
+   * A page of the chart's older bars came in: its bars now start at `firstBarTime` (UTC seconds).
+   * The contexts that don't reach back far enough for it start paging at once, so settling() says
+   * so before the chart's scripts run over the new bars, and they wait for them (IndicatorLayer;
+   * docs/SPEC.md §11, item 148). want() still tells the rest, after the scripts' results.
+   */
+  reachBack(firstBarTime: number): void {
+    if (this.disposed) return;
+    this.reach = { ...this.reach, firstBarTime };
+    for (const entry of this.entries.values()) {
+      if (entry.state === 'ready') void this.loadOlder(entry);
+    }
+  }
+
   /** Whether a context is still loading (its scripts wait). */
   loading(): boolean {
     for (const entry of this.entries.values()) if (entry.state === 'loading') return true;
@@ -132,6 +146,8 @@ export class RequestLoader implements RequestFeed {
     if (entry.state === 'loading') return true;
     const { data, info } = entry;
     if (entry.state !== 'ready' || !entry.hasMore || !data || !info) return false;
+    // A page that failed isn't coming: its scripts run on what's in until it's asked again.
+    if (!entry.loadingOlder && Date.now() < entry.retryAt) return false;
     return this.short(data.bars, entry.key.timeframe);
   }
 
@@ -231,6 +247,8 @@ export class RequestLoader implements RequestFeed {
     const data = entry.data;
     const info = entry.info;
     if (!data || !info || entry.loadingOlder || !entry.hasMore) return;
+    // A page that failed is asked again after a while, as a failed load is.
+    if (Date.now() < entry.retryAt) return;
     if (!this.short(data.bars, entry.key.timeframe)) return;
     const first = data.bars[0]?.time;
     if (first === undefined) return;
@@ -245,20 +263,29 @@ export class RequestLoader implements RequestFeed {
         signal,
         entry.hours,
       );
-      if (this.disposed || signal.aborted || entry.data !== data) return;
+      // Onto its bars as they are now. Each live update makes the context's data anew, so one
+      // that came while the page loaded threw the page away until 2026-11-17 (§11, item 148);
+      // only another page or a correction since (a new history) makes it stale.
+      const now = entry.data;
+      if (this.disposed || signal.aborted || !now || now.history !== data.history) return;
       const older = page.bars.filter((bar) => bar.time < first);
       entry.hasMore = page.hasMore && older.length > 0;
-      const bars = [...older, ...data.bars].slice(-MAX_REQUEST_BARS);
+      const bars = [...older, ...now.bars].slice(-MAX_REQUEST_BARS);
       entry.data = {
-        ...data,
+        ...now,
         bars,
         fromListing: page.fromListing,
-        version: data.version + 1,
-        history: data.history + 1,
+        version: now.version + 1,
+        history: now.history + 1,
       };
+      entry.loadingOlder = false;
       this.options.onHistory();
     } catch {
-      // Tried again on a later update.
+      if (this.disposed || signal.aborted) return;
+      // Asked again after a while; meanwhile its scripts run on what's in (settling()).
+      entry.retryAt = Date.now() + REQUEST_RETRY_MS;
+      entry.loadingOlder = false;
+      this.options.onHistory();
     } finally {
       entry.loadingOlder = false;
     }

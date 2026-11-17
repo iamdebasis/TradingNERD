@@ -779,6 +779,8 @@ export class ScriptRun {
    * changed, or 'all' when the script ran afresh.
    */
   update(bars: readonly Bar[], change: BarChange, index: number): number[] | 'all' {
+    // A live update: each context run asks the requests inside it again (requests.ts).
+    this.store?.touch();
     if (this.on) return this.updateTimeframe(bars);
     const main = this.main;
     const last = bars.length - 1;

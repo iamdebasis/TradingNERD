@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { chartState, expect, openChart, test } from './fixtures';
+import { chartCall, chartState, expect, makeIntervalBars, openChart, test } from './fixtures';
 
 /**
  * Scripts' requests (docs/SPEC.md §6.18, milestone P4): request.security()'s data from the
@@ -150,6 +150,64 @@ test('input.symbol is picked with Symbol Search, and the script asks for that sy
     .poll(() => market.barRequests.some((query) => query.get('symbol') === 'BINANCE:LDOUSDT'))
     .toBe(true);
   await expect.poll(() => pointsOf(page)).toBeGreaterThan(0);
+});
+
+test('a script waits for its requests to page back to older chart bars, then runs once over them', async ({
+  page,
+  market,
+}) => {
+  // Its 4h context: 15,000 bars, 2,500 days. Two pages of 5,000 reach the chart's first 1,000
+  // days; all 2,500 need a third (docs/SPEC.md §11, item 148).
+  market.setIntervalBars('240', makeIntervalBars('240', 15_000));
+  let holding = false;
+  let held = 0;
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/\/api\/bars\?/, async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    if (holding && query.get('resolution') === '240' && query.has('to')) {
+      held++;
+      await released;
+    }
+    await route.fallback();
+  });
+  await page.addInitScript(() => {
+    const source =
+      '//@version=6\nindicator("Lower")\nplot(request.security(syminfo.tickerid, "240", close))';
+    const list = [
+      {
+        id: 'script-1',
+        kind: 'script',
+        hidden: false,
+        settings: {},
+        script: { source, scriptId: null },
+      },
+    ];
+    localStorage.setItem(
+      'tn.chart.indicators',
+      JSON.stringify({ version: 2, list, folded: false }),
+    );
+  });
+  await openChart(page);
+  await expect.poll(() => pointsOf(page)).toBe(1_000);
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.calculating).toBe(false);
+  holding = true;
+  // Scrolling back brings the rest of the chart's days, which the 4h context doesn't reach yet.
+  await chartCall(page, 'scrollBars', -900);
+  await expect.poll(async () => (await chartState(page)).barCount).toBe(2_500);
+  // The context pages back at once, and the script waits for it: run now, it would run on the
+  // context's first 1,666 days and again once it's in. What it drew stays on its bars.
+  await expect.poll(() => held).toBe(1);
+  await page.waitForTimeout(500);
+  const waiting = (await indicatorsOf(page))[0];
+  expect(waiting?.calculating).toBe(true);
+  expect(waiting?.plots[0]?.points).toBe(1_000);
+  release();
+  // Once it's in, the script runs over every day.
+  await expect.poll(() => pointsOf(page)).toBe(2_500);
+  await expect.poll(async () => (await indicatorsOf(page))[0]?.calculating).toBe(false);
 });
 
 test('timeframe = runs a script on that timeframe, with the Calculation section’s two inputs', async ({

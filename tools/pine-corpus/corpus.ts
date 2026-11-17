@@ -492,6 +492,12 @@ function runOne(
         const reloaded = reloadDiffers(run, result.program, symbol, bars);
         if (reloaded && resultsDiffer(run, rerun())) varying.push(text);
         else if (reloaded) return { ok: false, stage: 'reload', message: reloaded };
+        else if (run.requested.length > 0) {
+          // Live updates on its requests' data, then a reload: what a fresh run gives too.
+          const lived = liveReloadDiffers(run, result.program, symbol, bars);
+          if (lived && resultsDiffer(run, rerun())) varying.push(text);
+          else if (lived) return { ok: false, stage: 'live reload', message: lived };
+        }
       }
     }
     if (run.error) return { ok: false, stage: 'runtime', message: run.error.message };
@@ -604,6 +610,63 @@ function reloadDiffers(
   chartOnly.setBars(bars, true);
   const older = resultsDiffer(fresh, chartOnly);
   return older ? `after older chart bars: ${older}` : null;
+}
+
+/**
+ * Whether live updates on a script's requested data, then a reload in the same run, show what a
+ * fresh run does (docs/SPEC.md §6.18). As the chart opens, each context's last two bars aren't in
+ * yet; live updates bring them as the app's loader does (a tick, the tick taken back, a new bar,
+ * and again), the script following each on the chart's live bar; then the chart reloads, keeping
+ * the contexts a fresh run would give again. What differs, or null.
+ */
+function liveReloadDiffers(
+  fresh: ScriptRun,
+  program: ScriptProgram,
+  symbol: ScriptSymbol,
+  bars: readonly Bar[],
+): string | null {
+  const tick = (bar: Bar): Bar => ({
+    ...bar,
+    close: bar.close * 1.001,
+    high: Math.max(bar.high, bar.close * 1.001),
+  });
+  let stage = 0;
+  const staged = new Map<ContextData, ContextData[]>();
+  const at = (data: ContextData): ContextData => {
+    let stages = staged.get(data);
+    if (!stages) {
+      const all = data.bars;
+      const n = all.length;
+      const base = all.slice(0, n - 2);
+      stages =
+        n < 4
+          ? [data]
+          : [
+              base,
+              [...base.slice(0, -1), tick(base.at(-1) as Bar)],
+              base,
+              all.slice(0, n - 1),
+              [...all.slice(0, n - 2), tick(all[n - 2] as Bar)],
+              all.slice(0, n - 1),
+              all,
+            ].map((list, i) => ({ ...data, bars: list, version: i + 1, history: 1 }));
+      staged.set(data, stages);
+    }
+    return stages[Math.min(stage, stages.length - 1)] as ContextData;
+  };
+  const feed: RequestFeed = {
+    rates: CORPUS_FEED.rates,
+    data: (key) => {
+      const data = CORPUS_FEED.data(key);
+      return data === null || data === 'invalid' ? data : at(data);
+    },
+  };
+  const run = new ScriptRun(program, program.defaults(), symbol, feed);
+  run.setBars(bars, true);
+  for (stage = 1; stage <= 6; stage++) run.update(bars, 'tick', bars.length - 1);
+  run.setBars(bars, true);
+  const differs = resultsDiffer(fresh, run);
+  return differs ? `after live updates: ${differs}` : null;
 }
 
 /** The first way two runs' results differ, or null (NaN equal to NaN): the page's and another. */
@@ -722,7 +785,7 @@ function report(scripts: Script[]): void {
     }
   }
   console.log(
-    `Through a worker as in the app, and reloaded with older bars in the same run: every script that runs gives the same results, but the ${varying.length} that differ from run to run in the page too (math.random(), timenow), which aren't compared`,
+    `Through a worker as in the app, reloaded with older bars in the same run, and reloaded after live updates on its requests' data: every script that runs gives the same results, but the ${varying.length} that differ from run to run in the page too (math.random(), timenow), which aren't compared`,
   );
   // The manual's error examples should stop here as they do on TradingView.
   const errors = results.filter((r) => r.script.deliberate);

@@ -272,6 +272,125 @@ describe("RequestLoader: the data scripts' requests ask for (docs/SPEC.md §6.18
     expect(subscriptions.size).toBe(0);
     expect(loader.data(bare)).toBeNull();
   });
+
+  it('pages back as soon as older chart bars come in, saying so before the scripts run', async () => {
+    const series = { 'BINANCE:ETHUSDT@1D': days(20_000) };
+    const { api, calls } = fakeApi(series);
+    const { feed } = fakeFeed();
+    const loader = new RequestLoader({
+      api,
+      feed,
+      background: '#0F0F0F',
+      onHistory: () => {},
+      onLive: () => {},
+    });
+    const bars = series['BINANCE:ETHUSDT@1D'];
+    loader.want([ETH], [ETH], { firstBarTime: (bars[19_500] as Bar).time, timeframe: '1D' });
+    await settle();
+    expect(loader.settling(ETH)).toBe(false);
+    const pages = () => calls.filter((call) => call.startsWith('bars')).length;
+    const before = pages();
+    // A page of the chart's older bars, before any script ran over them (want() comes after
+    // their results): its context starts paging back now, and its scripts wait for it.
+    loader.reachBack((bars[10_000] as Bar).time);
+    expect(pages()).toBe(before + 1);
+    expect(loader.settling(ETH)).toBe(true);
+    await settle();
+    const deeper = loader.data(ETH);
+    if (!deeper || deeper === 'invalid') throw new Error('not loaded');
+    expect(deeper.bars).toHaveLength(2 * REQUEST_PAGE_BARS);
+  });
+
+  it('keeps a page of older bars when a live update comes while it loads', async () => {
+    const series = { 'BINANCE:ETHUSDT@1D': days(20_000) };
+    const { api } = fakeApi(series);
+    // The older page holds on until the test lets it through.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const getBars = api.getBars;
+    api.getBars = async (symbol, resolution, to, countBack, signal, hours) => {
+      if (to !== null) await held;
+      return getBars(symbol, resolution, to, countBack, signal, hours);
+    };
+    const { feed, subscriptions } = fakeFeed();
+    const loader = new RequestLoader({
+      api,
+      feed,
+      background: '#0F0F0F',
+      onHistory: () => {},
+      onLive: () => {},
+    });
+    const bars = series['BINANCE:ETHUSDT@1D'];
+    loader.want([ETH], [ETH], { firstBarTime: (bars[19_500] as Bar).time, timeframe: '1D' });
+    await settle();
+    const before = loader.data(ETH);
+    if (!before || before === 'invalid') throw new Error('not loaded');
+    loader.want([], [ETH], { firstBarTime: (bars[10_000] as Bar).time, timeframe: '1D' });
+    // The live bar moves while the older page loads: each update is a new version of the data.
+    const last = before.bars.at(-1) as Bar;
+    subscriptions.get('BINANCE:ETHUSDT@1D')?.onBar({ ...last, close: 1 }, false);
+    release();
+    await settle();
+    const after = loader.data(ETH);
+    if (!after || after === 'invalid') throw new Error('gone');
+    expect(after.bars).toHaveLength(2 * REQUEST_PAGE_BARS);
+    expect(after.history).toBe(before.history + 1);
+    expect(after.bars.at(-1)?.close).toBe(1);
+  });
+
+  it('lets its scripts run on what is in when a page fails, and asks again after a while', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.UTC(2026, 10, 17));
+    const series = { 'BINANCE:ETHUSDT@1D': days(20_000) };
+    const { api } = fakeApi(series);
+    let down = false;
+    let pages = 0;
+    const getBars = api.getBars;
+    api.getBars = async (symbol, resolution, to, countBack, signal, hours) => {
+      if (to !== null) {
+        pages++;
+        if (down) throw new ApiError('network', 'unreachable');
+      }
+      return getBars(symbol, resolution, to, countBack, signal, hours);
+    };
+    const { feed } = fakeFeed();
+    const history = vi.fn();
+    const loader = new RequestLoader({
+      api,
+      feed,
+      background: '#0F0F0F',
+      onHistory: history,
+      onLive: () => {},
+    });
+    const bars = series['BINANCE:ETHUSDT@1D'];
+    loader.want([ETH], [ETH], { firstBarTime: (bars[19_500] as Bar).time, timeframe: '1D' });
+    await settle();
+    history.mockClear();
+    down = true;
+    const deeper = { firstBarTime: (bars[10_000] as Bar).time, timeframe: '1D' };
+    loader.want([], [ETH], deeper);
+    expect(loader.settling(ETH)).toBe(true);
+    await settle();
+    // The page failed: no more pages are coming for now, and its scripts are told so.
+    expect(loader.settling(ETH)).toBe(false);
+    expect(history).toHaveBeenCalledTimes(1);
+    expect(pages).toBe(1);
+    // Asked again only after REQUEST_RETRY_MS, as a failed load is.
+    down = false;
+    loader.want([], [ETH], deeper);
+    await settle();
+    expect(pages).toBe(1);
+    vi.setSystemTime(Date.now() + REQUEST_RETRY_MS);
+    expect(loader.settling(ETH)).toBe(true);
+    loader.want([], [ETH], deeper);
+    await settle();
+    expect(pages).toBe(2);
+    const deep = loader.data(ETH);
+    if (!deep || deep === 'invalid') throw new Error('not loaded');
+    expect(deep.bars).toHaveLength(2 * REQUEST_PAGE_BARS);
+  });
 });
 
 describe('Currency pairs for conversions (provisional: Kraken’s, docs/SPEC.md §11)', () => {

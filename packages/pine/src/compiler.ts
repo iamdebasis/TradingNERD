@@ -400,6 +400,8 @@ export interface CompiledProgram {
   readsClock: boolean;
   /** Whether it reads request.currency_rate()'s rates (Compiler.readsRates). */
   readsRates: boolean;
+  /** Whether it reads what a live update gives otherwise than history does (Compiler.readsLive). */
+  readsLive: boolean;
 }
 
 /** What one statement reads and writes: a request copies the statements its expression needs. */
@@ -616,6 +618,15 @@ export class Compiler {
    * that does is run again on every load, as one with request.security() inside is.
    */
   readsRates = false;
+  /**
+   * Reads what a live update gives otherwise than history does: a varip, barstate.isrealtime,
+   * ishistory, isnew, islast or islastconfirmedhistory, last_bar_index, last_bar_time or
+   * chart.right_visible_bar_time. TradingView: elapsed realtime bars "become historical bars" when
+   * a script reloads, and "if a script relies on temporary data from realtime bars in its
+   * calculations, it might behave differently after reloading" (Pine docs, Execution model). A
+   * request's context run that does is run again at a load after live updates (requests.ts).
+   */
+  readsLive = false;
   indicator: IndicatorDecl | null = null;
   readonly warnings: PineDiagnostic[] = [];
   readonly quals = new Map<object, Qual>();
@@ -772,6 +783,7 @@ export class Compiler {
       alertCalls: this.alertCalls,
       readsClock: this.readsClock,
       readsRates: this.readsRates,
+      readsLive: this.readsLive,
     };
   }
 
@@ -845,6 +857,8 @@ export class Compiler {
           default: field.default,
           varip: field.varip,
         });
+        // A varip field keeps its value through a live bar's updates: the load's live-sensitive.
+        if (field.varip) this.readsLive = true;
       }
     }
   }
@@ -1396,6 +1410,8 @@ export class Compiler {
       this.warn(`Shadowing variable "${name}", which exists in an outer scope`, span);
     }
     if (isReferenceType(base)) this.usesObjects();
+    // A varip keeps its value through a live bar's updates, which history doesn't have.
+    if (mode === 'varip') this.readsLive = true;
     const floor = this.floors.get(key) ?? CONST;
     const v: Var = {
       base,

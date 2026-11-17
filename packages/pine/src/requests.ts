@@ -428,6 +428,22 @@ const noRate = (symbol: string, currency: string, span: Span): PineRuntimeError 
 
 // ---- contexts ----
 
+/** A request a context run's code made inside it, as ContextRun.ask() records it. */
+interface InnerAsk {
+  readonly site: RequestSite;
+  /** What it asked for: the context's key, its non-standard type and that type's inputs. */
+  readonly asking: Asking;
+  readonly options: SecurityOptions;
+  /** Its text in a load's history set (RequestBroker.sealed()). */
+  readonly sealed: string;
+  /** It was made on one of the run's historical bars: asked again, it's registered there too. */
+  onHistory: boolean;
+  /** What it gave last: the inner context's run, or why there's none. */
+  result: ContextRun | 'missing' | 'invalid' | 'no rate';
+  /** The inner run's revision when the run last read it (-1 for none). */
+  revision: number;
+}
+
 /**
  * One context's run: the context program over the context's bars, its values bar by bar, and the
  * warm-up rule's checks (script.ts), so a value that still depends on bars not loaded isn't
@@ -445,12 +461,28 @@ export class ContextRun {
   /** Its prices are another currency's, converted at rates from other contexts (ContextStore.run). */
   converted = false;
   /**
-   * Its code reads no clock and makes no requests of its own: no request.*() call inside, nor
+   * Its code reads no clock and no other contexts' rates: no timenow, unseeded math.random() or
    * request.currency_rate() (from its last run afresh).
    */
-  private plain = false;
+  private clockFree = false;
+  /** Its code makes requests inside it: request.security() and the like (from its last run afresh). */
+  private nested = false;
+  /** Counts its changes (a run afresh, a live update, its live bar run again): outer runs read it. */
+  revision = 0;
+  /**
+   * The requests its code made inside it, by call site and what they asked for: asked again, once
+   * per load and live update, before it's reused (askedAgain()), so a change of theirs reaches it.
+   */
+  private readonly inner = new Map<RequestSite, Map<Asking, InnerAsk>>();
+  /** The store's stamp when it last asked them (ContextStore.stamp). */
+  private askedAt = -1;
   /** Its last run was afresh, with no live update since: it's what a fresh run gives. */
   private fresh = false;
+  /**
+   * Its code reads nothing a live update gives otherwise than history does (Compiler.readsLive):
+   * after live updates it still gives what a fresh run would (from its last run afresh).
+   */
+  private liveSafe = false;
   /** Kept from the script's last load: its data's next change runs it afresh (keep()). */
   private kept = false;
   private main: Execution | null = null;
@@ -480,19 +512,21 @@ export class ContextRun {
 
   /**
    * Whether the script's next load can keep this run (ContextStore.begin), as what a fresh run
-   * would give: it last ran afresh and its data hasn't changed since (a live update's values
-   * aren't a fresh run's: varip, barstate.isrealtime); its code reads no clock (timenow, an
-   * unseeded math.random()) and makes no requests of its own; its prices weren't converted to
-   * another currency (their rates come from other contexts); and no run of it stopped on an
-   * error (the time limit's can come out otherwise). Its data's version and history then say all
-   * that can change what it gives.
+   * would give: it last ran afresh, or had live updates since but its code can't tell them from
+   * history (liveSafe: no varip, barstate.isrealtime and the like) and makes no requests inside
+   * it (a request's value on a realtime bar is the context's latest, on history its last
+   * confirmed one: Pine docs, Other timeframes and data); its code reads no clock (timenow, an
+   * unseeded math.random()) nor request.currency_rate(); its prices weren't converted to another
+   * currency (their rates come from other contexts); and no run of it stopped on an error (the
+   * time limit's can come out otherwise). Its data's version and history, and the requests inside
+   * it asked again (askedAgain()), then say all that can change what it gives.
    */
   get keepable(): boolean {
     const main = this.main;
     return (
       main !== null &&
-      this.fresh &&
-      this.plain &&
+      (this.fresh || (this.liveSafe && !this.nested)) &&
+      this.clockFree &&
       !this.converted &&
       main.error === null &&
       this.checks.every((check) => check.error === null)
@@ -501,10 +535,37 @@ export class ContextRun {
 
   /**
    * The script's next load keeps it (ContextStore.begin): there, unchanged data keeps it as it
-   * is, and any change runs it afresh, as that load would have, not as a live update.
+   * is; data changed by live updates updates it as they do when its code can't tell them from
+   * history; any other change runs it afresh, as that load would have.
    */
   keep(): void {
     this.kept = true;
+  }
+
+  /**
+   * A request its code made inside it (its executions' RequestBroker): what it asked for, on
+   * which bar, and what it gave, so the requests can be asked again before the run is reused.
+   */
+  ask(
+    site: RequestSite,
+    asking: Asking,
+    options: SecurityOptions,
+    sealed: string,
+    onHistory: boolean,
+    result: ContextRun | 'missing' | 'invalid' | 'no rate',
+  ): void {
+    let asks = this.inner.get(site);
+    if (!asks) {
+      asks = new Map();
+      this.inner.set(site, asks);
+    }
+    const known = asks.get(asking);
+    if (known) {
+      known.result = result;
+      if (onHistory) known.onHistory = true;
+      return;
+    }
+    asks.set(asking, { site, asking, options, sealed, onHistory, result, revision: -1 });
   }
 
   get error(): ScriptError | null {
@@ -529,13 +590,36 @@ export class ContextRun {
     const kept = this.kept;
     this.kept = false;
     if (main && before && before.version === data.version && before.history === data.history) {
+      if (this.inner.size > 0 && this.askedAt !== this.store.stamp && this.askedAgain()) {
+        // A request inside it gives other values now. Kept from the last load, it runs afresh,
+        // as that load would have. Within a load, its live bar runs again, as TradingView
+        // recalculates requests on each realtime update (Pine docs, Other timeframes and data);
+        // its history stays as it was until the next load, as a chart's does, and that load
+        // runs it afresh: with no live bar (a market closed), its history alone may have read
+        // what changed (a higher timeframe's live bar, with lookahead on).
+        if (kept) this.full(this.window(data), data);
+        else if (this.live) this.again(this.window(data));
+        else {
+          this.fresh = false;
+          this.noteInner();
+        }
+        return;
+      }
+      // Kept after live updates: its warm-up verdict as a fresh run would give it now.
+      if (kept && !this.fresh) this.resettle(main.length, data);
       return;
     }
     this.data = data;
     const lastFrom = this.from;
     const bars = this.window(data);
+    // A run kept from the last load follows its data's live updates only when its code can't
+    // tell them from history; else it runs afresh, as that load would have.
     const incremental =
-      !kept && main && before && before.history === data.history && this.from === lastFrom;
+      (!kept || (this.liveSafe && !this.nested)) &&
+      main &&
+      before &&
+      before.history === data.history &&
+      this.from === lastFrom;
     if (incremental && bars.length >= main.length && main.length > 0) {
       this.fresh = false;
       if (bars.length === main.length) {
@@ -548,9 +632,55 @@ export class ContextRun {
         }
       }
       this.times(bars, data);
+      if (kept) this.resettle(bars.length, data);
+      this.changed();
       return;
     }
     this.full(bars, data);
+  }
+
+  /**
+   * Asks the requests inside it again, as its code would (once per load and live update): each is
+   * listed, counted and registered as asked on history for this load, and its context brought up
+   * to date. Whether any gives other values than when the run last read it.
+   */
+  private askedAgain(): boolean {
+    this.askedAt = this.store.stamp;
+    let changed = false;
+    for (const asks of this.inner.values()) {
+      for (const ask of asks.values()) {
+        if (ask.onHistory) this.store.history.add(ask.sealed);
+        const { key, type, inputs } = ask.asking;
+        const now = this.store.run(ask.site, key, ask.options, type, inputs);
+        if (now !== ask.result || (now instanceof ContextRun && now.revision !== ask.revision)) {
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  /** Its live bar runs again, reading what the requests inside it give now: a live update. */
+  private again(bars: readonly Bar[]): void {
+    for (const run of this.runs()) run.tick(bars);
+    this.fresh = false;
+    this.changed();
+  }
+
+  /** Its values may have changed: counted, and the requests inside it noted as read. */
+  private changed(): void {
+    this.revision++;
+    this.noteInner();
+    this.askedAt = this.store.stamp;
+  }
+
+  /** The requests inside it noted as read now: their contexts' revisions. */
+  private noteInner(): void {
+    for (const asks of this.inner.values()) {
+      for (const ask of asks.values()) {
+        ask.revision = ask.result instanceof ContextRun ? ask.result.revision : -1;
+      }
+    }
   }
 
   /** The bars that count: all of them, or the latest calc_bars_count (and the live one). */
@@ -574,10 +704,14 @@ export class ContextRun {
   private full(bars: readonly Bar[], data: ContextData): void {
     // Fresh only once it's done: a run cut short by a crash is never kept.
     this.fresh = false;
+    // The requests inside it, as this run makes them.
+    this.inner.clear();
     const realtimeFrom = data.live ? Math.max(0, bars.length - 1) : bars.length;
     const make = (start: number, changed: readonly Bar[]) => {
       const program = this.store.compile(this.plan);
-      this.plain = !program.readsClock && !program.readsRates && program.requests.length === 0;
+      this.clockFree = !program.readsClock && !program.readsRates;
+      this.nested = program.requests.length > 0;
+      this.liveSafe = !program.readsLive;
       const execution = new Execution(
         program,
         this.store.inputs,
@@ -590,7 +724,7 @@ export class ContextRun {
       const rt = program.runtime;
       rt.secondary = true;
       rt.main = this.store.main;
-      rt.requests = new RequestBroker(this.store);
+      rt.requests = new RequestBroker(this.store, this);
       return execution;
     };
     this.main = make(0, []);
@@ -606,19 +740,41 @@ export class ContextRun {
         )
       : [];
     for (const check of this.checks) check.all(bars);
-    this.times(bars, data);
-    this.settledFrom = this.settle(bars.length, data.fromListing || this.from > 0);
+    this.times(bars, data, true);
+    this.resettle(bars.length, data);
+    this.fresh = true;
+    this.changed();
+  }
+
+  /**
+   * Where its values are trusted from, by the warm-up rule's checks: after a run afresh, or for a
+   * run kept after live updates, which a fresh run would work out over the bars as they are now.
+   */
+  private resettle(length: number, data: ContextData): void {
+    this.settledFrom = this.settle(length, data.fromListing || this.from > 0);
     if (!data.fromListing) {
       // Made bars trusted from `data.warmup` on: what the code remembers counts from there.
       this.settledFrom = Math.max(this.settledFrom + (data.warmup ?? 0), this.warmup);
     }
-    this.fresh = true;
   }
 
-  private times(bars: readonly Bar[], data: ContextData): void {
+  /**
+   * Its bars' open and close times, which line its values up with the chart's. A run afresh
+   * always records them: its bars can be others at the same count (Renko's bricks made again as
+   * its ATR box changed with new bars; a calc_bars_count window moved on). A live update records
+   * them again when its last bar's open moved.
+   */
+  private times(bars: readonly Bar[], data: ContextData, afresh = false): void {
     this.live = data.live;
     this.currency = data.symbol.currency;
-    if (this.opens.length === bars.length) return;
+    const last = bars.at(-1);
+    if (
+      !afresh &&
+      this.opens.length === bars.length &&
+      (last === undefined || this.opens[bars.length - 1] === openOf(last))
+    ) {
+      return;
+    }
     const opens = new Float64Array(bars.length);
     for (let i = 0; i < bars.length; i++) opens[i] = openOf(bars[i] as Bar);
     this.opens = opens;
@@ -716,6 +872,11 @@ export class ContextStore {
   private readonly runs = new Map<string, ContextRun>();
   /** Each unique request this load made: Pine's limit counts them. */
   private readonly unique = new Set<string>();
+  /**
+   * Counts loads and live updates: a context run asks the requests inside it again once per
+   * stamp, not on every bar that reads it (ContextRun.askedAgain()).
+   */
+  stamp = 0;
   /** The runs this load asked for, by id, and the made bars' texts: the rest go at its end. */
   private readonly runsAsked = new Set<string>();
   private readonly madeAsked = new Set<string>();
@@ -739,12 +900,15 @@ export class ContextStore {
   /**
    * A new load of the script, with its own clock: what it asks for starts empty, and the runs of
    * the last load that a fresh run would give again stay (ContextRun.keepable). One whose data
-   * then turns out unchanged is used as it is; any change runs it afresh (ContextRun.ensure). A
-   * context that had live updates, reads the clock, makes requests of its own or is converted to
-   * another currency runs afresh, as every one did before step 3.
+   * and inner requests then turn out unchanged is used as it is; one whose data had live updates
+   * follows them when its code can't tell them from history; any other change runs it afresh
+   * (ContextRun.ensure). A context whose code can tell live updates from history and had some,
+   * that makes requests inside it and had live updates, that reads the clock or other contexts'
+   * rates, or that is converted to another currency runs afresh, as every one did before step 3.
    */
   begin(clock: RunClock): void {
     this.clock = clock;
+    this.stamp++;
     this.missing.clear();
     this.used.clear();
     this.history.clear();
@@ -755,6 +919,11 @@ export class ContextStore {
       if (run.keepable) run.keep();
       else this.runs.delete(id);
     }
+  }
+
+  /** A live update of the script's bars or its contexts': each run asks its inner requests again. */
+  touch(): void {
+    this.stamp++;
   }
 
   /** The load is done: runs and made bars it didn't ask for go (a context no longer read). */
@@ -1096,9 +1265,12 @@ export class RequestBroker {
   private keysKept = 0;
   /** Each call site's sealed() text for its last key. */
   private readonly sealedTexts = new WeakMap<RequestSite, { key: RequestKey; text: string }>();
+  /** The context run whose code asks through it: the requests it makes are inside that run's. */
+  private readonly owner: ContextRun | null;
 
-  constructor(store: ContextStore) {
+  constructor(store: ContextStore, owner: ContextRun | null = null) {
     this.store = store;
+    this.owner = owner;
   }
 
   get missing(): ReadonlyMap<string, RequestKey> {
@@ -1122,8 +1294,10 @@ export class RequestBroker {
     const { key, type, inputs } = asking;
     this.checkType(site, type, inputs);
     // A realtime bar can't ask for a new context (Pine docs, Dynamic requests).
-    this.sealed(site, key, rt);
-    const run = this.store.run(site, key, { ...options, currency }, type, inputs);
+    const sealed = this.sealed(site, key, rt);
+    const asked = { ...options, currency };
+    const run = this.store.run(site, key, asked, type, inputs);
+    this.owner?.ask(site, asking, asked, sealed, rt.index < rt.realtimeFrom, run);
     if (run === 'missing') return requestNa(site.base, site.items);
     if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);
     if (run === 'no rate') throw noRate(key.symbol, currency, site.span);
@@ -1153,7 +1327,7 @@ export class RequestBroker {
     if (!asking) return this.invalid(site, `Invalid timeframe "${timeframe}"`, options);
     const { key, type, inputs } = asking;
     this.checkType(site, type, inputs);
-    this.sealed(site, key, rt);
+    const sealed = this.sealed(site, key, rt);
     const resolution = resolutionOf(key.timeframe);
     if (resolution && spanOf(resolution) > spanOf(this.resolution(rt))) {
       if (options.ignoreInvalidTimeframe) return requestNa(site.base, site.items);
@@ -1162,7 +1336,9 @@ export class RequestBroker {
         site.span,
       );
     }
-    const run = this.store.run(site, key, { ...options, currency }, type, inputs);
+    const asked = { ...options, currency };
+    const run = this.store.run(site, key, asked, type, inputs);
+    this.owner?.ask(site, asking, asked, sealed, rt.index < rt.realtimeFrom, run);
     if (run === 'missing') return requestNa(site.base, site.items);
     if (run === 'invalid') return this.invalid(site, `Invalid symbol "${key.symbol}"`, options);
     if (run === 'no rate') throw noRate(key.symbol, currency, site.span);
@@ -1188,8 +1364,12 @@ export class RequestBroker {
     return new PineArray(elemOf(site.base), values);
   }
 
-  /** "scripts must request all required datasets while executing on historical bars". */
-  private sealed(site: RequestSite, key: RequestKey, rt: Runtime): void {
+  /**
+   * "scripts must request all required datasets while executing on historical bars": registers
+   * the request on a historical bar, refuses a new one on a realtime bar. Its text, which a
+   * context run's inner request is registered by again (ContextRun.askedAgain()).
+   */
+  private sealed(site: RequestSite, key: RequestKey, rt: Runtime): string {
     let sealed = this.sealedTexts.get(site);
     if (!sealed || sealed.key !== key) {
       sealed = { key, text: `${site.shared ?? site.id}|${requestKeyText(key)}` };
@@ -1203,6 +1383,7 @@ export class RequestBroker {
         site.span,
       );
     }
+    return asked;
   }
 
   /** A context's own runtime error stops the script, as one script (Pine docs, Runtime errors). */

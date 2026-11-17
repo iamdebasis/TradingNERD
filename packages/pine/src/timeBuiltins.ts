@@ -115,6 +115,8 @@ export function timeName(c: Compiler, name: string, span: Span): Compiled | null
       c.readsClock = true;
       return series('int', (rt) => rt.now, span);
     case 'last_bar_time':
+      // The last bar's time, which moves on as live bars open.
+      c.readsLive = true;
       return series(
         'int',
         (rt) => {

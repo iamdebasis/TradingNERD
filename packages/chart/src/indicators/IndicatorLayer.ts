@@ -166,6 +166,11 @@ class IndicatorView {
   librariesRevision = '';
   /** The request data its last run read, by its requested keys (refreshRequests compares). */
   contextsSeen: readonly unknown[] = [];
+  /**
+   * A script in a worker waits for its contexts: older chart bars came in that they don't reach
+   * back to yet (setBars). Its drawn values stay on their bars; it runs once they're in.
+   */
+  awaitingContexts = false;
   /** Whether a script was stopped when last drawn: a change either way draws it whole. */
   stopped = false;
   /** Its run went on in the view built in its place (the same code and inputs): it isn't stopped. */
@@ -268,8 +273,20 @@ export interface IndicatorDebugState {
   trades: { fills: number; painted: number; closed: number; open: number } | null;
   /** What stopped a script, if anything did. */
   error: string | null;
-  /** A script in a worker that has no results for the chart's bars yet, or messages unanswered. */
+  /**
+   * A script in a worker that has no results for the chart's bars yet, messages unanswered, or
+   * that waits for its contexts to page back to the chart's older bars.
+   */
   calculating: boolean;
+}
+
+/**
+ * Where scripts' requests get their data (the app's loader), told when older chart bars come in:
+ * its contexts can then page back before the scripts run over them (docs/SPEC.md §11, item 148).
+ */
+export interface PagingFeed extends RequestFeed {
+  /** The chart's bars now start at `firstBarTime` (UTC seconds). */
+  reachBack?(firstBarTime: number): void;
 }
 
 /** How the layer runs scripts, and who hears when a worker's results were drawn. */
@@ -364,7 +381,7 @@ export class IndicatorLayer {
   /** The libraries scripts import. */
   private libraries: ScriptLibraries = { revision: '' };
   /** Where scripts' requests get their data (the app's loader); none: they wait. */
-  private feed: RequestFeed | undefined;
+  private feed: PagingFeed | undefined;
   private readonly runner: ScriptRunner | undefined;
   private readonly onScripts: (() => void) | undefined;
 
@@ -419,6 +436,7 @@ export class IndicatorLayer {
       if (keep) {
         keep.runKept = true;
         view.contextsSeen = keep.contextsSeen;
+        view.awaitingContexts = keep.awaitingContexts;
         this.takeOffsets(view);
       } else if (this.bars.length > 0 && !indicator.hidden && !view.compileError) {
         // A hidden indicator isn't computed: showing it again builds it afresh.
@@ -524,12 +542,20 @@ export class IndicatorLayer {
     this.bars = bars;
     this.times = times;
     this.fromListing = fromListing;
+    // A page of older bars: the feed's contexts that don't reach back to them start paging now,
+    // not only after the scripts' results (docs/SPEC.md §11, item 148).
+    const first = bars[0]?.time;
+    if (prepended > 0 && first !== undefined) this.feed?.reachBack?.(first);
     for (const view of this.views) {
       if (view.indicator.hidden || view.compileError) continue;
       if (view.run.symbol !== this.symbol) this.renew(view);
       else if (prepended > 0) view.script?.prepended(prepended);
       else view.script?.replaced();
-      this.runBars(view);
+      // A script in a worker whose contexts are paging back to the new bars waits for them: run
+      // now, it would run them short of their history, with their warm-up checks, and again
+      // once they're in. Meanwhile what it drew stays on its bars.
+      view.awaitingContexts = prepended > 0 && this.pagingBack(view);
+      if (!view.awaitingContexts) this.runBars(view);
       // Offsets its run worked out afresh that its series don't have: it's built again below.
       if (view.script && this.offsetsDiffer(view)) {
         view.offsetsMoved = true;
@@ -561,6 +587,12 @@ export class IndicatorLayer {
     this.times = times;
     for (const view of this.views) {
       if (view.indicator.hidden || view.compileError) continue;
+      // A script waiting for its contexts runs once they're in, its live bar with it: told of the
+      // live bar now, its worker would find its bars aren't the chart's and run it all at once.
+      if (view.awaitingContexts) {
+        this.resume(view);
+        continue;
+      }
       this.updateView(view, change, index);
     }
   }
@@ -589,7 +621,7 @@ export class IndicatorLayer {
    * Where scripts' requests get their data: the app's loader (docs/SPEC.md §6.18). The scripts
    * run again with it.
    */
-  setFeed(feed: RequestFeed | undefined): void {
+  setFeed(feed: PagingFeed | undefined): void {
     if (feed === this.feed) return;
     this.feed = feed;
     for (const view of this.views) {
@@ -639,6 +671,10 @@ export class IndicatorLayer {
       const run = view.requesting;
       if (!run || view.indicator.hidden || view.compileError) continue;
       if (run.requested.length === 0) continue;
+      if (view.awaitingContexts) {
+        this.resume(view);
+        continue;
+      }
       if (kind === 'history' || run.waiting || last < 0) {
         const feed = this.feed;
         if (feed) {
@@ -900,7 +936,8 @@ export class IndicatorLayer {
         painted: view.drawings?.paintedCounts() ?? { labels: 0, lines: 0, boxes: 0, tables: 0 },
       },
       error: view.error,
-      calculating: !view.indicator.hidden && (view.script?.calculating ?? false),
+      calculating:
+        !view.indicator.hidden && (view.awaitingContexts || (view.script?.calculating ?? false)),
     }));
   }
 
@@ -963,6 +1000,7 @@ export class IndicatorLayer {
   private renew(view: IndicatorView): void {
     view.script?.dispose();
     view.run = this.makeRun(view.indicator, view.definition, view.program);
+    view.awaitingContexts = false;
     this.attach(view);
   }
 
@@ -1031,6 +1069,26 @@ export class IndicatorLayer {
     view.run.setBars(this.bars);
     const requesting = view.requesting;
     if (requesting) view.contextsSeen = this.contextsOf(requesting);
+  }
+
+  /**
+   * Whether a script in a worker has contexts still paging back for the chart (the feed's
+   * settling()). Only a worker's run waits for them: it keeps what it drew on its bars as older
+   * ones come in (RemoteRun.prepended), where a run in the page would draw its values off them.
+   */
+  private pagingBack(view: IndicatorView): boolean {
+    const feed = this.feed;
+    const script = view.script;
+    if (!feed?.settling || !script?.remote) return false;
+    return script.requested.some((key) => feed.settling?.(key) ?? false);
+  }
+
+  /** A script that waited for its contexts runs once none still pages back. */
+  private resume(view: IndicatorView): void {
+    if (this.pagingBack(view)) return;
+    view.awaitingContexts = false;
+    // A worker's result is drawn when it comes (scriptResult).
+    this.runBars(view);
   }
 
   /** The data a run's requested contexts have in the feed now, by its keys (null: missing). */
