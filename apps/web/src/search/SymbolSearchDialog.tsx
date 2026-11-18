@@ -94,6 +94,16 @@ interface Row {
   child: boolean;
 }
 
+/** An Enter pressed before the list answered what was typed: done once it does. */
+interface WaitingEnter {
+  /** Shift+Enter: add and close. */
+  close: boolean;
+  /** What it was pressed on: more typing, another tab or another source drops it. */
+  text: string;
+  tab: SearchTab;
+  source: string | null;
+}
+
 type FilterId = 'source' | 'type' | 'exchangeType';
 type TypeFilter = 'all' | 'spot';
 type ExchangeTypeFilter = 'all' | 'cex';
@@ -109,9 +119,11 @@ const EMPTY_SET: ReadonlySet<SymbolId> = new Set();
  * TradingView's "Add symbol" dialog (docs/reference/04-add-symbol.png), also the chart's symbol
  * search: every listed pair on the six exchanges, ranked by the gateway, one row per pair with
  * the exchanges that list it. Typing stays in the search field: ↑/↓ move, Enter adds (or shows
- * the symbol), Shift+Enter and Shift+click add and close, Escape closes. A formula of symbols
- * (TradingView's spread, docs/SPEC.md §5.11) gets its own row on top, which Enter takes; the
- * results below are for the symbol being typed, and a pick fills it in.
+ * the symbol), Shift+Enter and Shift+click add and close, Escape closes. With nothing
+ * highlighted, Enter takes the top result for what's typed, once it's in, and does nothing when
+ * there's none. A formula of symbols (TradingView's spread, docs/SPEC.md §5.11) gets its own row
+ * on top, which Enter takes; the results below are for the symbol being typed, and a pick fills
+ * it in.
  */
 export function SymbolSearchDialog({
   mode,
@@ -137,23 +149,28 @@ export function SymbolSearchDialog({
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const rowElements = useRef(new Map<number, HTMLDivElement>());
+  /** An Enter pressed before the list answered what's typed, done once it does (below). */
+  const waitingEnter = useRef<WaitingEnter | null>(null);
   const exchanges = useExchanges(api);
   /** In a formula, the symbol being typed: what's searched for, in place of the whole text. */
   const operand = useMemo(() => (looksLikeFormula(text) ? lastOperand(text) : null), [text]);
   const query = (operand ? operand.text : text.trim()).slice(0, MAX_QUERY_LENGTH);
   const search = useSymbolSearch(api, query, source, tab === 'all' ? null : tab);
   const parsed = useMemo(() => readFormula(text), [text]);
+  /**
+   * Whether the results on screen answer what's typed now. Other text, another tab or another
+   * source sends a new search, and the last results stay on screen until its answer, or after
+   * it failed.
+   */
+  const answered = search.query === query && !search.loading && search.error === null;
   // Plainly a formula, or text that reads as one when no symbol matches it ("NVDA/AMD").
-  const unmatched =
-    search.query === query &&
-    !search.loading &&
-    search.error === null &&
-    search.matches.length === 0 &&
-    query !== '';
+  const unmatched = answered && search.matches.length === 0 && query !== '';
   const typed = useTypedFormula(api, operand || unmatched ? parsed : null);
   const formulaRow = typed.formula;
   /** The lines above the results: the formula's. */
   const top = formulaRow ? 1 : 0;
+  /** The formula's row is on its way: it comes a render after the text reads as a formula. */
+  const formulaComing = (operand !== null || unmatched) && parsed !== null && formulaRow === null;
   /** The tab's exchanges, for the source filter: crypto's, or the US stock exchanges. */
   const tabExchanges = exchanges.filter(
     (exchange) =>
@@ -236,6 +253,8 @@ export function SymbolSearchDialog({
    * formula, it fills in the symbol being typed.
    */
   const activate = (row: Row, close: boolean) => {
+    // A click acts now, in place of an Enter still waiting for the list.
+    waitingEnter.current = null;
     const { listing } = row;
     if (operand) {
       if (!listing.live) return;
@@ -260,6 +279,7 @@ export function SymbolSearchDialog({
    * show it (search mode) or add it (add mode).
    */
   const activateFormula = async (close: boolean) => {
+    waitingEnter.current = null;
     if (!parsed) return;
     const done = await typed.finder.complete(parsed);
     if (!mounted.current || done.state !== 'ready') return;
@@ -273,16 +293,67 @@ export function SymbolSearchDialog({
     if (close) onClose();
   };
 
+  /** A line's action: the formula's row, or a result's. */
+  const activateLine = (line: number, close: boolean) => {
+    if (line < top) {
+      void activateFormula(close);
+      return;
+    }
+    const row = rows[line - top];
+    if (row) activate(row, close);
+  };
+
+  /**
+   * The line Enter takes with nothing highlighted: the formula's row, else the first result.
+   * TradingView takes the top search result for what's typed, and does nothing when there's
+   * none (Charting Library, `allow_arbitrary_symbol_search_input`). 'wait' until the results
+   * answer what's typed, the last ones staying on screen meanwhile, or while the formula's row
+   * is on its way; a search that failed has no result to take.
+   */
+  const topLine = (): 0 | 'none' | 'wait' => {
+    if (top > 0) return 0;
+    if (formulaComing) return 'wait';
+    if (!answered) return !search.loading && search.error !== null ? 'none' : 'wait';
+    return rows.length > 0 ? 0 : 'none';
+  };
+
+  /**
+   * Enter, or Shift+Enter to close too: the highlighted line where it answers what's typed (the
+   * formula's row always does), else the top line, now or once the results are in.
+   */
+  const enter = (close: boolean) => {
+    waitingEnter.current = null;
+    const highlighted = active >= 0 && active < lineCount && (active < top || answered);
+    const line = highlighted ? active : topLine();
+    if (line === 'wait') waitingEnter.current = { close, text, tab, source };
+    else if (line !== 'none') activateLine(line, close);
+  };
+
+  // An Enter that came before the results for what's typed: done with the top line once they're
+  // in, unless what it was pressed on has changed since (more typing, another tab or source).
+  // It runs after every render: the results, the formula's row and any change each bring one.
+  useEffect(() => {
+    const waiting = waitingEnter.current;
+    if (!waiting) return;
+    if (waiting.text !== text || waiting.tab !== tab || waiting.source !== source) {
+      waitingEnter.current = null;
+      return;
+    }
+    const line = topLine();
+    if (line === 'wait') return;
+    waitingEnter.current = null;
+    if (line !== 'none') activateLine(line, waiting.close);
+  });
+
   const onInputKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
+      // Picking a line by hand drops an Enter still waiting for the list.
+      waitingEnter.current = null;
       moveTo(active + (event.key === 'ArrowDown' ? 1 : -1));
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const line = Math.max(active, 0);
-      const row = rows[line - top];
-      if (line < top) void activateFormula(event.shiftKey);
-      else if (row) activate(row, event.shiftKey);
+      enter(event.shiftKey);
     }
   };
 

@@ -28,6 +28,32 @@ async function openAddSymbol(page: Page) {
   await expect(field(addDialog(page))).toBeFocused();
 }
 
+/**
+ * Holds the gateway's answer to the next search for `query` until `release()`, as a slow answer
+ * would: meanwhile the list still shows the results for what was typed before. `sent` resolves
+ * once the dialog has asked.
+ */
+async function holdSearch(page: Page, query: string) {
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let asked = () => {};
+  const sent = new Promise<void>((resolve) => {
+    asked = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === '/api/symbols/search' && url.searchParams.get('query') === query,
+    async (route) => {
+      asked();
+      await released;
+      await route.fallback();
+    },
+    { times: 1 },
+  );
+  return { sent, release };
+}
+
 const XRP_PAIRS = [
   'BINANCE:XRPUSDT',
   'COINBASE:XRPUSD',
@@ -100,7 +126,8 @@ test('Enter adds the top match and keeps the dialog open; ↓ picks; Shift+Enter
   await openAddSymbol(page);
   const input = field(addDialog(page));
   await input.fill('xrp/usdc');
-  await expect(result(addDialog(page), 'BINANCE:XRPUSDC')).toBeVisible();
+  // The list answers what's typed: the list before typing has an XRPUSDC row too, further down.
+  await expect.poll(() => results(addDialog(page))).toEqual(['BINANCE:XRPUSDC']);
   await page.keyboard.press('Enter');
   // Added at the end of the section, as the row below the last one.
   await expect.poll(() => savedSymbols(market.watchlistSaves).at(-1)).toBe('BINANCE:XRPUSDC');
@@ -121,6 +148,79 @@ test('Enter adds the top match and keeps the dialog open; ↓ picks; Shift+Enter
     .poll(() => savedSymbols(market.watchlistSaves).slice(-2))
     .toEqual(['BINANCE:XRPUSDC', 'BINANCE:XRPEUR']);
   await expect(watchlist(page).getByRole('button', { name: 'XRPEUR', exact: true })).toBeVisible();
+});
+
+test('Enter waits for the results for what was typed, then takes their top match; with none it does nothing', async ({
+  page,
+  market,
+  consoleGuard,
+}) => {
+  // TradingView: Enter takes the top search result, and does nothing when there are none
+  // (Charting Library, allow_arbitrary_symbol_search_input). Never the list typed before.
+  consoleGuard.allow(/status of 500/); // the search made to fail
+  await openAddSymbol(page);
+  const dialog = addDialog(page);
+  const input = field(dialog);
+  await expect.poll(async () => (await results(dialog))[0]).toBe('AMEX:SPY');
+  const saves = market.watchlistSaves.length;
+
+  const usdc = await holdSearch(page, 'xrp/usdc');
+  await input.fill('xrp/usdc');
+  await usdc.sent;
+  await page.keyboard.press('Enter');
+  // The answer isn't in yet: the list before typing is still on screen, and its top isn't added.
+  await expect(result(dialog, 'AMEX:SPY')).toBeVisible();
+  await expect(watchlist(page).getByRole('button', { name: 'SPY', exact: true })).toHaveCount(0);
+  usdc.release();
+  await expect.poll(() => savedSymbols(market.watchlistSaves).at(-1)).toBe('BINANCE:XRPUSDC');
+  await expect(dialog).toBeVisible();
+
+  // A search that failed has no result to take: the list before stays on screen, unadded.
+  await input.fill('');
+  await expect.poll(async () => (await results(dialog))[0]).toBe('AMEX:SPY');
+  await page.route(
+    (url) => url.pathname === '/api/symbols/search' && url.searchParams.get('query') === 'xrp/try',
+    (route) => route.fulfill({ status: 500, json: { error: 'internal_error', message: 'Down' } }),
+  );
+  const failed = page.waitForResponse(
+    (answer) => new URL(answer.url()).searchParams.get('query') === 'xrp/try',
+  );
+  await input.fill('xrp/try');
+  await failed;
+  await page.keyboard.press('Enter');
+
+  // Nothing matches what's typed: Shift+Enter does nothing, and the dialog stays open.
+  const none = await holdSearch(page, 'ZZZZ');
+  await input.fill('ZZZZ');
+  await none.sent;
+  await page.keyboard.press('Shift+Enter');
+  none.release();
+  await expect(dialog.getByRole('status')).toHaveText('No symbols match your criteria');
+
+  // An Enter is for the text it was pressed on: typing on drops it, before its answer comes.
+  const btc = await holdSearch(page, 'xrp/btc');
+  await input.fill('xrp/btc');
+  await btc.sent;
+  await page.keyboard.press('Enter');
+  await input.fill('xrp/eur');
+  await expect.poll(() => results(dialog)).toEqual(['BINANCE:XRPEUR']);
+  btc.release();
+
+  // Shift+Enter adds the top match once it's in, and closes.
+  const btcAgain = await holdSearch(page, 'xrp/btc');
+  await input.fill('xrp/btc');
+  await btcAgain.sent;
+  await page.keyboard.press('Shift+Enter');
+  await expect(dialog).toBeVisible();
+  btcAgain.release();
+  await expect(dialog).toHaveCount(0);
+  await expect
+    .poll(() => savedSymbols(market.watchlistSaves).slice(-2))
+    .toEqual(['BINANCE:XRPUSDC', 'BINANCE:XRPBTC']);
+  // Two adds in all: never the list typed before (SPY), nor the text typed after an Enter (EUR).
+  expect(market.watchlistSaves).toHaveLength(saves + 2);
+  expect(savedSymbols(market.watchlistSaves)).not.toContain('AMEX:SPY');
+  expect(savedSymbols(market.watchlistSaves)).not.toContain('BINANCE:XRPEUR');
 });
 
 test('Shift+click adds and closes; Escape and a press outside close', async ({ page, market }) => {
@@ -182,8 +282,9 @@ test('symbol search, from the pill or a letter typed on the chart, switches the 
   await expect(searchDialog(page)).toBeVisible();
   await expect(searchDialog(page).getByText('to add symbol and close dialog')).toHaveCount(0);
   await field(searchDialog(page)).fill('LDO');
+  // The list answers what's typed: the list before typing has an LDOUSDT row too, further down.
+  await expect.poll(() => results(searchDialog(page))).toEqual(['BINANCE:LDOUSDT']);
   const ldo = result(searchDialog(page), 'BINANCE:LDOUSDT');
-  await expect(ldo).toBeVisible();
   await expect(ldo.getByRole('button')).toHaveCount(0); // nothing to add here
   await page.keyboard.press('Enter');
   await expect(searchDialog(page)).toHaveCount(0);

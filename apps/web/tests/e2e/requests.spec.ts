@@ -123,7 +123,14 @@ test('input.symbol is picked with Symbol Search, and the script asks for that sy
   const search = page.getByRole('dialog', { name: 'Symbol search' });
   await expect(search).toBeVisible();
   await search.getByRole('combobox').fill('LDO');
-  await expect(search.locator('[role="option"][data-symbol="BINANCE:LDOUSDT"]')).toBeVisible();
+  // The list answers what's typed, its top LDOUSDT: the list before typing has an LDO row too.
+  await expect
+    .poll(() =>
+      search
+        .getByRole('option')
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-symbol'))),
+    )
+    .toEqual(['BINANCE:LDOUSDT']);
   await page.keyboard.press('Enter');
   await expect(search).toHaveCount(0);
   await expect(field).toHaveText('BINANCE:LDOUSDT');
