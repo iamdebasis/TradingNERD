@@ -273,15 +273,17 @@ test('a Greater Than price alert, Every time, triggers again a minute on, and ed
   await expect(row).toContainText('XRPUSDT Greater Than 1.7000');
 });
 
-test('an alert on a heavy script runs in a worker of its own: the page never waits on it, and Stop stops its worker', async ({
+test('an alert on a heavy script runs in a worker of its own: the page never waits on it or on its chime, and Stop stops its worker', async ({
   page,
   market,
 }) => {
-  // The page's long tasks, and the alerts' script workers (named "Pine alert") made and stopped.
+  // The page's long tasks, the alerts' script workers (named "Pine alert") made and stopped, and
+  // the AudioContexts made and audio elements played.
   await page.addInitScript(() => {
     const w = window as unknown as {
       __long: number[];
       __alertWorkers: { made: number; stopped: number };
+      __audio: { contexts: number; plays: { src: string; playing: boolean; seconds: number }[] };
     };
     w.__long = [];
     new PerformanceObserver((entries) => {
@@ -301,11 +303,34 @@ test('an alert on a heavy script runs in a worker of its own: the page never wai
         super.terminate();
       }
     };
+    w.__audio = { contexts: 0, plays: [] };
+    const Context = window.AudioContext;
+    window.AudioContext = class extends Context {
+      constructor(options?: AudioContextOptions) {
+        w.__audio.contexts++;
+        super(options);
+      }
+    };
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      const played = { src: this.src, playing: false, seconds: Number.NaN };
+      w.__audio.plays.push(played);
+      this.addEventListener(
+        'playing',
+        () => {
+          played.playing = true;
+          played.seconds = this.duration;
+        },
+        { once: true },
+      );
+      return play.call(this);
+    };
   });
   const alertWorkers = () =>
     page.evaluate(() => (window as unknown as { __alertWorkers: unknown }).__alertWorkers);
   const longTasks = () =>
     page.evaluate(() => (window as unknown as { __long: number[] }).__long.splice(0));
+  const audio = () => page.evaluate(() => (window as unknown as { __audio: unknown }).__audio);
   await openChart(page);
   // Seconds of the engine's work over the alert's bars: one long task of seconds in the page.
   await addScript(
@@ -348,7 +373,20 @@ test('an alert on a heavy script runs in a worker of its own: the page never wai
   await expect(toasts(page)).toHaveCount(1);
   await expect(toasts(page).first()).toContainText('Heavy above 2 at 2.5');
   // Seconds of the engine's work, and no task of the page's of 200 ms or more meanwhile.
-  expect(Math.max(0, ...(await longTasks()))).toBeLessThan(200);
+  const tasks = await longTasks();
+  expect(
+    Math.max(0, ...tasks),
+    `the page's long tasks: ${tasks.map((ms) => Math.round(ms)).join(', ') || 'none'} ms`,
+  ).toBeLessThan(200);
+  // Play sound is on: its chime played once, from an audio element, 0.55 s long, and no
+  // AudioContext was made. Making one held the page while it waited on the audio output: 41 to
+  // 76 ms here for a browser's first (measured 2026-11-18), where a play took up to 2 ms.
+  await expect.poll(audio).toEqual({
+    contexts: 0,
+    plays: [
+      { src: expect.stringMatching(/^blob:/), playing: true, seconds: expect.closeTo(0.55, 2) },
+    ],
+  });
   // Stopped from the Alerts panel, its worker stops at once.
   await page
     .getByRole('navigation', { name: 'Panels' })
