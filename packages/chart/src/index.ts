@@ -10,6 +10,13 @@ export {
   instrumentSymbol,
 } from './ChartController';
 export {
+  type CursorMode,
+  DEFAULT_DRAWING_SETTINGS,
+  type DrawingEvents,
+  type DrawingSettings,
+} from './drawings/DrawingEngine';
+export type { MagnetMode } from './drawings/magnet';
+export {
   formatCountdown,
   formatCrosshairTime,
   formatPrice,

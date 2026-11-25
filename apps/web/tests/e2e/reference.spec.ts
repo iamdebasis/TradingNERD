@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { chartState, expect, openChart, test } from './fixtures';
+import { chartState, expect, hideDrawingToolbar, openChart, test } from './fixtures';
 
 /**
  * Pixel checks against the TradingView reference screenshot (docs/reference/01-chart-layout.png).
@@ -97,6 +97,8 @@ const near = (rgb: [number, number, number], target: [number, number, number], t
 const reference: Image = PNG.sync.read(readFileSync(REFERENCE));
 
 async function settledScreenshot(page: Page): Promise<Image> {
+  // The reference was taken with TradingView's drawings toolbar hidden.
+  await hideDrawingToolbar(page);
   await openChart(page);
   await expect(page.locator('[data-book]')).toHaveAttribute('data-status', 'live');
   await page.mouse.move(0, 0); // no crosshair
@@ -206,6 +208,7 @@ test.describe('matches the TradingView reference pixels', () => {
 });
 
 test('the legend sits where TradingView puts it', async ({ page, market }) => {
+  await hideDrawingToolbar(page);
   await openChart(page);
   // The reference shows Sell 1.2955, the spread 0.0001 and Buy 1.2956; the boxes fit them.
   await market.sendBook(1.2955, 1.2956);

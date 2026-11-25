@@ -23,6 +23,7 @@ import {
   parseScriptsIndex,
   parseScriptVersionSource,
   parseStockKeyStatus,
+  parseSymbolDrawings,
   parseSymbolInfo,
   parseSymbolSearchResponse,
   parseWatchlistSummary,
@@ -34,6 +35,7 @@ import {
   type SearchCategory,
   type SessionHours,
   type StockKeyStatus,
+  type SymbolDrawings,
   type SymbolInfo,
   type SymbolSearchResponse,
   type Watchlist,
@@ -259,6 +261,24 @@ export const librariesApi = {
 };
 
 export type LibrariesApi = typeof librariesApi;
+
+const symbolDrawings = (body: unknown): SymbolDrawings =>
+  checked(parseSymbolDrawings(body), 'drawings');
+
+/**
+ * The user's drawings, per symbol (docs/SPEC.md §5.27), which the gateway keeps in
+ * data/drawings.json; a save replaces the symbol's whole list.
+ */
+export const drawingsApi = {
+  load: async (symbol: string, signal?: AbortSignal): Promise<SymbolDrawings> =>
+    symbolDrawings(
+      await getJson(`${API_PREFIX}/drawings?symbol=${encodeURIComponent(symbol)}`, signal),
+    ),
+  save: async (drawings: SymbolDrawings): Promise<SymbolDrawings> =>
+    symbolDrawings(await getJson(`${API_PREFIX}/drawings`, undefined, sendJson('PUT', drawings))),
+};
+
+export type DrawingsApi = typeof drawingsApi;
 
 /** Flagged symbols, kept by the gateway in data/flags.json. */
 export const flagsApi = {

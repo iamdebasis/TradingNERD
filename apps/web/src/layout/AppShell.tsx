@@ -11,6 +11,7 @@ import { IntervalPrompt, promptKey } from '../chart/IntervalPrompt';
 import { type ChartRoute, withInterval, withSymbol } from '../chart/route';
 import { olderCapsApi } from '../data/api';
 import { useGateway, useGatewayStatus } from '../data/GatewayContext';
+import { DrawingToolbar } from '../drawings/DrawingToolbar';
 import { IndicatorsDialog } from '../indicators/IndicatorsDialog';
 import { indicatorStore } from '../indicators/indicatorStore';
 import { isEditable } from '../lib/dom';
@@ -290,6 +291,7 @@ export function AppShell({ route }: { route: ChartRoute }) {
         />
       )}
       <div className={styles.main}>
+        <DrawingToolbar />
         <div
           ref={workspaceRef}
           className={styles.workspace}

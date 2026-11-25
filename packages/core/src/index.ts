@@ -1,5 +1,6 @@
 export * from './clock.ts';
 export * from './config.ts';
+export * from './drawings.ts';
 export * from './flags.ts';
 export * from './formula.ts';
 export * from './intervals.ts';

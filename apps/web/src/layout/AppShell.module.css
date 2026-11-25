@@ -1,10 +1,13 @@
 .app {
   display: grid;
+  /* Never wider than the window: a narrow one clips the top bar rather than widen the page. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--size-toolbar-height) minmax(0, 1fr);
   height: 100%;
 }
 
 .main {
+  position: relative;
   display: flex;
   min-height: 0;
 }
