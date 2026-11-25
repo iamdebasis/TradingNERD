@@ -1,0 +1,227 @@
+/*
+ * TradingView's left drawing toolbar and its menus, measured from the user's screenshot of
+ * 25 November at 2× (CSS px): a 52 px column; 34 × 34 buttons with a 4 px radius, one every
+ * 38 px, the first 8 px below the chart's top; the chosen one #303030; icons #B8B8B8; 1 px
+ * #303030 separators 34 wide; a group's tab 9.5 × 34 in #212121 with a #858585 chevron. The
+ * column's background is the app's surface (#0F0F0F) rather than the screenshot's newer black
+ * (docs/SPEC.md §11). Hover colors aren't in the screenshot: provisional.
+ */
+.toolbar {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 52px;
+  /* The gutter above the chart (4) and 8 more. */
+  padding: 12px 0 4px;
+  background: var(--color-bg);
+  color: var(--color-axis-text);
+}
+
+.group {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 52px;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: #1f1f1f;
+}
+
+.button[aria-pressed="true"] {
+  background: #303030;
+}
+
+.button:focus-visible,
+.tab:focus-visible,
+.item:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* A group's tab: at the column's right edge, shown on hover and while its menu is open. */
+.tab {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 9.5px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px 0 0 4px;
+  background: #212121;
+  color: #858585;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.group:hover .tab,
+.tab[aria-expanded="true"],
+.tab:focus-visible {
+  visibility: visible;
+}
+
+.tab:hover {
+  color: var(--color-text);
+}
+
+.separator {
+  flex: none;
+  width: 34px;
+  height: 1px;
+  margin: 4px 0;
+  background: #303030;
+}
+
+/*
+ * The menus: beside the column, their top 8 px above their button's; 283 wide, #131313 with a
+ * 1 px #1F1F1F border; a 6 px pad, 24 px section titles in 11 px uppercase #8C8C8C, 40 px rows
+ * with the icon centred 24 px in, the name at 42 px in 14 px #B8B8B8, and the shortcut ending
+ * 216 px in, in 12 px #8C8C8C (room for TradingView's favorite star, D3).
+ */
+.menu {
+  position: fixed;
+  z-index: 100;
+  width: 283px;
+  padding: 6px 0;
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+  background: #131313;
+  box-shadow: 0 2px 9px rgb(0 0 0 / 50%);
+  color: var(--color-axis-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.section {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin: 0;
+  padding: 0 0 0 13.5px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 0.6px;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  padding: 0 66px 0 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: #262626;
+}
+
+.item[aria-checked="true"] {
+  background: #303030;
+  color: var(--color-text);
+}
+
+.itemIcon {
+  display: flex;
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.itemName {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemKey {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/*
+ * Hiding the toolbar (TradingView's Drawings toolbar switch, in its main menu; the Charting
+ * Library's toolbar hider arrow): an arrow at its foot, and once hidden a tab over the chart's
+ * left edge that takes no room. Placement and look provisional (docs/SPEC.md §11).
+ */
+.hide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 24px;
+  margin-top: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #858585;
+  cursor: pointer;
+}
+
+.hide:hover {
+  background: #1f1f1f;
+  color: var(--color-text);
+}
+
+.showTab {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 9.5px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 4px 4px 0;
+  background: #212121;
+  color: #858585;
+  cursor: pointer;
+}
+
+.showTab:hover {
+  color: var(--color-text);
+}
+
+.hide:focus-visible,
+.showTab:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}

@@ -18,8 +18,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 10: indicators: a history page's `fromListing`.
  * 11: Pine scripts: My scripts and their versions (/api/scripts).
  * 12: Pine libraries the scripts import, their code pasted by the user (/api/libraries).
+ * 13: the user's drawings, per symbol (/api/drawings).
  */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {

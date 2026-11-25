@@ -165,6 +165,36 @@
   outline-offset: -1px;
 }
 
+/* Undo and Redo: a 28 px icon in a 34 px button, dimmed with nothing to undo (provisional). */
+.undo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 5.5px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.undo:hover:not(:disabled) {
+  background: var(--color-gutter);
+}
+
+.undo:disabled {
+  color: var(--color-chip);
+  cursor: default;
+}
+
+.undo:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
 /* TradingView's Settings button, at the bar's right end: a 28 px icon in a 34 px button. */
 .iconButton {
   display: flex;

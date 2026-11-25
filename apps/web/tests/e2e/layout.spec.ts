@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { chartState, expect, openChart, test } from './fixtures';
+import { chartState, expect, hideDrawingToolbar, openChart, test } from './fixtures';
 
 const toolbar = (page: Page) => page.getByRole('banner');
 const chart = (page: Page) => page.getByRole('main', { name: 'Chart' });
@@ -30,6 +30,8 @@ async function dragSplitter(page: Page, dx: number) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // The reference's layout: TradingView's drawings toolbar was hidden (drawings.spec.ts checks it shown).
+  await hideDrawingToolbar(page);
   await openChart(page);
 });
 

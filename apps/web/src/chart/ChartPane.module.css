@@ -23,3 +23,28 @@
   transform: translateX(-50%);
   pointer-events: none;
 }
+
+/* Drawings that couldn't load or be saved, said at the chart's foot until they are. TradingView
+   documents no such message but its size limit's: the place, look and words are ours,
+   provisional (docs/SPEC.md §11). */
+.drawingsNotice {
+  position: absolute;
+  z-index: 3;
+  bottom: 44px;
+  left: 50%;
+  max-width: calc(100% - 32px);
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--color-popup);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 50%);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.noticeWhat {
+  color: var(--color-text);
+  font-weight: 600;
+}

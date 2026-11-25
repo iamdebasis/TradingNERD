@@ -4,6 +4,10 @@ import type { SymbolContext } from '@tradingnerd/indicators';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { marketApi, searchApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
+import { DrawingSettingsDialog } from '../drawings/DrawingSettingsDialog';
+import { drawingKeyAction } from '../drawings/drawingKeys';
+import { DRAWINGS_RETRY_MS, drawingStore, useDrawings } from '../drawings/drawingStore';
+import { FloatingToolbar } from '../drawings/FloatingToolbar';
 import { gestureSettings } from '../gestures/gestureSettings';
 import { definitionOf } from '../indicators/definitions';
 import {
@@ -16,6 +20,7 @@ import {
 import { IndicatorSettingsDialog } from '../indicators/IndicatorSettingsDialog';
 import { indicatorStore, useIndicators } from '../indicators/indicatorStore';
 import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
+import { isEditable } from '../lib/dom';
 import { librariesStore, useLibraries } from '../pine/librariesStore';
 import { logsStore } from '../pine/logsStore';
 import { pineStore } from '../pine/pineStore';
@@ -102,6 +107,10 @@ export function ChartPane({
   resolutionRef.current = resolution;
   /** A Pine Logs entry's bar, brought into view: its time over it for a moment. */
   const [barTip, setBarTip] = useState<{ x: number; label: string } | null>(null);
+  /** The user's drawings (docs/SPEC.md §6.24): the symbol's, the toolbar's modes, the selection. */
+  const drawings = useDrawings();
+  /** The drawing whose settings are open. */
+  const [drawingSettings, setDrawingSettings] = useState<string | null>(null);
 
   // The session talks to the legend; the indicators' rows follow the same bar.
   const legendView = useMemo(
@@ -153,6 +162,12 @@ export function ChartPane({
       onLayout: () => setPanes(created.paneLayout()),
       scriptRunner: workerScripts,
       onScripts: scriptsChanged,
+      drawings: {
+        onEdit: (list) => drawingStore.edit(list),
+        onSelect: (ids) => drawingStore.setSelection(ids),
+        onToolDone: () => drawingStore.toolDone(),
+        onOpen: (id) => setDrawingSettings(id),
+      },
     });
     values.chart = created;
     // The user's gesture settings (the top bar's Gestures popup), now and as they change.
@@ -323,6 +338,64 @@ export function ChartPane({
     session.current?.setBackgrounds(settings.preMarketBackground, settings.postMarketBackground);
   }, [settings.preMarketBackground, settings.postMarketBackground]);
 
+  // The drawings belong to the symbol: another symbol's load from the gateway.
+  useEffect(() => {
+    drawingStore.setSymbol(symbol);
+  }, [symbol]);
+
+  useEffect(() => {
+    chart?.setDrawings(drawings.drawings);
+  }, [chart, drawings.drawings]);
+
+  const { tool, prefs } = drawings;
+  useEffect(() => {
+    chart?.setDrawingSettings({
+      tool,
+      cursor: prefs.cursor,
+      magnetOn: prefs.magnetOn,
+      magnet: prefs.magnet,
+      keepDrawing: prefs.keepDrawing,
+      lockAll: prefs.lockAll,
+      hideAll: prefs.hideAll,
+    });
+  }, [chart, tool, prefs]);
+
+  // The drawing tools' keys (drawingKeys.ts): not while a field or a dialog has them.
+  useEffect(() => {
+    if (!chart) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isEditable(event.target)) return;
+      const action = drawingKeyAction(event);
+      if (!action || document.querySelector('[role="dialog"]')) return;
+      switch (action.kind) {
+        case 'cancel':
+          if (chart.cancelDrawing()) event.preventDefault();
+          return;
+        case 'delete':
+          if (chart.removeSelectedDrawings()) event.preventDefault();
+          return;
+        case 'tool':
+          event.preventDefault();
+          drawingStore.setTool(action.tool);
+          return;
+        case 'undo':
+          event.preventDefault();
+          drawingStore.undo();
+          return;
+        case 'redo':
+          event.preventDefault();
+          drawingStore.redo();
+          return;
+        case 'hide-all':
+          event.preventDefault();
+          drawingStore.setPrefs({ hideAll: !drawingStore.get().prefs.hideAll });
+          return;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [chart]);
+
   const actions = useMemo(
     (): RowActions => ({
       onHide: (id, hidden) => indicatorStore.setHidden(id, hidden),
@@ -338,6 +411,19 @@ export function ChartPane({
   // Volume and overlays sit in the price pane: their rows join the legend's; the others' panes
   // have their own.
   const inPricePane = indicators.list.filter((item) => definitionOf(item).placement !== 'pane');
+  // The floating toolbar shows for one selected drawing.
+  const selected =
+    drawings.selection.length === 1 && !prefs.hideAll
+      ? drawings.drawings.find((drawing) => drawing.id === drawings.selection[0])
+      : undefined;
+
+  // Drawings that couldn't load or be saved: said on the chart until they are (provisional).
+  const drawingsProblem =
+    drawings.loadError !== null
+      ? { what: "Drawings couldn't be loaded.", why: drawings.loadError }
+      : drawings.saveError !== null
+        ? { what: "Drawings couldn't be saved.", why: drawings.saveError }
+        : null;
 
   return (
     <div className={styles.pane}>
@@ -365,6 +451,27 @@ export function ChartPane({
       />
       {editing !== null && (
         <IndicatorSettingsDialog id={editing} onClose={() => setEditing(null)} />
+      )}
+      {selected && (
+        <FloatingToolbar
+          key={selected.id}
+          drawing={selected}
+          onSettings={() => setDrawingSettings(selected.id)}
+        />
+      )}
+      {drawingSettings !== null && (
+        <DrawingSettingsDialog
+          id={drawingSettings}
+          chart={chart}
+          onClose={() => setDrawingSettings(null)}
+        />
+      )}
+      {drawingsProblem && (
+        <div className={styles.drawingsNotice} role="status">
+          <span className={styles.noticeWhat}>{drawingsProblem.what}</span>{' '}
+          {drawingsProblem.why.replace(/[.\s]*$/, '.')} Trying again every{' '}
+          {DRAWINGS_RETRY_MS / 1000} s.
+        </div>
       )}
       {barTip && (
         <div className={styles.barTip} style={{ left: barTip.x }} role="tooltip">

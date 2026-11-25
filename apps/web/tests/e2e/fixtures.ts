@@ -6,6 +6,8 @@ import {
   CRYPTOCAP,
   DEFAULT_FLAG_STATE,
   DEFAULT_WATCHLIST,
+  type Drawing,
+  drawingsKey,
   type ExchangeSummary,
   evaluateFormula,
   type FlagState,
@@ -17,6 +19,7 @@ import {
   parseFlagState,
   parseFormula,
   parseResolution,
+  parseSymbolDrawings,
   parseSymbolId,
   parseWatchlist,
   parseWatchlistName,
@@ -25,6 +28,7 @@ import {
   type SearchCategory,
   type SessionHours,
   type StockKeyStatus,
+  type SymbolDrawings,
   type SymbolInfo,
   type SymbolKind,
   searchCatalog,
@@ -601,6 +605,12 @@ export interface MockMarket {
   activeId: string;
   /** The flags GET /api/flags serves; PUTs replace them. */
   flags: FlagState;
+  /** The user's drawings by symbol key, as /api/drawings serves them; PUTs replace a symbol's. */
+  drawings: Map<string, Drawing[]>;
+  /** Every drawings save the page made, in order. */
+  readonly drawingSaves: SymbolDrawings[];
+  /** While true, drawings loads and saves fail as if the gateway were unreachable. */
+  failDrawings(failing: boolean): void;
   /** Every flag state the page saved, in order. */
   readonly flagSaves: FlagState[];
   /** While true, watchlist loads fail as if the gateway were unreachable. */
@@ -778,6 +788,8 @@ class MockGateway implements MockMarket {
   readonly watchlistSaves: Watchlist[] = [];
   flags: FlagState = structuredClone(DEFAULT_FLAG_STATE);
   readonly flagSaves: FlagState[] = [];
+  drawings = new Map<string, Drawing[]>();
+  readonly drawingSaves: SymbolDrawings[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
   readonly barSymbols: [string, string][] = [];
@@ -792,6 +804,7 @@ class MockGateway implements MockMarket {
   private openCount = 0;
   private failingLoads = false;
   private refusedLoads = 0;
+  private failingDrawings = false;
   private readonly subscriptions = new Map<
     string,
     { channel: string; symbol: string; resolution: string }
@@ -874,6 +887,21 @@ class MockGateway implements MockMarket {
         return route.fulfill({ json: saved });
       }
       return route.fulfill({ json: this.flags });
+    });
+    // The user's drawings, per symbol (apps/gateway/src/routes/drawings.ts): never the real file.
+    await this.page.route(/\/api\/drawings(\?.*)?$/, (route) => {
+      const request = route.request();
+      if (this.failingDrawings) return route.abort('connectionrefused');
+      if (request.method() === 'PUT') {
+        const saved = parseSymbolDrawings(request.postDataJSON());
+        if (!saved)
+          return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'x' } });
+        this.drawings.set(saved.symbol, saved.drawings);
+        this.drawingSaves.push(saved);
+        return route.fulfill({ json: saved });
+      }
+      const symbol = drawingsKey(new URL(request.url()).searchParams.get('symbol') ?? '');
+      return route.fulfill({ json: { symbol, drawings: this.drawings.get(symbol) ?? [] } });
     });
     // The user's lists, as the gateway keeps them (apps/gateway/src/routes/watchlist.ts).
     await this.page.route(/\/api\/watchlists(\/[^?]*)?$/, (route) => {
@@ -1194,6 +1222,10 @@ class MockGateway implements MockMarket {
     this.failingLoads = failing;
   }
 
+  failDrawings(failing: boolean): void {
+    this.failingDrawings = failing;
+  }
+
   refusedWatchlistLoads(): number {
     return this.refusedLoads;
   }
@@ -1510,6 +1542,16 @@ export async function chartPriceLabel(page: Page, price: number): Promise<string
     if (!chart) throw new Error('The chart is not mounted');
     return chart.priceLabel(value);
   }, price);
+}
+
+/**
+ * Hides the drawings toolbar before the page loads, as it was in the user's October reference
+ * screenshots (docs/reference/01-07), so their layout and pixels compare like with like.
+ */
+export async function hideDrawingToolbar(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('tn.drawings.toolbar', JSON.stringify({ toolbarShown: false }));
+  });
 }
 
 /** Waits until the chart shows data, then returns its state. */

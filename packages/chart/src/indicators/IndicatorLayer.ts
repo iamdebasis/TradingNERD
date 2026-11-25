@@ -880,6 +880,45 @@ export class IndicatorLayer {
     return view?.host?.priceToCoordinate(price) ?? null;
   }
 
+  // The user's drawings on an indicator's pane (docs/SPEC.md §6.24) use its scale.
+
+  /** Where a value sits on indicator pane `paneIndex` (pane px), or null without one. */
+  paneY(paneIndex: number, value: number): number | null {
+    const view = this.paneView(paneIndex);
+    return view ? this.drawingY(view, value) : null;
+  }
+
+  /** The value at a y on indicator pane `paneIndex`, or null without one. */
+  paneValue(paneIndex: number, y: number): number | null {
+    const view = this.paneView(paneIndex);
+    if (!view) return null;
+    for (const series of view.series) {
+      const value = series.coordinateToPrice(y);
+      if (value !== null) return value;
+    }
+    return null;
+  }
+
+  /** A value as indicator pane `paneIndex`'s scale writes it, or null without one. */
+  paneFormat(paneIndex: number, value: number): string | null {
+    const view = this.paneView(paneIndex);
+    return view ? formatIndicatorValue(value, view.format) : null;
+  }
+
+  /** Pane y of each tick label on indicator pane `paneIndex`'s price axis. */
+  paneTickYs(paneIndex: number): number[] {
+    const view = this.paneView(paneIndex);
+    return view ? this.tickYs(view) : [];
+  }
+
+  /** The indicator whose own pane is pane `paneIndex`. */
+  private paneView(paneIndex: number): IndicatorView | null {
+    if (paneIndex === 0) return null;
+    return (
+      this.views.find((view) => view.ownPane && view.host && view.paneIndex() === paneIndex) ?? null
+    );
+  }
+
   /** Auto-scale back on in every indicator pane (Alt + R, a new symbol). */
   autoScale(): void {
     for (const view of this.views) if (view.ownPane) view.host?.priceScale().setAutoScale(true);

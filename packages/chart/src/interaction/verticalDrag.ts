@@ -16,11 +16,16 @@ export type PaneLookup = (
  * such drag is handled here, in whichever pane it starts. Once auto-scale is off, the library's
  * own drag takes over. Double-clicking the price axis (or Alt+R) turns auto-scale back on.
  */
-export function installVerticalDrag(chart: IChartApi, paneAt: PaneLookup): () => void {
+export function installVerticalDrag(
+  chart: IChartApi,
+  paneAt: PaneLookup,
+  /** A press something else took (a drawing being drawn or dragged): left alone. */
+  isTaken: (event: PointerEvent) => boolean = () => false,
+): () => void {
   const element = chart.chartElement();
 
   const onPointerDown = (down: PointerEvent) => {
-    if (down.button !== 0 || !down.isPrimary) return;
+    if (down.button !== 0 || !down.isPrimary || isTaken(down)) return;
     // A pane separator's handle (the library's, with its resize cursor) resizes panes instead.
     if (down.target instanceof HTMLElement && down.target.style.cursor === 'row-resize') return;
     const box = element.getBoundingClientRect();

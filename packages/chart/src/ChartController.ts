@@ -1,6 +1,7 @@
 import {
   type Bar,
   type BarClock,
+  type Drawing,
   formatResolution,
   isIntraday,
   type MarketSchedule,
@@ -36,6 +37,16 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
+import { crosshairLinesShow, cursorCss } from './drawings/cursors';
+import {
+  DrawingEngine,
+  type DrawingEvents,
+  type DrawingHost,
+  type DrawingSettings,
+  type PointerInput,
+} from './drawings/DrawingEngine';
+import { DrawingLayer, type DrawingLayerHost } from './drawings/DrawingLayer';
+import type { Pt } from './drawings/geometry';
 import { formatCountdown, formatCrosshairTime, formatTickMark, formatValue } from './format';
 import {
   type IndicatorDebugState,
@@ -186,6 +197,11 @@ export interface ChartControllerOptions {
    * and legend values may have changed.
    */
   onScripts?: () => void;
+  /**
+   * The user's drawings (docs/SPEC.md §6.24): each edit made on the chart (the app keeps and
+   * saves them, and gives them back with setDrawings), the selection, and a tool's end.
+   */
+  drawings?: DrawingEvents;
 }
 
 /** A snapshot of the chart's state for tests and diagnostics. */
@@ -275,6 +291,15 @@ export class ChartController {
   private readonly cleanups: (() => void)[] = [];
   private readonly viewport: TimeViewport;
   private readonly indicators: IndicatorLayer;
+  /** The user's drawings, and the layer that paints them on each pane's scale series. */
+  private readonly drawings: DrawingEngine;
+  private readonly drawingLayers = new Map<ISeriesApi<SeriesType>, DrawingLayer>();
+  private readonly drawingLayerHost: DrawingLayerHost;
+  /** Presses the drawings took: the chart's own drags leave them alone. */
+  private readonly takenPresses = new WeakSet<PointerEvent>();
+  /** The pointer whose press the drawings took, while it's down. */
+  private drawingPointer: number | null = null;
+  private drawingCursor: string | null = null;
   private bars: Bar[] = [];
   /** Some bar's body has a script's barcolor() color. */
   private recolored = false;
@@ -398,6 +423,20 @@ export class ChartController {
       ...(options.scriptRunner ? { runner: options.scriptRunner } : {}),
       onScripts: () => this.scriptsChanged(),
     });
+    this.drawings = new DrawingEngine(this.drawingHost(), options.drawings ?? {});
+    this.drawingLayerHost = {
+      engine: this.drawings,
+      background: theme.background,
+      fontFamily: theme.fontFamily,
+      fontSize: theme.fontSize,
+      formatPrice: (pane, price) =>
+        pane === 0 ? this.format(price) : (this.indicators.paneFormat(pane, price) ?? `${price}`),
+      formatTime: (time) => this.timeLabel(time),
+      tickSize: (pane) => (pane === 0 ? (this.instrument?.tickSize ?? 0.01) : 0.01),
+      tickYs: (pane) => (pane === 0 ? this.tickYs() : this.indicators.paneTickYs(pane)),
+      axisBackground: theme.background,
+    };
+    this.syncDrawingLayers();
 
     const onCrosshairMove = (param: MouseEventParams<Time>) => this.onCrosshairMove(param);
     this.chart.subscribeCrosshairMove(onCrosshairMove);
@@ -427,6 +466,19 @@ export class ChartController {
     element.addEventListener('pointerdown', onPointerDown, { capture: true });
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    // The drawings take a press on one of them, or any while a tool is chosen; the chart's own
+    // drags (panning, the price scale's) then leave it alone. Added before the vertical drag's
+    // listener, which runs after this one and asks.
+    const onDrawingDown = (event: PointerEvent) => this.drawingDown(event);
+    const onDrawingMove = (event: PointerEvent) => this.drawingMove(event);
+    const onDrawingUp = (event: PointerEvent) => this.drawingUp(event, false);
+    const onDrawingCancel = (event: PointerEvent) => this.drawingUp(event, true);
+    const onDrawingOpen = (event: MouseEvent) => this.drawingOpen(event);
+    element.addEventListener('pointerdown', onDrawingDown, { capture: true });
+    element.addEventListener('dblclick', onDrawingOpen);
+    window.addEventListener('pointermove', onDrawingMove);
+    window.addEventListener('pointerup', onDrawingUp);
+    window.addEventListener('pointercancel', onDrawingCancel);
     const sizes = new ResizeObserver(() => this.options.onLayout?.());
     sizes.observe(element);
 
@@ -437,6 +489,11 @@ export class ChartController {
       () => window.removeEventListener('pointermove', onPointerMove),
       () => window.removeEventListener('pointerup', onPointerUp),
       () => cancelAnimationFrame(frame),
+      () => element.removeEventListener('pointerdown', onDrawingDown, { capture: true }),
+      () => window.removeEventListener('pointermove', onDrawingMove),
+      () => window.removeEventListener('pointerup', onDrawingUp),
+      () => window.removeEventListener('pointercancel', onDrawingCancel),
+      () => element.removeEventListener('dblclick', onDrawingOpen),
       () => sizes.disconnect(),
       installWheel(this.chart, this.viewport, {
         tuning: () => this.tuning,
@@ -449,7 +506,11 @@ export class ChartController {
         ...(options.onGesture ? { onGesture: options.onGesture } : {}),
       }),
       () => this.viewport.clear(),
-      installVerticalDrag(this.chart, (y) => this.paneAtPoint(y)),
+      installVerticalDrag(
+        this.chart,
+        (y) => this.paneAtPoint(y),
+        (event) => this.takenPresses.has(event),
+      ),
       installKeyboard({
         reset: () => this.resetView(),
         zoom: (notches) => this.zoom(notches),
@@ -502,6 +563,8 @@ export class ChartController {
       },
     });
     this.refreshLastPrice();
+    // Another interval spaces future bars differently, and shows other drawings (Visibility).
+    this.drawings.barsChanged();
   }
 
   /**
@@ -555,6 +618,8 @@ export class ChartController {
   /** After the indicators changed: bar colors, pane heights, history and the panes' layout. */
   private afterIndicators(): void {
     this.recolorBars();
+    // An indicator's pane came, went or was built again: its drawings' layer follows its scale.
+    this.syncDrawingLayers();
     this.paneHeights = this.indicators.paneHeights();
     // A new indicator may wait on older bars than the chart has.
     this.checkHistory(this.chart.timeScale().getVisibleLogicalRange());
@@ -642,6 +707,7 @@ export class ChartController {
       this.series.update(toCandle(bar, time));
       change = 'new';
       index = this.bars.length - 1;
+      this.drawings.barsChanged();
     } else if (bar.time === last.time) {
       this.bars[this.bars.length - 1] = bar;
       this.series.update(toCandle(bar, this.displayTimes.at(-1) ?? bar.time));
@@ -819,6 +885,77 @@ export class ChartController {
     return formatter ? formatter(shown as Time) : String(time);
   }
 
+  // ---- the user's drawings (docs/SPEC.md §6.24) ----
+
+  /** The chart symbol's drawings, as the app keeps them (in drawing order, the last on top). */
+  setDrawings(drawings: readonly Drawing[]): void {
+    this.drawings.setDrawings(drawings);
+  }
+
+  /**
+   * The left toolbar's tool, cursor and modes. The arrow and the eraser hide the crosshair's
+   * lines; its labels stay (provisional, §11).
+   */
+  setDrawingSettings(settings: Partial<DrawingSettings>): void {
+    this.drawings.setSettings(settings);
+    if (settings.cursor !== undefined) {
+      const visible = crosshairLinesShow(settings.cursor);
+      this.chart.applyOptions({ crosshair: { vertLine: { visible }, horzLine: { visible } } });
+    }
+  }
+
+  selectedDrawings(): readonly string[] {
+    return this.drawings.selection();
+  }
+
+  selectDrawings(ids: readonly string[]): void {
+    this.drawings.select(ids);
+  }
+
+  /** Escape: a drawing being drawn or dragged, else the selection, else the tool. */
+  cancelDrawing(): boolean {
+    return this.drawings.cancel();
+  }
+
+  /** Delete: the selected drawings go, but locked ones. True when any went. */
+  removeSelectedDrawings(): boolean {
+    return this.drawings.removeSelected();
+  }
+
+  /** The bar a drawing's time is on, as its Coordinates tab numbers bars: from the first loaded. */
+  drawingBarOf(time: number): number {
+    return Math.round(this.drawings.logicalOf(time));
+  }
+
+  /** The time of bar `bar` (from the first loaded), past the last at the interval's length. */
+  drawingTimeOf(bar: number): number {
+    return this.drawings.timeOfLogical(bar);
+  }
+
+  /**
+   * The drawings' state for the browser tests: the engine's, and each pane's drawings as shown
+   * (their points, handles and lines in chart px from the chart's top left).
+   */
+  debugDrawings(): ReturnType<DrawingEngine['debug']> & {
+    shapes: { id: string; pane: number; points: (Pt | null)[]; handles: Pt[]; lines: Pt[][] }[];
+  } {
+    const tops = this.paneTops();
+    const shapes = this.chart.panes().flatMap((_, pane) =>
+      this.drawings.shapes(pane).map((shape) => {
+        const top = tops[pane] ?? 0;
+        const move = (point: Pt) => ({ x: point.x, y: point.y + top });
+        return {
+          id: shape.drawing.id,
+          pane,
+          points: shape.points.map((point) => (point ? move(point) : null)),
+          handles: shape.handles.map(move),
+          lines: shape.lines.map((line) => line.map(move)),
+        };
+      }),
+    );
+    return { ...this.drawings.debug(), shapes };
+  }
+
   destroy(): void {
     clearTimeout(this.countdownTimer);
     cancelAnimationFrame(this.layoutFrame);
@@ -872,6 +1009,169 @@ export class ChartController {
     const series = hit.index === 0 ? this.series : this.indicators.scaleSeries(hit.index);
     if (!series) return null;
     return { series, y: hit.y, height: heights[hit.index] ?? 0, main: hit.index === 0 };
+  }
+
+  /** Each pane's top, CSS px from the chart's top, the price pane first. */
+  private paneTops(): number[] {
+    let top = 0;
+    return this.chart.panes().map((pane) => {
+      const at = top;
+      top += pane.getHeight() + PANE_SEPARATOR;
+      return at;
+    });
+  }
+
+  /** What the drawing engine needs of the chart (DrawingHost). */
+  private drawingHost(): DrawingHost {
+    const timeScale = () => this.chart.timeScale();
+    // The library places whole bars only (5.2.1 gives 0 for a fraction), and x is linear in the
+    // index: fractions are worked out from bars 0 and 1.
+    const origin = () => {
+      const x0 = timeScale().logicalToCoordinate(0 as Logical);
+      const x1 = timeScale().logicalToCoordinate(1 as Logical);
+      return x0 === null || x1 === null || x1 === x0 ? null : { x0, spacing: x1 - x0 };
+    };
+    return {
+      logicalToX: (logical) => {
+        const at = origin();
+        return at ? at.x0 + logical * at.spacing : null;
+      },
+      xToLogical: (x) => {
+        const at = origin();
+        return at ? (x - at.x0) / at.spacing : null;
+      },
+      priceToY: (pane, price) =>
+        pane === 0 ? this.series.priceToCoordinate(price) : this.indicators.paneY(pane, price),
+      yToPrice: (pane, y) =>
+        pane === 0 ? this.series.coordinateToPrice(y) : this.indicators.paneValue(pane, y),
+      paneKey: (pane) => (pane === 0 ? null : this.indicators.paneOwners().get(pane)),
+      paneIndex: (key) => {
+        if (key === null) return 0;
+        for (const [index, id] of this.indicators.paneOwners()) if (id === key) return index;
+        return null;
+      },
+      paneSize: (pane) => {
+        if (pane < 0 || pane >= this.chart.panes().length) return null;
+        const { width, height } = this.chart.paneSize(pane);
+        return { width, height };
+      },
+      bars: () => this.bars,
+      resolution: () => this.instrument?.resolution ?? null,
+      requestUpdate: () => {
+        for (const layer of this.drawingLayers.values()) layer.requestUpdate();
+      },
+      // A drawing being drawn or dragged mustn't move the chart too.
+      setPanning: (enabled) =>
+        this.chart.applyOptions({
+          handleScroll: {
+            pressedMouseMove: enabled,
+            horzTouchDrag: enabled,
+            vertTouchDrag: enabled,
+          },
+        }),
+      setCursor: (cursor) => {
+        this.drawingCursor = cursor;
+        this.applyDrawingCursor();
+      },
+    };
+  }
+
+  /**
+   * One drawing layer on each pane's scale series: the candles', and each indicator pane's
+   * first plot's. A series rebuilt or removed takes its layer with it; a new one gets one.
+   */
+  private syncDrawingLayers(): void {
+    const wanted = new Set<ISeriesApi<SeriesType>>();
+    this.chart.panes().forEach((_, index) => {
+      const series = index === 0 ? this.series : this.indicators.scaleSeries(index);
+      if (series) wanted.add(series);
+    });
+    for (const [series, layer] of this.drawingLayers) {
+      if (wanted.has(series)) continue;
+      if (layer.isAttached()) series.detachPrimitive(layer);
+      this.drawingLayers.delete(series);
+    }
+    for (const series of wanted) {
+      if (this.drawingLayers.has(series)) continue;
+      const layer = new DrawingLayer(this.drawingLayerHost);
+      series.attachPrimitive(layer);
+      this.drawingLayers.set(series, layer);
+    }
+    this.applyDrawingCursor();
+  }
+
+  /**
+   * The drawings' cursor on every pane's row: set on the row, it wins over the one the library
+   * sets on the chart as the crosshair moves, and the axes keep their own.
+   */
+  private applyDrawingCursor(): void {
+    const css = this.drawingCursor === null ? null : cursorCss(this.drawingCursor);
+    for (const pane of this.chart.panes()) {
+      const row = pane.getHTMLElement();
+      if (!row) continue;
+      if (css) row.style.setProperty('cursor', css);
+      else row.style.removeProperty('cursor');
+    }
+  }
+
+  /** Where a pointer is: the pane under it, or pane `pane` however far off it, in pane px. */
+  private pointerInput(event: MouseEvent, pane?: number): PointerInput | null {
+    const box = this.chart.chartElement().getBoundingClientRect();
+    const x = event.clientX - box.left;
+    const y = event.clientY - box.top;
+    const mods = { shift: event.shiftKey, mod: event.ctrlKey || event.metaKey };
+    if (pane !== undefined) {
+      const top = this.paneTops()[pane];
+      return top === undefined ? null : { pane, x, y: y - top, ...mods };
+    }
+    if (x < 0 || x >= this.chart.paneSize(0).width) return null;
+    const hit = paneAt(
+      y,
+      this.chart.panes().map((item) => item.getHeight()),
+    );
+    return hit ? { pane: hit.index, x, y: hit.y, ...mods } : null;
+  }
+
+  private drawingDown(event: PointerEvent): void {
+    if (event.button !== 0 || !event.isPrimary) return;
+    // A pane separator's handle resizes panes.
+    if (event.target instanceof HTMLElement && event.target.style.cursor === 'row-resize') return;
+    const input = this.pointerInput(event);
+    if (!input || !this.drawings.pointerDown(input)) return;
+    this.takenPresses.add(event);
+    this.drawingPointer = event.pointerId;
+  }
+
+  private drawingMove(event: PointerEvent): void {
+    const pressed = this.drawingPointer === event.pointerId;
+    const active = this.drawings.activePane();
+    if (pressed || active !== null) {
+      this.drawings.pointerMove(this.pointerInput(event, active ?? undefined), pressed);
+      return;
+    }
+    // While the chart's own drag runs, nothing is hovered.
+    if ((event.buttons & 1) !== 0) return;
+    const element = this.chart.chartElement();
+    const inside = event.target instanceof Node && element.contains(event.target);
+    this.drawings.pointerMove(inside ? this.pointerInput(event) : null, false);
+  }
+
+  /** A double-click on a drawing opens its settings. */
+  private drawingOpen(event: MouseEvent): void {
+    const input = this.pointerInput(event);
+    const hit = input ? this.drawings.hitTest(input.pane, input.x, input.y) : null;
+    if (hit) this.options.drawings?.onOpen?.(hit.id);
+  }
+
+  private drawingUp(event: PointerEvent, cancelled: boolean): void {
+    if (this.drawingPointer !== event.pointerId) return;
+    this.drawingPointer = null;
+    if (cancelled) {
+      this.drawings.cancel();
+      return;
+    }
+    const active = this.drawings.activePane();
+    this.drawings.pointerUp(this.pointerInput(event, active ?? undefined));
   }
 
   /** Tells the app of indicator panes resized by dragging a separator. */
@@ -948,6 +1248,7 @@ export class ChartController {
     this.recolored = false;
     this.indicators.setBars(this.bars, this.displayTimes, this.fromListing, prepended);
     this.recolorBars();
+    this.drawings.barsChanged();
   }
 
   /**
@@ -956,6 +1257,7 @@ export class ChartController {
    */
   private scriptsChanged(): void {
     this.recolorBars();
+    this.syncDrawingLayers();
     this.checkHistory(this.chart.timeScale().getVisibleLogicalRange());
     this.options.onScripts?.();
   }
