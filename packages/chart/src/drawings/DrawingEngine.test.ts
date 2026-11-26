@@ -59,11 +59,22 @@ class FakeHost implements DrawingHost {
     const found = this.panes[pane];
     return found ? { width: 800, height: found.height } : null;
   }
+  /** The chart's bars: a test may replace the last, as a live tick does. */
+  series: Bar[] = BARS;
   bars() {
-    return BARS;
+    return this.series;
   }
   resolution() {
     return this.interval;
+  }
+  /** The history asked for (bars before the first), and whether there's none older. */
+  asked: number[] = [];
+  ended = false;
+  needHistory(bars: number) {
+    this.asked.push(bars);
+  }
+  historyEnded() {
+    return this.ended;
   }
   requestUpdate() {
     this.updates++;
@@ -516,5 +527,250 @@ describe('the chart around it', () => {
     engine.setSettings({ tool: 'ray' });
     engine.pointerMove(input(155, 275), false);
     expect(host.cursor).toBe('crosshair');
+  });
+});
+
+describe('channels and pitchforks (D2)', () => {
+  const shapeOf = (id: string) => engine.shapes(0).find((shape) => shape.drawing.id === id);
+
+  it('places a parallel channel with three clicks, its third point kept at the first’s bar', () => {
+    engine.setSettings({ tool: 'parallel-channel' });
+    click(105, 200);
+    engine.pointerMove(input(305, 100), false);
+    // Until its second point is down, it shows as its first line, in its color.
+    const preview = engine.shapes(0).find((shape) => shape.drawing.id === 'preview');
+    expect([preview?.drawing.tool, preview?.drawing.style.color]).toEqual([
+      'trend-line',
+      '#2962FF',
+    ]);
+    click(305, 100);
+    expect(edits).toHaveLength(0);
+    expect(engine.debug().placing?.index).toBe(2);
+    engine.pointerMove(input(205, 190), false);
+    click(205, 190);
+    // 40 px under the first line at bar 20: kept 40 under it at bar 10, at 300 − 40.
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(10), price: 300 },
+      { time: at(30), price: 400 },
+      { time: at(10), price: 260 },
+    ]);
+    expect(toolDone).toBe(1);
+  });
+
+  it('places a channel’s first line in one drag, then its third point with a click', () => {
+    engine.setSettings({ tool: 'parallel-channel' });
+    drag([105, 200], [305, 100]);
+    expect(edits).toHaveLength(0);
+    expect(engine.debug().placing?.index).toBe(2);
+    engine.pointerMove(input(205, 190), false);
+    click(205, 190);
+    expect(lastEdit()[0]?.points.map((point) => point.price)).toEqual([300, 400, 260]);
+  });
+
+  it('places a pitchfork’s three points where they’re clicked', () => {
+    engine.setSettings({ tool: 'pitchfork' });
+    click(105, 300);
+    click(205, 100);
+    click(305, 200);
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(10), price: 200 },
+      { time: at(20), price: 400 },
+      { time: at(30), price: 300 },
+    ]);
+  });
+
+  it('draws no channel whose first line’s two points are in one place', () => {
+    engine.setSettings({ tool: 'parallel-channel' });
+    click(105, 200);
+    click(105, 200);
+    click(205, 150);
+    expect(edits).toHaveLength(0);
+    expect(toolDone).toBe(1);
+  });
+
+  it('marks a parallel channel’s four corners on the axes', () => {
+    engine.setDrawings([
+      given('c', 'parallel-channel', [
+        [10, 300],
+        [30, 400],
+        [10, 260],
+      ]),
+    ]);
+    expect(shapeOf('c')?.axis.map((point) => [point.price, point.time])).toEqual([
+      [300, at(10)],
+      [400, at(30)],
+      [260, at(10)],
+      [360, at(30)],
+    ]);
+  });
+
+  it('sets a parallel channel’s width by its second line’s middle handle', () => {
+    engine.setDrawings([
+      given('c', 'parallel-channel', [
+        [10, 300],
+        [30, 400],
+        [10, 260],
+      ]),
+    ]);
+    engine.select(['c']);
+    // The second line's middle sits at bar 20, 40 px under the first line's (y 150).
+    drag([205, 190], [205, 170]);
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(10), price: 300 },
+      { time: at(30), price: 400 },
+      { time: at(10), price: 280 },
+    ]);
+  });
+
+  it('keeps a parallel channel’s width when its first point moves', () => {
+    engine.setDrawings([
+      given('c', 'parallel-channel', [
+        [10, 300],
+        [30, 400],
+        [10, 260],
+      ]),
+    ]);
+    engine.select(['c']);
+    drag([105, 200], [125, 180]);
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(12), price: 320 },
+      { time: at(30), price: 400 },
+      { time: at(12), price: 280 },
+    ]);
+  });
+
+  it('moves only a flat top/bottom’s flat price by its flat line’s handle', () => {
+    engine.setDrawings([
+      given('f', 'flat-top-bottom', [
+        [10, 300],
+        [30, 400],
+        [30, 240],
+      ]),
+    ]);
+    engine.select(['f']);
+    drag([105, 260], [155, 280]);
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(10), price: 300 },
+      { time: at(30), price: 400 },
+      { time: at(30), price: 220 },
+    ]);
+  });
+
+  it('mirrors a disjoint channel’s second line’s start onto its first point', () => {
+    engine.setDrawings([
+      given('d', 'disjoint-channel', [
+        [10, 300],
+        [30, 400],
+        [30, 240],
+      ]),
+    ]);
+    engine.select(['d']);
+    // Its second line runs from (105, 160) to (305, 260), the first's mirror.
+    drag([105, 160], [105, 150]);
+    expect(lastEdit()[0]?.points[0]).toEqual({ time: at(10), price: 290 });
+    const start = shapeOf('d')?.handles.find((handle) => handle.point === 3);
+    expect([start?.x, start?.y]).toEqual([105, 150]);
+  });
+
+  it('takes a click inside a channel’s background, but not inside a pitchfork’s', () => {
+    engine.setDrawings([
+      given('c', 'parallel-channel', [
+        [10, 300],
+        [30, 400],
+        [10, 260],
+      ]),
+      given('p', 'pitchfork', [
+        [50, 200],
+        [60, 400],
+        [70, 300],
+      ]),
+    ]);
+    // Between the channel's first line (y 175 at bar 15) and its middle level (y 195).
+    expect(engine.pointerDown(input(155, 185))).toBe(true);
+    engine.pointerUp(input(155, 185));
+    expect(engine.selection()).toEqual(['c']);
+    // Inside the pitchfork's band between its median and its 0.5 level, off every line.
+    const p = shapeOf('p');
+    const band = p?.fills[0]?.points;
+    expect(band).toBeDefined();
+    const [a, b, c, d] = band ?? [];
+    const inside = {
+      x: ((a?.x ?? 0) + (b?.x ?? 0) + (c?.x ?? 0) + (d?.x ?? 0)) / 4,
+      y: ((a?.y ?? 0) + (b?.y ?? 0) + (c?.y ?? 0) + (d?.y ?? 0)) / 4,
+    };
+    expect(engine.hitTest(0, inside.x, inside.y)).toBeNull();
+  });
+
+  it('fits a regression trend to the closes between its bars, its handles on the line', () => {
+    engine.setSettings({ tool: 'regression-trend' });
+    click(105, 300);
+    click(305, 300);
+    const [drawing] = lastEdit();
+    expect(drawing?.points.map((point) => point.time)).toEqual([at(10), at(30)]);
+    const shape = shapeOf(drawing?.id ?? '');
+    // Closes 105 + i: a straight line from 115 at bar 10 to 135 at bar 30, no spread.
+    expect(shape?.lines).toEqual([
+      [
+        { x: 105, y: 385 },
+        { x: 305, y: 365 },
+      ],
+    ]);
+    expect(shape?.handles.map(({ x, y, point }) => [x, y, point])).toEqual([
+      [105, 385, 0],
+      [305, 365, 1],
+    ]);
+    expect(shape?.label?.text).toBe('1');
+    expect(shape?.axis.map((point) => point.price)).toEqual([115, 135]);
+  });
+
+  it('draws a regression trend only on the price pane', () => {
+    engine.setSettings({ tool: 'regression-trend' });
+    engine.pointerDown(input(105, 100, { pane: 1 }));
+    engine.pointerUp(input(105, 100, { pane: 1 }));
+    expect(engine.debug().placing).toBeNull();
+    expect(edits).toHaveLength(0);
+  });
+
+  it('asks for the history a regression trend needs, and is worked out only once it’s all in', () => {
+    engine.setDrawings([
+      given('r', 'regression-trend', [
+        [-20, 0],
+        [10, 0],
+      ]),
+    ]);
+    expect(host.asked).toEqual([20]);
+    // Until then, only a line between its points: nothing worked out from part of its bars.
+    expect(shapeOf('r')?.looks).toEqual([]);
+    expect(shapeOf('r')?.label).toBeNull();
+    // The exchange has none older: it's worked out on the bars there are.
+    host.ended = true;
+    engine.barsChanged();
+    expect(host.asked).toEqual([20]);
+    expect(shapeOf('r')?.axis.map((point) => point.price)).toEqual([105, 115]);
+  });
+
+  it('follows a live tick on its last bar, though nothing else changed', () => {
+    host.series = BARS.slice();
+    engine.setDrawings([
+      given('r', 'regression-trend', [
+        [90, 0],
+        [99, 0],
+      ]),
+    ]);
+    // Closes rising one a bar: a perfect line, Pearson's R 1.
+    expect(shapeOf('r')?.label?.text).toBe('1');
+    const last = host.series[99] as Bar;
+    host.series[99] = { ...last, close: last.close - 50 };
+    expect(shapeOf('r')?.label?.text).not.toBe('1');
+  });
+
+  it('asks for no more than its limit of history', () => {
+    engine.setDrawings([
+      given('r', 'regression-trend', [
+        [-60_000, 0],
+        [10, 0],
+      ]),
+    ]);
+    expect(host.asked).toEqual([]);
   });
 });

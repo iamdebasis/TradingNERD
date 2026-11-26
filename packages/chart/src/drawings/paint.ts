@@ -469,3 +469,39 @@ export function drawTimeLabel(
   );
   ctx.restore();
 }
+
+/** A filled area: its color at its opacity (a channel's background, a pitchfork's bands). */
+export function fillArea(
+  ctx: CanvasRenderingContext2D,
+  points: readonly Pt[],
+  color: string,
+  opacity: number,
+): void {
+  const [first, ...rest] = points;
+  if (!first || rest.length < 2) return;
+  ctx.save();
+  ctx.fillStyle = withAlpha(color, opacity);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  for (const point of rest) ctx.lineTo(point.x, point.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** A short text centred under a point, its top there (a regression trend's Pearson's R). */
+export function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  at: Pt,
+  text: string,
+  color: string,
+  font: string,
+): void {
+  ctx.save();
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(text, at.x, at.y);
+  ctx.restore();
+}

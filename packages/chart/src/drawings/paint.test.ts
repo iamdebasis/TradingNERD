@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutSegment, layoutText, textOn, withAlpha } from './paint';
+import { cutSegment, fillArea, layoutText, textOn, withAlpha } from './paint';
 
 /** A canvas context that measures text at 6 px a character, as the tests need no more. */
 const ctx = {
@@ -106,5 +106,61 @@ describe('cutSegment', () => {
         { x: 110, y: 0 },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe('fillArea', () => {
+  /** A context that writes down the path it's given and the color it's filled with. */
+  function recorder() {
+    const calls: string[] = [];
+    const context = {
+      fillStyle: '',
+      save() {},
+      restore() {},
+      beginPath: () => calls.push('begin'),
+      moveTo: (x: number, y: number) => calls.push(`move ${x} ${y}`),
+      lineTo: (x: number, y: number) => calls.push(`line ${x} ${y}`),
+      closePath: () => calls.push('close'),
+      fill() {
+        calls.push(`fill ${context.fillStyle}`);
+      },
+    };
+    return { calls, context: context as unknown as CanvasRenderingContext2D };
+  }
+
+  it('fills the area through its corners in its color at its opacity', () => {
+    const { calls, context } = recorder();
+    fillArea(
+      context,
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 5 },
+      ],
+      '#2962FF33',
+      1,
+    );
+    expect(calls).toEqual([
+      'begin',
+      'move 0 0',
+      'line 10 0',
+      'line 10 5',
+      'close',
+      'fill rgba(41, 98, 255, 0.2)',
+    ]);
+  });
+
+  it('fills nothing with fewer than three corners', () => {
+    const { calls, context } = recorder();
+    fillArea(
+      context,
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+      ],
+      '#2962FF',
+      0.2,
+    );
+    expect(calls).toEqual([]);
   });
 });

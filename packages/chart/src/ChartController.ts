@@ -305,6 +305,8 @@ export class ChartController {
   private recolored = false;
   /** The first bar is the pair's listing, where TradingView's history starts too. */
   private fromListing = false;
+  /** The exchange has no bars older than the chart's first (drawings: a regression trend). */
+  private historyEnded = false;
   /** The indicator panes' heights last applied or told, to tell only a change. */
   private paneHeights: Record<string, number> = {};
   private layoutFrame = 0;
@@ -571,20 +573,32 @@ export class ChartController {
    * Replaces all data. `fromListing`: the first bar is the pair's listing, where TradingView's
    * history starts too, so indicators start where TradingView's do (BarsResponse.fromListing).
    */
-  setBars(bars: readonly Bar[], fromListing = false): void {
+  setBars(bars: readonly Bar[], fromListing = false, hasMore = true): void {
     this.bars = [...bars];
     this.fromListing = fromListing;
+    this.historyEnded = !hasMore;
     this.setSeriesData();
     this.refreshLastPrice();
   }
 
-  /** Adds older history on the left; the view stays where it is. `fromListing` as for setBars. */
-  prependBars(older: readonly Bar[], fromListing = false): void {
+  /**
+   * Adds older history on the left; the view stays where it is. `fromListing` as for setBars;
+   * `hasMore` false once the exchange has none older (BarsResponse.hasMore).
+   */
+  prependBars(older: readonly Bar[], fromListing = false, hasMore = true): void {
     const first = this.bars[0]?.time ?? Number.POSITIVE_INFINITY;
     const fresh = older.filter((bar) => bar.time < first);
-    if (fresh.length === 0 && fromListing === this.fromListing) return;
+    if (fresh.length === 0 && fromListing === this.fromListing) {
+      // Only the history's end learned: a regression trend waiting for older bars stops waiting.
+      if (this.historyEnded !== !hasMore) {
+        this.historyEnded = !hasMore;
+        this.drawings.barsChanged();
+      }
+      return;
+    }
     this.bars = [...fresh, ...this.bars];
     this.fromListing = fromListing;
+    this.historyEnded = !hasMore;
     this.setSeriesData(fresh.length);
   }
 
@@ -937,7 +951,16 @@ export class ChartController {
    * (their points, handles and lines in chart px from the chart's top left).
    */
   debugDrawings(): ReturnType<DrawingEngine['debug']> & {
-    shapes: { id: string; pane: number; points: (Pt | null)[]; handles: Pt[]; lines: Pt[][] }[];
+    shapes: {
+      id: string;
+      pane: number;
+      points: (Pt | null)[];
+      handles: Pt[];
+      lines: Pt[][];
+      looks: { line: Pt[]; color: string }[];
+      fills: { points: Pt[]; color: string }[];
+      label: string | null;
+    }[];
   } {
     const tops = this.paneTops();
     const shapes = this.chart.panes().flatMap((_, pane) =>
@@ -950,6 +973,12 @@ export class ChartController {
           points: shape.points.map((point) => (point ? move(point) : null)),
           handles: shape.handles.map(move),
           lines: shape.lines.map((line) => line.map(move)),
+          looks: shape.looks.map((look) => ({
+            line: [move(look.a), move(look.b)],
+            color: look.color,
+          })),
+          fills: shape.fills.map((fill) => ({ points: fill.points.map(move), color: fill.color })),
+          label: shape.label?.text ?? null,
         };
       }),
     );
@@ -1057,6 +1086,12 @@ export class ChartController {
       },
       bars: () => this.bars,
       resolution: () => this.instrument?.resolution ?? null,
+      // A regression trend's older bars: the same pages back as scrolling loads. Asked once the
+      // code that gave the chart its bars has finished, as the engine asks from inside setBars
+      // and prependBars, before the app's session counts its load as done (a request then would
+      // be dropped).
+      needHistory: (bars) => queueMicrotask(() => this.options.onNeedHistory?.(bars)),
+      historyEnded: () => this.historyEnded,
       requestUpdate: () => {
         for (const layer of this.drawingLayers.values()) layer.requestUpdate();
       },

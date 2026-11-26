@@ -1,14 +1,25 @@
 import type { ChartController } from '@tradingnerd/chart';
 import {
   type Drawing,
+  type DrawingFill,
+  type DrawingLevel,
+  type DrawingLineStyle,
+  type DrawingPoint,
   type DrawingStats,
   type DrawingStyle,
   type DrawingText,
   H_ALIGNS,
   type HAlign,
+  isPitchforkTool,
   LINE_ENDS,
   type LineEnd,
+  MAX_DEVIATION,
   MAX_DRAWING_TEXT,
+  MAX_LEVEL_COEFF,
+  PITCHFORK_TOOLS,
+  PRICE_SOURCES,
+  type PriceSource,
+  type RegressionSettings,
   TOOL_NAMES,
   TOOL_OPTIONS,
   V_ALIGNS,
@@ -23,14 +34,32 @@ import { Dropdown } from '../chart/Dropdown';
 import frame from '../indicators/IndicatorSettingsDialog.module.css';
 import { CloseIcon } from '../toolbar/icons';
 import { ColorField } from './ColorEditor';
+import { joinColor, splitColor } from './color';
 import styles from './Drawings.module.css';
 import { drawingStore, useDrawings } from './drawingStore';
 
-type Tab = 'style' | 'text' | 'coordinates' | 'visibility';
+type Tab = 'inputs' | 'style' | 'text' | 'coordinates' | 'visibility';
 
 const ALIGN_H_NAMES: Record<HAlign, string> = { left: 'Left', center: 'Center', right: 'Right' };
 const ALIGN_V_NAMES: Record<VAlign, string> = { top: 'Top', middle: 'Middle', bottom: 'Bottom' };
+/** A channel's text sits over it, inside it or under it (TradingView's blog, 21 August 2023). */
+const CHANNEL_V_NAMES: Record<VAlign, string> = { top: 'Top', middle: 'Inside', bottom: 'Bottom' };
 const END_NAMES: Record<LineEnd, string> = { normal: 'Normal', arrow: 'Arrow' };
+/** Flat top/bottom's and Disjoint channel's Extend drop-down (their Help Center pages). */
+const EXTENDS = ['none', 'left', 'right', 'both'] as const;
+const EXTEND_NAMES: Record<(typeof EXTENDS)[number], string> = {
+  none: "Don't extend",
+  left: 'Extend left',
+  right: 'Extend right',
+  both: 'Extend both',
+};
+/** The pitchforks' Style drop-down, switching one into another (Help Center, each pitchfork). */
+const PITCHFORK_NAMES: Record<(typeof PITCHFORK_TOOLS)[number], string> = {
+  pitchfork: 'Original',
+  'schiff-pitchfork': 'Schiff',
+  'modified-schiff-pitchfork': 'Modified Schiff',
+  'inside-pitchfork': 'Inside',
+};
 
 /** TradingView's stats, as its Style tab names them (Help Center, Trendline drawing tool). */
 const STATS: readonly { key: keyof DrawingStats; name: string }[] = [
@@ -76,7 +105,10 @@ export function DrawingSettingsDialog({
   const { drawings } = useDrawings();
   const drawing = drawings.find((item) => item.id === id);
   const [before] = useState(() => drawingStore.get().drawings);
-  const [tab, setTab] = useState<Tab>('style');
+  // A regression trend opens on its Inputs, as TradingView's studies do (provisional, §11).
+  const [tab, setTab] = useState<Tab>(() =>
+    drawing && TOOL_OPTIONS[drawing.tool].regression ? 'inputs' : 'style',
+  );
   const dialog = useRef<HTMLDivElement>(null);
 
   const cancel = () => {
@@ -112,6 +144,7 @@ export function DrawingSettingsDialog({
   const setStyle = (change: Partial<DrawingStyle>) =>
     set({ ...drawing, style: { ...drawing.style, ...change } });
   const tabs: { tab: Tab; name: string }[] = [
+    ...(options.regression ? [{ tab: 'inputs' as const, name: 'Inputs' }] : []),
     { tab: 'style', name: 'Style' },
     ...(options.text ? [{ tab: 'text' as const, name: 'Text' }] : []),
     { tab: 'coordinates', name: 'Coordinates' },
@@ -150,10 +183,19 @@ export function DrawingSettingsDialog({
           ))}
         </div>
         <div className={frame.content} role="tabpanel">
-          {tab === 'style' && <StyleTab drawing={drawing} onStyle={setStyle} />}
+          {tab === 'inputs' && (
+            <InputsTab
+              settings={drawing.style.regression}
+              onSettings={(change) =>
+                setStyle({ regression: { ...drawing.style.regression, ...change } })
+              }
+            />
+          )}
+          {tab === 'style' && <StyleTab drawing={drawing} onStyle={setStyle} onDrawing={set} />}
           {tab === 'text' && (
             <TextTab
               text={drawing.style.text}
+              channel={options.fill === 'color'}
               onText={(text) => setStyle({ text: { ...drawing.style.text, ...text } })}
             />
           )}
@@ -216,12 +258,22 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function StyleTab({
   drawing,
   onStyle,
+  onDrawing,
 }: {
   drawing: Drawing;
   onStyle(change: Partial<DrawingStyle>): void;
+  onDrawing(drawing: Drawing): void;
 }) {
   const { style } = drawing;
   const options = TOOL_OPTIONS[drawing.tool];
+  if (options.regression) return <RegressionStyle style={style} onStyle={onStyle} />;
+  if (isPitchforkTool(drawing.tool)) {
+    return <PitchforkStyle drawing={drawing} onStyle={onStyle} onDrawing={onDrawing} />;
+  }
+  if (drawing.tool === 'parallel-channel') {
+    return <ParallelChannelStyle style={style} onStyle={onStyle} />;
+  }
+  if (options.extendMenu) return <AngledChannelStyle style={style} onStyle={onStyle} />;
   return (
     <>
       <div className={frame.row}>
@@ -330,13 +382,423 @@ function StyleTab({
   );
 }
 
+interface LineLook {
+  color: string;
+  width: number;
+  lineStyle: DrawingLineStyle;
+}
+
+/** A line's color, thickness and style in one swatch, as TradingView's rows have them. */
+function LineSwatch({
+  label,
+  look,
+  onLook,
+}: {
+  label: string;
+  look: LineLook;
+  onLook(change: Partial<LineLook>): void;
+}) {
+  return (
+    <ColorField
+      label={label}
+      color={look.color}
+      onChange={(color) => onLook({ color })}
+      line={{
+        width: look.width,
+        lineStyle: look.lineStyle,
+        onWidth: (width) => onLook({ width }),
+        onStyle: (lineStyle) => onLook({ lineStyle }),
+      }}
+    />
+  );
+}
+
+/** A row whose name has a checkbox before it, its controls on the right. */
+function CheckRow({
+  label,
+  checked,
+  onChecked,
+  children,
+}: {
+  label: string;
+  checked: boolean;
+  onChecked(checked: boolean): void;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={frame.row}>
+      <label className={frame.checkLabel}>
+        <input
+          type="checkbox"
+          className={frame.checkbox}
+          checked={checked}
+          onChange={(event) => onChecked(event.target.checked)}
+        />
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A tool's levels: each on or off, its coefficient, and its line (TradingView's blog, Parallel
+ * channel gets more levels: "coefficient, color, thickness, and line style"; Help Center, each
+ * pitchfork's Levels).
+ */
+function LevelRows({
+  levels,
+  onLevels,
+}: {
+  levels: readonly DrawingLevel[];
+  onLevels(levels: DrawingLevel[]): void;
+}) {
+  const set = (index: number, change: Partial<DrawingLevel>) =>
+    onLevels(levels.map((level, i) => (i === index ? { ...level, ...change } : level)));
+  return (
+    <>
+      <h3 className={frame.section}>Levels</h3>
+      {levels
+        .map((level, index) => ({ level, index, key: `level-${index + 1}` }))
+        .map(({ level, index, key }) => (
+          <div key={key} className={frame.row}>
+            <span className={frame.checkLabel}>
+              <input
+                type="checkbox"
+                className={frame.checkbox}
+                aria-label={`Level ${index + 1}`}
+                checked={level.visible}
+                onChange={(event) => set(index, { visible: event.target.checked })}
+              />
+              <span className={styles.levelCoeff}>
+                <NumberField
+                  label={`Level ${index + 1} coefficient`}
+                  value={level.coeff}
+                  min={-MAX_LEVEL_COEFF}
+                  max={MAX_LEVEL_COEFF}
+                  onChange={(coeff) => set(index, { coeff })}
+                />
+              </span>
+            </span>
+            <LineSwatch
+              label={`Level ${index + 1}`}
+              look={level}
+              onLook={(change) => set(index, change)}
+            />
+          </div>
+        ))}
+    </>
+  );
+}
+
+/**
+ * The Background row: on or off, and a color with its opacity (the channels), or an opacity
+ * over the lines' own colors (the pitchforks: Help Center, "the slider beside adjusts its
+ * opacity").
+ */
+function BackgroundRow({
+  fill,
+  opacityOnly,
+  onFill,
+}: {
+  fill: DrawingFill;
+  opacityOnly: boolean;
+  onFill(fill: DrawingFill): void;
+}) {
+  const { hex, opacity } = splitColor(fill.color);
+  const percent = Math.round(opacity * 100);
+  return (
+    <CheckRow label="Background" checked={fill.on} onChecked={(on) => onFill({ ...fill, on })}>
+      {opacityOnly ? (
+        <span className={styles.opacityControl}>
+          <input
+            type="range"
+            className={styles.range}
+            min={0}
+            max={100}
+            value={percent}
+            aria-label="Background opacity"
+            onChange={(event) =>
+              onFill({ ...fill, color: joinColor(hex, Number(event.target.value) / 100) })
+            }
+          />
+          <output className={styles.percent}>{percent}%</output>
+        </span>
+      ) : (
+        <ColorField
+          label="Background"
+          color={fill.color}
+          onChange={(color) => onFill({ ...fill, color })}
+        />
+      )}
+    </CheckRow>
+  );
+}
+
+/** A Parallel channel's Style: its lines, its levels, Extend, Background (Help Center). */
+function ParallelChannelStyle({
+  style,
+  onStyle,
+}: {
+  style: DrawingStyle;
+  onStyle(change: Partial<DrawingStyle>): void;
+}) {
+  return (
+    <>
+      <div className={frame.row}>
+        <span className={frame.label}>Channel</span>
+        <LineSwatch label="Channel" look={style} onLook={onStyle} />
+      </div>
+      <LevelRows levels={style.levels} onLevels={(levels) => onStyle({ levels })} />
+      <h3 className={frame.section}>Extend</h3>
+      <Check
+        label="Extend left line"
+        checked={style.extendLeft}
+        onChange={(extendLeft) => onStyle({ extendLeft })}
+      />
+      <Check
+        label="Extend right line"
+        checked={style.extendRight}
+        onChange={(extendRight) => onStyle({ extendRight })}
+      />
+      <BackgroundRow fill={style.fill} opacityOnly={false} onFill={(fill) => onStyle({ fill })} />
+    </>
+  );
+}
+
+/** Flat top/bottom's and Disjoint channel's Style: Line, its ends, Extend, Prices, Background. */
+function AngledChannelStyle({
+  style,
+  onStyle,
+}: {
+  style: DrawingStyle;
+  onStyle(change: Partial<DrawingStyle>): void;
+}) {
+  const extend =
+    style.extendLeft && style.extendRight
+      ? 'both'
+      : style.extendLeft
+        ? 'left'
+        : style.extendRight
+          ? 'right'
+          : 'none';
+  return (
+    <>
+      <div className={frame.row}>
+        <span className={frame.label}>Line</span>
+        <LineSwatch label="Line" look={style} onLook={onStyle} />
+      </div>
+      <Row label="Left end">
+        <Dropdown
+          label="Left end"
+          value={style.leftEnd}
+          options={LINE_ENDS.map((end) => ({ value: end, label: END_NAMES[end] }))}
+          onChange={(value) => onStyle({ leftEnd: value as LineEnd })}
+        />
+      </Row>
+      <Row label="Right end">
+        <Dropdown
+          label="Right end"
+          value={style.rightEnd}
+          options={LINE_ENDS.map((end) => ({ value: end, label: END_NAMES[end] }))}
+          onChange={(value) => onStyle({ rightEnd: value as LineEnd })}
+        />
+      </Row>
+      <Row label="Extend">
+        <Dropdown
+          label="Extend"
+          value={extend}
+          options={EXTENDS.map((item) => ({ value: item, label: EXTEND_NAMES[item] }))}
+          onChange={(value) =>
+            onStyle({
+              extendLeft: value === 'left' || value === 'both',
+              extendRight: value === 'right' || value === 'both',
+            })
+          }
+        />
+      </Row>
+      <Check
+        label="Prices"
+        checked={style.showPriceLabels}
+        onChange={(showPriceLabels) => onStyle({ showPriceLabels })}
+      />
+      <BackgroundRow fill={style.fill} opacityOnly={false} onFill={(fill) => onStyle({ fill })} />
+    </>
+  );
+}
+
+/**
+ * A pitchfork's Style (Help Center, each pitchfork): the Style drop-down switching it into
+ * another kind on the same points, Extend lines, the Median, its Levels, Use one color, and the
+ * Background's opacity.
+ */
+function PitchforkStyle({
+  drawing,
+  onStyle,
+  onDrawing,
+}: {
+  drawing: Drawing;
+  onStyle(change: Partial<DrawingStyle>): void;
+  onDrawing(drawing: Drawing): void;
+}) {
+  const { style } = drawing;
+  return (
+    <>
+      <Row label="Style">
+        <Dropdown
+          label="Pitchfork style"
+          value={drawing.tool}
+          options={PITCHFORK_TOOLS.map((tool) => ({ value: tool, label: PITCHFORK_NAMES[tool] }))}
+          onChange={(value) => {
+            if (isPitchforkTool(value)) onDrawing({ ...drawing, tool: value });
+          }}
+        />
+      </Row>
+      <Check
+        label="Extend lines"
+        checked={style.extendLines}
+        onChange={(extendLines) => onStyle({ extendLines })}
+      />
+      <CheckRow
+        label="Median"
+        checked={style.lineVisible}
+        onChecked={(lineVisible) => onStyle({ lineVisible })}
+      >
+        <LineSwatch label="Median" look={style} onLook={onStyle} />
+      </CheckRow>
+      <LevelRows levels={style.levels} onLevels={(levels) => onStyle({ levels })} />
+      <div className={frame.row}>
+        <span className={frame.label}>Use one color</span>
+        <ColorField
+          label="Use one color"
+          color={style.color}
+          onChange={(color) =>
+            onStyle({ color, levels: style.levels.map((level) => ({ ...level, color })) })
+          }
+        />
+      </div>
+      <BackgroundRow fill={style.fill} opacityOnly onFill={(fill) => onStyle({ fill })} />
+    </>
+  );
+}
+
+/** A Regression trend's Style (Help Center): Base, Up, Down, Extend lines, Pearson's R. */
+function RegressionStyle({
+  style,
+  onStyle,
+}: {
+  style: DrawingStyle;
+  onStyle(change: Partial<DrawingStyle>): void;
+}) {
+  const { regression } = style;
+  const setLine = (which: 'up' | 'down', change: Partial<RegressionSettings['up']>) =>
+    onStyle({ regression: { ...regression, [which]: { ...regression[which], ...change } } });
+  return (
+    <>
+      <CheckRow
+        label="Base"
+        checked={style.lineVisible}
+        onChecked={(lineVisible) => onStyle({ lineVisible })}
+      >
+        <LineSwatch label="Base" look={style} onLook={onStyle} />
+      </CheckRow>
+      <CheckRow
+        label="Up"
+        checked={regression.up.visible}
+        onChecked={(visible) => setLine('up', { visible })}
+      >
+        <LineSwatch label="Up" look={regression.up} onLook={(change) => setLine('up', change)} />
+      </CheckRow>
+      <CheckRow
+        label="Down"
+        checked={regression.down.visible}
+        onChecked={(visible) => setLine('down', { visible })}
+      >
+        <LineSwatch
+          label="Down"
+          look={regression.down}
+          onLook={(change) => setLine('down', change)}
+        />
+      </CheckRow>
+      <Check
+        label="Extend lines"
+        checked={style.extendLines}
+        onChange={(extendLines) => onStyle({ extendLines })}
+      />
+      <Check
+        label="Pearson's R"
+        checked={regression.showPearsons}
+        onChange={(showPearsons) => onStyle({ regression: { ...regression, showPearsons } })}
+      />
+    </>
+  );
+}
+
+/**
+ * A Regression trend's Inputs (Help Center): its deviations, each used or not, and its source.
+ */
+function InputsTab({
+  settings,
+  onSettings,
+}: {
+  settings: RegressionSettings;
+  onSettings(change: Partial<RegressionSettings>): void;
+}) {
+  return (
+    <>
+      <CheckRow
+        label="Upper deviation"
+        checked={settings.useUpperDeviation}
+        onChecked={(useUpperDeviation) => onSettings({ useUpperDeviation })}
+      >
+        <div className={frame.control}>
+          <NumberField
+            label="Upper deviation"
+            value={settings.upperDeviation}
+            min={-MAX_DEVIATION}
+            max={MAX_DEVIATION}
+            onChange={(upperDeviation) => onSettings({ upperDeviation })}
+          />
+        </div>
+      </CheckRow>
+      <CheckRow
+        label="Lower deviation"
+        checked={settings.useLowerDeviation}
+        onChecked={(useLowerDeviation) => onSettings({ useLowerDeviation })}
+      >
+        <div className={frame.control}>
+          <NumberField
+            label="Lower deviation"
+            value={settings.lowerDeviation}
+            min={-MAX_DEVIATION}
+            max={MAX_DEVIATION}
+            onChange={(lowerDeviation) => onSettings({ lowerDeviation })}
+          />
+        </div>
+      </CheckRow>
+      <Row label="Source">
+        <Dropdown
+          label="Source"
+          value={settings.source}
+          options={PRICE_SOURCES.map((source) => ({ value: source, label: source }))}
+          onChange={(value) => onSettings({ source: value as PriceSource })}
+        />
+      </Row>
+    </>
+  );
+}
+
 function TextTab({
   text,
+  channel,
   onText,
 }: {
   text: DrawingText;
+  /** A channel's: over it, inside it or under it. */
+  channel: boolean;
   onText(change: Partial<DrawingText>): void;
 }) {
+  const verticalNames = channel ? CHANNEL_V_NAMES : ALIGN_V_NAMES;
   return (
     <>
       <textarea
@@ -376,7 +838,7 @@ function TextTab({
         <Dropdown
           label="Vertical alignment"
           value={text.alignV}
-          options={V_ALIGNS.map((align) => ({ value: align, label: ALIGN_V_NAMES[align] }))}
+          options={V_ALIGNS.map((align) => ({ value: align, label: verticalNames[align] }))}
           onChange={(value) => onText({ alignV: value as VAlign })}
         />
       </Row>
@@ -386,7 +848,10 @@ function TextTab({
 
 /**
  * Each point's price and bar (TradingView's Coordinates tab: "price and bar number"); bars
- * counted from the first loaded. A horizontal line has only a price, a vertical line only a bar.
+ * counted from the first loaded. A horizontal line has only a price, a vertical line only a bar,
+ * a regression trend only bars (its prices come from them). A parallel channel's third point is
+ * its Price offset from the first (Help Center, Parallel channel); a flat top/bottom's and a
+ * disjoint channel's third only a price, at the second point's bar.
  */
 function CoordinatesTab({
   drawing,
@@ -397,27 +862,30 @@ function CoordinatesTab({
   chart: ChartController | null;
   onSet(drawing: Drawing): void;
 }) {
-  const priced = drawing.tool !== 'vertical-line';
-  const timed = drawing.tool !== 'horizontal-line' && chart !== null;
+  const { tool, points } = drawing;
+  const parallel = tool === 'parallel-channel';
+  const angled = tool === 'flat-top-bottom' || tool === 'disjoint-channel';
+  const priced = tool !== 'vertical-line' && tool !== 'regression-trend';
+  const timed = (index: number) =>
+    tool !== 'horizontal-line' && chart !== null && !(angled && index === 2);
   const setPoint = (index: number, change: { price?: number; bar?: number }) => {
-    const points = drawing.points.map((point, i) => {
+    const next = points.map((point, i) => {
       if (i !== index) return point;
       return {
         price: change.price ?? point.price,
         time: change.bar !== undefined && chart ? chart.drawingTimeOf(change.bar) : point.time,
       };
     });
-    onSet({ ...drawing, points });
+    onSet({ ...drawing, points: keptThird(tool, points, next) });
   };
+  const [first, , third] = points;
   return (
     <>
-      {drawing.points
+      {(parallel ? points.slice(0, 2) : points)
         .map((point, index) => ({ point, index, key: `point-${index + 1}` }))
         .map(({ point, index, key }) => (
           <div key={key} className={frame.row}>
-            <span className={frame.label}>
-              {drawing.points.length > 1 ? `#${index + 1}` : 'Point'}
-            </span>
+            <span className={frame.label}>{points.length > 1 ? `#${index + 1}` : 'Point'}</span>
             <div className={styles.coordinate}>
               {priced && (
                 <NumberField
@@ -426,7 +894,7 @@ function CoordinatesTab({
                   onChange={(price) => setPoint(index, { price })}
                 />
               )}
-              {timed && chart && (
+              {timed(index) && chart && (
                 <NumberField
                   label={`Bar ${index + 1}`}
                   value={chart.drawingBarOf(point.time)}
@@ -437,8 +905,46 @@ function CoordinatesTab({
             </div>
           </div>
         ))}
+      {parallel && first && third && (
+        <Row label="Price offset">
+          <NumberField
+            label="Price offset"
+            value={third.price - first.price}
+            onChange={(offset) =>
+              onSet({
+                ...drawing,
+                points: points.map((point, i) =>
+                  i === 2 ? { time: first.time, price: first.price + offset } : point,
+                ),
+              })
+            }
+          />
+        </Row>
+      )}
     </>
   );
+}
+
+/**
+ * A channel's third point after its first two changed, as the chart keeps it: a parallel
+ * channel's at its first point's bar, its price offset kept; a flat top/bottom's and disjoint
+ * channel's at its second point's bar.
+ */
+function keptThird(
+  tool: Drawing['tool'],
+  before: readonly DrawingPoint[],
+  after: DrawingPoint[],
+): DrawingPoint[] {
+  const [a, b, c] = after;
+  const [a0, , c0] = before;
+  if (!a || !b || !c) return after;
+  if (tool === 'parallel-channel' && a0 && c0 && c === c0) {
+    return [a, b, { time: a.time, price: a.price + (c0.price - a0.price) }];
+  }
+  if (tool === 'flat-top-bottom' || tool === 'disjoint-channel') {
+    return [a, b, { time: b.time, price: c.price }];
+  }
+  return after;
 }
 
 /** A number field that takes what's typed once it's a number. */

@@ -154,6 +154,98 @@ export function CrossLineIcon() {
   );
 }
 
+// The Channels and Pitchforks sections' icons (D2), traced from the same screenshot: each ring
+// and line measured on its 28-unit grid (docs/SPEC.md §7.8).
+
+export function ParallelChannelIcon() {
+  return (
+    <Icon>
+      <path d="M7.9 18.1 18.1 7.9M12.5 24.5l4.6-4.6M19.9 17.1 25 12" />
+      <Point x={6.5} y={19.5} />
+      <Point x={19.5} y={6.5} />
+      <Point x={18.5} y={18.5} />
+    </Icon>
+  );
+}
+
+export function RegressionTrendIcon() {
+  return (
+    <Icon>
+      <path d="M5.5 16.5v-5l17-9v5M22.5 11.5v5l-17 9v-5M7.3 17.6l13.4-7.2" />
+      <Point x={5.5} y={18.5} />
+      <Point x={22.5} y={9.5} />
+    </Icon>
+  );
+}
+
+export function FlatTopBottomIcon() {
+  return (
+    <Icon>
+      <path d="M7.3 12.65l13.4-6.3M7.5 22.5h13" />
+      <Point x={5.5} y={13.5} />
+      <Point x={22.5} y={5.5} />
+      <Point x={5.5} y={22.5} />
+      <Point x={22.5} y={22.5} />
+    </Icon>
+  );
+}
+
+export function DisjointChannelIcon() {
+  return (
+    <Icon>
+      <path d="M7.4 9.8l13.2-4.6M7.4 18.2l13.2 4.6" />
+      <Point x={5.5} y={10.5} />
+      <Point x={22.5} y={4.5} />
+      <Point x={5.5} y={17.5} />
+      <Point x={22.5} y={23.5} />
+    </Icon>
+  );
+}
+
+export function PitchforkIcon() {
+  return (
+    <Icon>
+      <path d="M6.9 10.1 13 4M6.9 12.9l8.2 8.2M6.9 21.1 19.5 8.5M17.9 21.1l6.6-6.6" />
+      <Point x={5.5} y={11.5} />
+      <Point x={5.5} y={22.5} />
+      <Point x={16.5} y={22.5} />
+    </Icon>
+  );
+}
+
+export function SchiffPitchforkIcon() {
+  return (
+    <Icon>
+      <path d="M6.5 22.5h10M8.9 10.1 15 4M8.9 12.9l8.2 8.2M9.5 20.5 21 9M19.9 21.1l6.6-6.6" />
+      <Point x={7.5} y={11.5} />
+      <Point x={4.5} y={22.5} />
+      <Point x={18.5} y={22.5} />
+    </Icon>
+  );
+}
+
+export function ModifiedSchiffPitchforkIcon() {
+  return (
+    <Icon>
+      <path d="M5.5 22.5h11M8.9 10.1 15 4M8.9 12.9l8.2 8.2M7.5 22.5 21 9M19.9 21.1l6.6-6.6" />
+      <Point x={7.5} y={11.5} />
+      <Point x={3.5} y={22.5} />
+      <Point x={18.5} y={22.5} />
+    </Icon>
+  );
+}
+
+export function InsidePitchforkIcon() {
+  return (
+    <Icon>
+      <path d="M6.5 22.5h12M12.1 15.8l6.8 5.4M8.5 21l1.4-4.6M11.1 12.6 13.9 3.5M15.5 18.5 19 7.3M21.1 20.6 24 11.3" />
+      <Point x={10.5} y={14.5} />
+      <Point x={4.5} y={22.5} />
+      <Point x={20.5} y={22.5} />
+    </Icon>
+  );
+}
+
 export const TOOL_ICONS: Record<DrawingTool, () => JSX.Element> = {
   'trend-line': TrendLineIcon,
   ray: RayIcon,
@@ -164,6 +256,14 @@ export const TOOL_ICONS: Record<DrawingTool, () => JSX.Element> = {
   'horizontal-ray': HorizontalRayIcon,
   'vertical-line': VerticalLineIcon,
   'cross-line': CrossLineIcon,
+  'parallel-channel': ParallelChannelIcon,
+  'regression-trend': RegressionTrendIcon,
+  'flat-top-bottom': FlatTopBottomIcon,
+  'disjoint-channel': DisjointChannelIcon,
+  pitchfork: PitchforkIcon,
+  'schiff-pitchfork': SchiffPitchforkIcon,
+  'modified-schiff-pitchfork': ModifiedSchiffPitchforkIcon,
+  'inside-pitchfork': InsidePitchforkIcon,
 };
 
 /** The magnet: a horseshoe, its poles banded; the strong one's poles filled. */

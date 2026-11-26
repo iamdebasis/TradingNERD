@@ -4,7 +4,7 @@ import {
   type DrawingTool,
   drawingsKey,
   isDrawingTool,
-  LINE_TOOLS,
+  TREND_LINE_TOOLS,
 } from '@tradingnerd/core';
 import { useSyncExternalStore } from 'react';
 import { type DrawingsApi, drawingsApi } from '../data/api';
@@ -45,7 +45,7 @@ export interface ToolbarPrefs {
   keepDrawing: boolean;
   lockAll: boolean;
   hideAll: boolean;
-  /** The Lines group's tool its button shows: the last one chosen. */
+  /** The trend line tools' button shows the last of them chosen (Lines, Channels, Pitchforks). */
   lineTool: DrawingTool;
   /** The drawings toolbar shows (TradingView's Drawings toolbar switch; shown at first). */
   toolbarShown: boolean;
@@ -77,7 +77,7 @@ export function sanitizeToolbar(value: unknown): ToolbarPrefs {
     lockAll: bool('lockAll'),
     hideAll: bool('hideAll'),
     lineTool:
-      isDrawingTool(raw.lineTool) && (LINE_TOOLS as readonly string[]).includes(raw.lineTool)
+      isDrawingTool(raw.lineTool) && (TREND_LINE_TOOLS as readonly string[]).includes(raw.lineTool)
         ? raw.lineTool
         : DEFAULT_TOOLBAR.lineTool,
     toolbarShown: bool('toolbarShown'),
@@ -301,7 +301,9 @@ export class DrawingStore {
   /** A tool to draw with, or null for the cursor; a line tool becomes its group's button. */
   setTool(tool: DrawingTool | null): void {
     const prefs =
-      tool && (LINE_TOOLS as readonly string[]).includes(tool) && tool !== this.value.prefs.lineTool
+      tool &&
+      (TREND_LINE_TOOLS as readonly string[]).includes(tool) &&
+      tool !== this.value.prefs.lineTool
         ? { ...this.value.prefs, lineTool: tool }
         : this.value.prefs;
     if (prefs !== this.value.prefs) writeJson(DRAWING_TOOLBAR_KEY, prefs);

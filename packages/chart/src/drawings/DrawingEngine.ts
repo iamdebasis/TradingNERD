@@ -3,14 +3,24 @@ import {
   type Drawing,
   type DrawingPoint,
   type DrawingTool,
+  defaultDrawingStyle,
+  isPitchforkTool,
   newDrawing,
   type Resolution,
   TOOL_POINTS,
   visibleOn,
 } from '@tradingnerd/core';
 import {
+  disjointChannel,
+  dragChannelHandle,
+  flatTopBottom,
+  parallelChannel,
+  placedPoints,
+} from './channels';
+import {
   distanceToSegment,
   HANDLE_HIT,
+  insidePolygon,
   LINE_HIT,
   lineSegment,
   type Pt,
@@ -18,6 +28,9 @@ import {
   snap45,
 } from './geometry';
 import { type MagnetMode, magnetPrice } from './magnet';
+import type { FillArea, LookLine, PartLabel, ShapeParts, TextFrame } from './parts';
+import { pitchfork } from './pitchforks';
+import { barRange, fitRegression, type RegressionFit, regressionParts } from './regression';
 import { TimeMap } from './timeMap';
 
 /**
@@ -72,6 +85,10 @@ export interface DrawingHost {
   paneSize(pane: number): Size | null;
   bars(): readonly Bar[];
   resolution(): Resolution | null;
+  /** Load about this many bars of history older than the chart's first (a regression's). */
+  needHistory?(bars: number): void;
+  /** The chart has every bar there is: its first is the start of the exchange's history. */
+  historyEnded?(): boolean;
   /** Repaint the drawings. */
   requestUpdate(): void;
   /** The chart's own dragging (pan and scale), off while a drawing is being drawn or dragged. */
@@ -109,18 +126,38 @@ export interface Handle extends Pt {
   square: boolean;
 }
 
+/** A place a selected drawing marks on the price and time axes, with its price and time. */
+export interface AxisPoint {
+  x: number | null;
+  y: number | null;
+  price: number;
+  time: number;
+}
+
 /** A drawing as shown on one pane. */
 export interface PlacedShape {
   drawing: Drawing;
   /** Its points on this pane, in order; null where one can't be placed (no bars). */
   points: (Pt | null)[];
-  /** The line between its two points, for its text and stats; null for one-point tools. */
+  /** The line between a line tool's two points, for its text and stats; null for the rest. */
   segment: [Pt, Pt] | null;
-  /** Its lines as drawn, carried to the pane's edges where they extend. */
+  /** Its lines as drawn in its own look, carried to the pane's edges where they extend. */
   lines: [Pt, Pt][];
+  /** Lines with a look of their own: a channel's or pitchfork's levels, a regression's bands. */
+  looks: LookLine[];
+  /** Its filled areas, under its lines. */
+  fills: FillArea[];
+  /** A press inside its fills takes it (a channel's background). */
+  fillsTakeClicks: boolean;
   /** Ends with an arrow: its tip, and the point it points away from. */
   arrows: [Pt, Pt][];
   handles: Handle[];
+  /** Where a channel's text goes. */
+  frame: TextFrame | null;
+  /** A text it writes beside itself (a regression's Pearson's R). */
+  label: PartLabel | null;
+  /** What it marks on the axes while selected, or always with its price labels on. */
+  axis: AxisPoint[];
   /** Anchored on this pane (not a vertical line from another). */
   own: boolean;
   /** The pane it's shown on, and its size. */
@@ -135,16 +172,26 @@ const EDGE = 4;
 /** Where a horizontal line's handle sits across the pane, and a vertical line's down it. */
 const SIDE_HANDLE = 0.9;
 const PREVIEW_ID = 'preview';
+/**
+ * A regression trend asks for older history until the chart holds its first bar, but never past
+ * this many bars on the chart: beyond, it isn't worked out on that interval (ours, provisional
+ * §11; 35 days of 1-minute bars, 137 years of days).
+ */
+export const REGRESSION_HISTORY_BARS = 50_000;
 
 interface Placing {
   tool: DrawingTool;
   pane: number;
   key: string | null;
   points: DrawingPoint[];
+  /** The point the pointer places now: 1 once the first is down, up to the last. */
+  index: number;
   /** The pointer is down. */
   pressed: boolean;
   downAt: Pt;
   dragged: boolean;
+  /** A press placed the point before the last: it's set when the press is let go. */
+  advancing: boolean;
   /** The last point's press has come: the drawing is done when it's let go. */
   closing: boolean;
 }
@@ -180,6 +227,23 @@ export class DrawingEngine {
   private map: TimeMap | null = null;
   private panningOff = false;
   private cursor: string | null | undefined = undefined;
+  /** Each pane's shapes as last worked out, and what they were worked out from. */
+  private shapeCache = new Map<
+    number,
+    {
+      version: number;
+      stamp: string;
+      bars: readonly Bar[];
+      length: number;
+      last: Bar | undefined;
+      shapes: PlacedShape[];
+    }
+  >();
+  /** Counts the engine's changes: each repaint it asks for. */
+  private version = 0;
+  /** Regressions worked out on these bars, by their range and inputs. */
+  private fits = new Map<string, RegressionFit | null>();
+  private fitsOn: { bars: readonly Bar[]; length: number; last: Bar | undefined } | null = null;
 
   constructor(host: DrawingHost, events: DrawingEvents = {}) {
     this.host = host;
@@ -196,6 +260,7 @@ export class DrawingEngine {
     const kept = this.selected.filter((id) => ids.has(id));
     if (kept.length !== this.selected.length) this.setSelection(kept);
     if (this.hover && !ids.has(this.hover)) this.setHover(null, null);
+    this.askHistory();
     this.update();
   }
 
@@ -219,6 +284,8 @@ export class DrawingEngine {
   /** The bars or their interval changed: anchor times map to new places. */
   barsChanged(): void {
     this.map = null;
+    this.version++;
+    this.askHistory();
     this.host.requestUpdate();
   }
 
@@ -349,8 +416,23 @@ export class DrawingEngine {
     if (placing) {
       if (input && input.pane === placing.pane) this.movePlacing(input);
       placing.pressed = false;
-      const single = TOOL_POINTS[placing.tool] === 1;
-      if (single || placing.closing || placing.dragged) this.finishPlacing();
+      const last = placing.points.length - 1;
+      if (last === 0 || placing.closing) {
+        this.finishPlacing();
+      } else if (placing.dragged || placing.advancing) {
+        // A drag or a click set the point being placed: the drawing is done, or its next point
+        // follows the pointer (a three-point tool's third, after a drag drew its first line).
+        if (placing.index >= last) {
+          this.finishPlacing();
+        } else {
+          placing.index += 1;
+          placing.points[placing.index] = {
+            ...(placing.points[placing.index - 1] as DrawingPoint),
+          };
+          placing.dragged = false;
+          placing.advancing = false;
+        }
+      }
       this.update();
       return;
     }
@@ -376,6 +458,33 @@ export class DrawingEngine {
     const size = this.host.paneSize(pane);
     const key = this.host.paneKey(pane);
     if (!size || key === undefined) return [];
+    // A paint asks three times (the pane, the price axis, the time axis): worked out once while
+    // nothing they depend on has changed, the chart's view included (two bars' x and two prices'
+    // y fix where every point goes, on a log scale too), its interval (the Visibility tab) and its
+    // last bar (a live regression).
+    const bars = this.host.bars();
+    const resolution = this.host.resolution();
+    const stamp = [
+      key,
+      resolution ? `${resolution.count}${resolution.unit}` : '',
+      size.width,
+      size.height,
+      this.host.logicalToX(0),
+      this.host.logicalToX(1),
+      this.host.priceToY(pane, 1),
+      this.host.priceToY(pane, 2),
+    ].join('|');
+    const cached = this.shapeCache.get(pane);
+    if (
+      cached &&
+      cached.version === this.version &&
+      cached.stamp === stamp &&
+      cached.bars === bars &&
+      cached.length === bars.length &&
+      cached.last === bars[bars.length - 1]
+    ) {
+      return cached.shapes;
+    }
     const shapes: PlacedShape[] = [];
     for (const drawing of this.shown()) {
       const own = drawing.pane === key;
@@ -385,7 +494,22 @@ export class DrawingEngine {
       const shape = this.shapeOf(drawing, pane, size, own);
       if (shape) shapes.push(shape);
     }
+    this.shapeCache.set(pane, {
+      version: this.version,
+      stamp,
+      bars,
+      length: bars.length,
+      last: bars[bars.length - 1],
+      shapes,
+    });
     return shapes;
+  }
+
+  /** The drawing being moved or placed now, or null: every other one stays still meanwhile. */
+  activeId(): string | null {
+    if (this.placing) return PREVIEW_ID;
+    if (this.drag?.moved) return this.drag.cloneId ?? this.drag.id;
+    return null;
   }
 
   /** Shown selected: its handles with the thicker ring (the drawing being placed is too). */
@@ -444,12 +568,20 @@ export class DrawingEngine {
       }
     }
     if (best) return { id: best.id, handle: best.handle };
+    // Then the topmost drawing under the pointer: on one of its lines, or inside a channel's
+    // background (TradingView's channels take a click there; a pitchfork's and a regression's
+    // wide bands don't, so the chart under them can still be dragged; provisional, §11).
     for (let i = shapes.length - 1; i >= 0; i--) {
       const shape = shapes[i] as PlacedShape;
       const reach = LINE_HIT + shape.drawing.style.width / 2;
-      if (shape.lines.some(([a, b]) => distanceToSegment(at, a, b) <= reach)) {
-        return { id: shape.drawing.id, handle: null };
-      }
+      const onLine =
+        shape.lines.some(([a, b]) => distanceToSegment(at, a, b) <= reach) ||
+        shape.looks.some(
+          (look) => distanceToSegment(at, look.a, look.b) <= LINE_HIT + look.width / 2,
+        );
+      const inside =
+        shape.fillsTakeClicks && shape.fills.some((fill) => insidePolygon(at, fill.points));
+      if (onLine || inside) return { id: shape.drawing.id, handle: null };
     }
     return null;
   }
@@ -457,7 +589,7 @@ export class DrawingEngine {
   debug(): {
     drawings: Drawing[];
     selection: string[];
-    placing: { tool: DrawingTool; points: DrawingPoint[] } | null;
+    placing: { tool: DrawingTool; points: DrawingPoint[]; index: number } | null;
     dragging: string | null;
     hover: string | null;
     cursor: string | null;
@@ -467,7 +599,11 @@ export class DrawingEngine {
       drawings: this.drawings.slice(),
       selection: this.selected.slice(),
       placing: this.placing
-        ? { tool: this.placing.tool, points: this.placing.points.map((p) => ({ ...p })) }
+        ? {
+            tool: this.placing.tool,
+            points: this.placing.points.map((p) => ({ ...p })),
+            index: this.placing.index,
+          }
         : null,
       dragging: this.drag?.id ?? null,
       hover: this.hover,
@@ -528,10 +664,24 @@ export class DrawingEngine {
         : list.map((item) => (item.id === drag.id ? drag.current : item));
     }
     if (this.placing) {
-      const { tool, points, key } = this.placing;
-      shown = [...shown, newDrawing(PREVIEW_ID, tool, points, key)];
+      shown = [...shown, this.preview(this.placing)];
     }
     return shown;
+  }
+
+  /**
+   * The drawing being placed, as it would be: a three-point tool shows only its first line, in
+   * its look, until its second point is down (the third would only echo the second; ours).
+   */
+  private preview(placing: Placing): Drawing {
+    const { tool, points, key, index } = placing;
+    if (index >= points.length - 1) return newDrawing(PREVIEW_ID, tool, points, key);
+    const first = newDrawing(PREVIEW_ID, 'trend-line', points.slice(0, 2), key);
+    const look = defaultDrawingStyle(tool);
+    first.style.color = look.color;
+    first.style.width = look.width;
+    first.style.lineStyle = look.lineStyle;
+    return first;
   }
 
   private shapeOf(drawing: Drawing, pane: number, size: Size, own: boolean): PlacedShape | null {
@@ -546,12 +696,26 @@ export class DrawingEngine {
       points,
       segment: null,
       lines: [],
+      looks: [],
+      fills: [],
+      fillsTakeClicks: false,
       arrows: [],
       handles: [],
+      frame: null,
+      label: null,
+      axis: drawing.points.map((point, i) => ({
+        x: points[i]?.x ?? null,
+        y: own ? (points[i]?.y ?? null) : null,
+        price: point.price,
+        time: point.time,
+      })),
       own,
       pane,
       size,
     };
+    if (TOOL_POINTS[drawing.tool] === 3 || drawing.tool === 'regression-trend') {
+      return own ? this.partsShape(shape) : null;
+    }
     const first = drawing.points[0];
     if (!first) return null;
     const x0 = this.timeToX(first.time);
@@ -610,6 +774,221 @@ export class DrawingEngine {
     }
   }
 
+  /** A channel's, pitchfork's or regression trend's shape on its own pane. */
+  private partsShape(shape: PlacedShape): PlacedShape | null {
+    const { drawing, size } = shape;
+    if (drawing.tool === 'regression-trend') return this.regressionShape(shape);
+    if (shape.points.some((point) => point === null)) return null;
+    const points = shape.points as Pt[];
+    const { style } = drawing;
+    let parts: ShapeParts | null = null;
+    switch (drawing.tool) {
+      case 'parallel-channel':
+        parts = parallelChannel(points, style, size);
+        break;
+      case 'flat-top-bottom':
+        parts = flatTopBottom(points, style, size);
+        break;
+      case 'disjoint-channel':
+        parts = disjointChannel(points, style, size);
+        break;
+      default:
+        if (isPitchforkTool(drawing.tool)) parts = pitchfork(drawing.tool, points, style, size);
+    }
+    if (!parts) return null;
+    this.takeParts(shape, parts);
+    shape.axis = this.axisOf(shape, parts);
+    // A flat top/bottom's and disjoint channel's ends: arrows on both lines where they stop.
+    if (drawing.tool === 'flat-top-bottom' || drawing.tool === 'disjoint-channel') {
+      const handle = (n: number) => parts.handles.find((item) => item.point === n);
+      const flat = drawing.tool === 'flat-top-bottom';
+      const start = handle(flat ? 2 : 3);
+      const end = handle(flat ? 3 : 2);
+      const [a, b] = points;
+      for (const [from, to] of [
+        [a, b],
+        [start, end],
+      ]) {
+        if (!from || !to) continue;
+        if (style.leftEnd === 'arrow' && !style.extendLeft) shape.arrows.push([from, to]);
+        if (style.rightEnd === 'arrow' && !style.extendRight) shape.arrows.push([to, from]);
+      }
+    }
+    return shape;
+  }
+
+  private takeParts(shape: PlacedShape, parts: ShapeParts): void {
+    shape.lines = parts.lines;
+    shape.looks = parts.looks;
+    shape.fills = parts.fills;
+    shape.fillsTakeClicks = parts.fillsTakeClicks;
+    shape.handles = parts.handles;
+    shape.frame = parts.frame;
+    shape.label = parts.label ?? null;
+  }
+
+  /**
+   * What a channel or pitchfork marks on the axes: its corners (a pitchfork its three points),
+   * each with its price and its bar's time.
+   */
+  private axisOf(shape: PlacedShape, parts: ShapeParts): AxisPoint[] {
+    const { drawing, pane } = shape;
+    const [p0, p1, p2] = drawing.points;
+    if (!p0 || !p1 || !p2) return [];
+    const entry = (n: number, time: number, price?: number): AxisPoint | null => {
+      const handle = parts.handles.find((item) => item.point === n);
+      if (!handle) return null;
+      const value = price ?? this.host.yToPrice(pane, handle.y);
+      return value === null ? null : { x: handle.x, y: handle.y, price: value, time };
+    };
+    const corners =
+      drawing.tool === 'parallel-channel'
+        ? [entry(2, p0.time), entry(3, p1.time)]
+        : drawing.tool === 'flat-top-bottom'
+          ? [entry(2, p0.time, p2.price), entry(3, p1.time, p2.price)]
+          : drawing.tool === 'disjoint-channel'
+            ? [entry(2, p1.time, p2.price), entry(3, p0.time)]
+            : [entry(2, p2.time, p2.price)];
+    return [entry(0, p0.time, p0.price), entry(1, p1.time, p1.price), ...corners].filter(
+      (item): item is AxisPoint => item !== null,
+    );
+  }
+
+  /**
+   * A regression trend: worked out from the chart's bars between its points, or, until it can be
+   * (fewer than two bars there, or older history still on its way), a line between its points in
+   * its base line's look, never one worked out from part of its bars.
+   */
+  private regressionShape(shape: PlacedShape): PlacedShape | null {
+    const { drawing, pane, size } = shape;
+    const [p0, p1] = drawing.points;
+    if (!p0 || !p1) return null;
+    const fit = this.regressionFit(drawing);
+    const parts = fit
+      ? regressionParts(
+          fit,
+          (index) => this.host.logicalToX(index),
+          (price) => this.host.priceToY(pane, price),
+          drawing.style,
+          size,
+          p0.time <= p1.time ? [0, 1] : [1, 0],
+        )
+      : null;
+    if (fit && parts) {
+      this.takeParts(shape, parts);
+      const { times } = this.timeMap();
+      const [first, last] = parts.handles;
+      shape.axis =
+        first && last
+          ? [
+              { x: first.x, y: first.y, price: fit.start, time: times[fit.from] as number },
+              { x: last.x, y: last.y, price: fit.end, time: times[fit.to] as number },
+            ]
+          : [];
+      return shape;
+    }
+    const [a, b] = shape.points;
+    if (!a || !b) return null;
+    const line = lineSegment(a, b, false, false, size);
+    if (line) shape.lines.push(line);
+    shape.handles.push({ ...a, point: 0, square: false }, { ...b, point: 1, square: false });
+    return shape;
+  }
+
+  /** A regression trend's fit on the chart's bars, kept until the bars change. */
+  private regressionFit(drawing: Drawing): RegressionFit | null {
+    const [p0, p1] = drawing.points;
+    const map = this.timeMap();
+    const first = map.times[0];
+    if (!p0 || !p1 || first === undefined) return null;
+    // Every bar of its range must be on the chart, unless the exchange has none older.
+    if (Math.min(p0.time, p1.time) < first && !(this.host.historyEnded?.() ?? false)) return null;
+    const range = barRange(map.times, p0.time, p1.time);
+    if (!range) return null;
+    const bars = this.host.bars();
+    const last = bars[bars.length - 1];
+    const on = this.fitsOn;
+    if (!on || on.bars !== bars || on.length !== bars.length || on.last !== last) {
+      this.fits.clear();
+      this.fitsOn = { bars, length: bars.length, last };
+    }
+    const inputs = drawing.style.regression;
+    const key = [
+      range[0],
+      range[1],
+      inputs.source,
+      inputs.upperDeviation,
+      inputs.lowerDeviation,
+      inputs.useUpperDeviation,
+      inputs.useLowerDeviation,
+    ].join('|');
+    if (!this.fits.has(key)) {
+      if (this.fits.size >= 256) this.fits.clear();
+      this.fits.set(key, fitRegression(bars, range[0], range[1], inputs));
+    }
+    return this.fits.get(key) ?? null;
+  }
+
+  /**
+   * The history a regression trend shown on this interval needs: the chart is asked for the bars
+   * between its first point and the chart's first bar, up to REGRESSION_HISTORY_BARS in all.
+   */
+  private askHistory(): void {
+    const need = this.host.needHistory;
+    if (!need || this.settings.hideAll || this.host.historyEnded?.()) return;
+    const map = this.timeMap();
+    const first = map.times[0];
+    if (first === undefined) return;
+    const resolution = this.host.resolution();
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const drawing of this.drawings) {
+      if (drawing.tool !== 'regression-trend' || drawing.hidden) continue;
+      if (resolution && !visibleOn(drawing.visibility, resolution)) continue;
+      for (const point of drawing.points) earliest = Math.min(earliest, point.time);
+    }
+    if (!(earliest < first)) return;
+    const lacking = Math.ceil(-map.logicalOf(earliest));
+    if (lacking <= 0 || map.length + lacking > REGRESSION_HISTORY_BARS) return;
+    need.call(this.host, lacking);
+  }
+
+  /** Points as bars (x, the logical index) and the pane's y, where channels.ts's rules work. */
+  private toLogical(pane: number, points: readonly DrawingPoint[]): Pt[] | null {
+    const map = this.timeMap();
+    const out: Pt[] = [];
+    for (const point of points) {
+      const x = map.logicalOf(point.time);
+      const y = this.host.priceToY(pane, point.price);
+      if (!Number.isFinite(x) || y === null) return null;
+      out.push({ x, y });
+    }
+    return out;
+  }
+
+  /**
+   * Points as bars and pane y back as times and prices. One that sits on a known point's bar, or
+   * at its y, keeps that point's time or price, so a point a rule left alone comes back as it was.
+   */
+  private fromLogical(
+    pane: number,
+    points: readonly Pt[],
+    known: readonly DrawingPoint[],
+    knownAt: readonly Pt[],
+  ): DrawingPoint[] | null {
+    const map = this.timeMap();
+    const out: DrawingPoint[] = [];
+    for (const point of points) {
+      const sameX = knownAt.findIndex((item) => item.x === point.x);
+      const sameY = knownAt.findIndex((item) => item.y === point.y);
+      const time = sameX >= 0 ? (known[sameX] as DrawingPoint).time : map.timeOf(point.x);
+      const price =
+        sameY >= 0 ? (known[sameY] as DrawingPoint).price : this.host.yToPrice(pane, point.y);
+      if (price === null || !Number.isFinite(time)) return null;
+      out.push({ time, price });
+    }
+    return out;
+  }
+
   /** The point at a pane position: its bar's time, and its price, the magnet's if it's on. */
   private pointAt(
     pane: number,
@@ -656,22 +1035,32 @@ export class DrawingEngine {
   private press(tool: DrawingTool, input: PointerInput, key: string | null): void {
     const placing = this.placing;
     if (placing) {
-      // The last point's click: the drawing is done when it's let go.
+      // The point being placed goes where the press is. The last one's: the drawing is done when
+      // it's let go; an earlier one's: the next point follows the pointer then.
       if (input.pane === placing.pane) this.movePlacing(input);
       placing.pressed = true;
-      placing.closing = true;
+      placing.downAt = { x: input.x, y: input.y };
+      placing.dragged = false;
+      if (placing.index >= placing.points.length - 1) placing.closing = true;
+      else placing.advancing = true;
       return;
     }
+    // A regression trend is worked out from the symbol's prices: only on the price pane (ours;
+    // TradingView doesn't say, §11).
+    if (tool === 'regression-trend' && key !== null) return;
     const point = this.anchorAt(input);
     if (!point) return;
+    const count = TOOL_POINTS[tool];
     this.placing = {
       tool,
       pane: input.pane,
       key,
-      points: Array.from({ length: TOOL_POINTS[tool] }, () => ({ ...point })),
+      points: Array.from({ length: count }, () => ({ ...point })),
+      index: Math.min(1, count - 1),
       pressed: true,
       downAt: { x: input.x, y: input.y },
       dragged: false,
+      advancing: false,
       closing: false,
     };
   }
@@ -679,10 +1068,15 @@ export class DrawingEngine {
   private movePlacing(input: PointerInput): void {
     const placing = this.placing;
     if (!placing) return;
-    const last = placing.points.length - 1;
-    const other = last > 0 ? placing.points[0] : undefined;
+    const { index, points } = placing;
+    // Shift keeps the second point at 45° steps from the first.
+    const other = index === 1 ? points[0] : undefined;
     const point = this.anchorAt(input, other);
-    if (point) placing.points[last] = point;
+    if (point) {
+      points[index] = point;
+      // The points after it wait on it (a three-point tool's third while its second is placed).
+      for (let i = index + 1; i < points.length; i++) points[i] = { ...point };
+    }
     if (
       placing.pressed &&
       Math.hypot(input.x - placing.downAt.x, input.y - placing.downAt.y) >= DRAG_START
@@ -695,16 +1089,22 @@ export class DrawingEngine {
     const placing = this.placing;
     if (!placing) return;
     this.stopPlacing();
-    const [a, b] = placing.points;
-    // Two points in one place make no line to see or take: nothing is drawn.
-    const degenerate =
-      b !== undefined && a !== undefined && a.time === b.time && a.price === b.price;
-    if (!degenerate) {
-      const drawing = newDrawing(this.newId(), placing.tool, placing.points, placing.key);
+    const points = this.placedOf(placing);
+    if (!degenerate(placing.tool, points)) {
+      const drawing = newDrawing(this.newId(), placing.tool, points, placing.key);
       this.edit([...this.drawings, drawing]);
       this.setSelection([drawing.id]);
     }
     if (!this.settings.keepDrawing) this.events.onToolDone?.();
+  }
+
+  /** A drawing's points as kept once placed: a channel's third as its first two set it. */
+  private placedOf(placing: Placing): DrawingPoint[] {
+    const { tool, points, pane } = placing;
+    if (points.length < 3) return points;
+    const at = this.toLogical(pane, points);
+    if (!at) return points;
+    return this.fromLogical(pane, placedPoints(tool, at), points, at) ?? points;
   }
 
   private stopPlacing(): void {
@@ -725,6 +1125,13 @@ export class DrawingEngine {
     const timeOnly = base.tool === 'vertical-line';
     if (drag.handle !== null) {
       if (input.pane !== drag.pane) return;
+      const channel = this.dragChannel(base, drag.handle, input);
+      if (channel === null) return;
+      if (channel) {
+        drag.current = { ...base, points: channel };
+        this.update();
+        return;
+      }
       const points = base.points.map((point) => ({ ...point }));
       const other = points.length === 2 ? points[1 - drag.handle] : undefined;
       const point = this.anchorAt(input, other);
@@ -757,6 +1164,28 @@ export class DrawingEngine {
     this.update();
   }
 
+  /**
+   * A channel's handle dragged by channels.ts's rules; undefined for a handle that moves its own
+   * point (every other tool's), null when it can't be placed now.
+   */
+  private dragChannel(
+    base: Drawing,
+    handle: number,
+    input: PointerInput,
+  ): DrawingPoint[] | null | undefined {
+    const { tool } = base;
+    if (tool !== 'parallel-channel' && tool !== 'flat-top-bottom' && tool !== 'disjoint-channel') {
+      return undefined;
+    }
+    const anchor = this.anchorAt(input);
+    const at = this.toLogical(input.pane, base.points);
+    const to = anchor ? this.toLogical(input.pane, [anchor])?.[0] : undefined;
+    if (!anchor || !at || !to) return null;
+    const next = dragChannelHandle(tool, at, handle, to);
+    if (!next) return undefined;
+    return this.fromLogical(input.pane, next, [...base.points, anchor], [...at, to]);
+  }
+
   private endDrag(): void {
     this.drag = null;
     this.resume();
@@ -775,6 +1204,7 @@ export class DrawingEngine {
   }
 
   private update(): void {
+    this.version++;
     this.updateCursor();
     this.host.requestUpdate();
   }
@@ -793,4 +1223,18 @@ export class DrawingEngine {
     this.cursor = next;
     this.host.setCursor(next);
   }
+}
+
+/**
+ * Points that make nothing to see or take, so nothing is drawn: a line's two, or a channel's
+ * first line's, in one place; a regression trend's on one bar; a pitchfork's three in one place.
+ */
+function degenerate(tool: DrawingTool, points: readonly DrawingPoint[]): boolean {
+  const [a, b, c] = points;
+  const same = (p?: DrawingPoint, q?: DrawingPoint) =>
+    p !== undefined && q !== undefined && p.time === q.time && p.price === q.price;
+  if (points.length < 2) return false;
+  if (tool === 'regression-trend') return a?.time === b?.time;
+  if (isPitchforkTool(tool)) return same(a, b) && same(b, c);
+  return same(a, b);
 }
