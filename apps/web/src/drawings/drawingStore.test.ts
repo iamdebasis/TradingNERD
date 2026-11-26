@@ -415,6 +415,15 @@ describe('the left toolbar’s state', () => {
     expect(again.get().tool).toBeNull();
   });
 
+  it('remembers a channel or a pitchfork as the trend line tools’ last choice too', () => {
+    const store = new DrawingStore(new FakeGateway());
+    store.setTool('parallel-channel');
+    expect(new DrawingStore(new FakeGateway()).get().prefs.lineTool).toBe('parallel-channel');
+    store.setTool('inside-pitchfork');
+    expect(new DrawingStore(new FakeGateway()).get().prefs.lineTool).toBe('inside-pitchfork');
+    expect(sanitizeToolbar({ lineTool: 'regression-trend' }).lineTool).toBe('regression-trend');
+  });
+
   it('puts the tool down when a cursor is chosen, or when a drawing is done', () => {
     const store = new DrawingStore(new FakeGateway());
     store.setTool('ray');

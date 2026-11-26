@@ -14,10 +14,12 @@ import {
   cutSegment,
   drawArrowHead,
   drawHandle,
+  drawLabel,
   drawStatsBox,
   drawText,
   drawTimeLabel,
   drawTrendAngle,
+  fillArea,
   fontOf,
   layoutText,
   strokeSegments,
@@ -59,6 +61,20 @@ const H_TEXT_INSET = 3;
 const SIDE_OF: Record<VAlign, TextSide> = { bottom: 'above', middle: 'on', top: 'below' };
 
 /**
+ * From this many drawings standing still round one being moved or placed, those under it and
+ * those over it are painted once into bitmaps of their own and copied each frame: a hundred
+ * channels' and pitchforks' bands take too long to paint again at every move (measured in the
+ * cloud's software canvas, 2026-11-26: 110 to 126 ms a frame).
+ */
+const STILL_LAYERS_FROM = 12;
+
+interface StillLayer {
+  canvas: HTMLCanvasElement;
+  /** What it was painted from: each drawing, its state and its points, and the bitmap's size. */
+  key: string;
+}
+
+/**
  * One pane's user drawings (docs/SPEC.md §6.24), attached to the series whose scale the pane
  * has: the candles on the price pane, an indicator's first plot on its own pane. The pane
  * view paints over the series; the axis views paint under the crosshair's own labels.
@@ -70,6 +86,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private readonly timeAxis: readonly IPrimitivePaneView[];
   private series: ISeriesApi<SeriesType> | null = null;
   private redraw: (() => void) | null = null;
+  /** The still drawings under and over the one moving, while one does. */
+  private still: { below: StillLayer | null; above: StillLayer | null } = {
+    below: null,
+    above: null,
+  };
+  /** A number for each drawing object, so a still layer knows when one changed. */
+  private readonly serials = new WeakMap<object, number>();
+  private serial = 0;
 
   constructor(host: DrawingLayerHost) {
     this.host = host;
@@ -127,29 +151,104 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const { engine } = this.host;
     const shapes = engine.shapes(pane);
     if (shapes.length === 0) return;
-    target.useMediaCoordinateSpace(({ context: ctx }) => {
-      for (const shape of shapes) this.drawShape(ctx, shape);
-      // Handles over every line.
-      const hovered = engine.hoveredHandle();
-      for (const shape of shapes) {
-        if (!engine.showsHandles(shape.drawing)) continue;
-        const selected = engine.isSelected(shape.drawing.id);
-        for (const handle of shape.handles) {
-          drawHandle(ctx, handle, {
-            square: handle.square,
-            fill: this.host.background,
-            selected,
-            hovered: hovered?.id === shape.drawing.id && hovered.point === handle.point,
-          });
-        }
+    const active = engine.activeId();
+    const at = active === null ? -1 : shapes.findIndex((shape) => shape.drawing.id === active);
+    if (at < 0 || shapes.length - 1 < STILL_LAYERS_FROM) {
+      this.still = { below: null, above: null };
+      target.useMediaCoordinateSpace(({ context: ctx }) => {
+        for (const shape of shapes) this.drawShape(ctx, shape);
+        this.drawHandles(ctx, shapes);
+      });
+      return;
+    }
+    // One drawing moving among many: the rest copied from their bitmaps, in the same order.
+    target.useBitmapCoordinateSpace(
+      ({ context: ctx, bitmapSize, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
+        const below = this.stillLayer('below', shapes.slice(0, at), bitmapSize, h, v);
+        const above = this.stillLayer('above', shapes.slice(at + 1), bitmapSize, h, v);
+        if (below) ctx.drawImage(below, 0, 0);
+        ctx.save();
+        ctx.scale(h, v);
+        this.drawShape(ctx, shapes[at] as PlacedShape);
+        ctx.restore();
+        if (above) ctx.drawImage(above, 0, 0);
+        ctx.save();
+        ctx.scale(h, v);
+        this.drawHandles(ctx, shapes);
+        ctx.restore();
+      },
+    );
+  }
+
+  /** Handles over every line: a selected drawing's, a hovered one's. */
+  private drawHandles(ctx: CanvasRenderingContext2D, shapes: readonly PlacedShape[]): void {
+    const { engine } = this.host;
+    const hovered = engine.hoveredHandle();
+    for (const shape of shapes) {
+      if (!engine.showsHandles(shape.drawing)) continue;
+      const selected = engine.isSelected(shape.drawing.id);
+      for (const handle of shape.handles) {
+        drawHandle(ctx, handle, {
+          square: handle.square,
+          fill: this.host.background,
+          selected,
+          hovered: hovered?.id === shape.drawing.id && hovered.point === handle.point,
+        });
       }
-    });
+    }
+  }
+
+  /** The still drawings under (or over) the moving one, painted once while they stay so. */
+  private stillLayer(
+    which: 'below' | 'above',
+    shapes: readonly PlacedShape[],
+    size: { width: number; height: number },
+    h: number,
+    v: number,
+  ): HTMLCanvasElement | null {
+    if (shapes.length === 0) return null;
+    const { engine } = this.host;
+    const key = [
+      size.width,
+      size.height,
+      h,
+      v,
+      ...shapes.map((shape) => {
+        const { drawing } = shape;
+        const state = `${engine.isSelected(drawing.id) ? 's' : ''}${engine.isHovered(drawing.id) ? 'h' : ''}`;
+        const at = shape.points.map((point) => (point ? `${point.x},${point.y}` : '-')).join(';');
+        return `${this.serialOf(drawing)}${state}:${at}`;
+      }),
+    ].join('|');
+    const kept = this.still[which];
+    if (kept?.key === key) return kept.canvas;
+    const canvas = kept?.canvas ?? document.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(h, 0, 0, v, 0, 0);
+    for (const shape of shapes) this.drawShape(ctx, shape);
+    this.still[which] = { canvas, key };
+    return canvas;
+  }
+
+  private serialOf(drawing: object): number {
+    let serial = this.serials.get(drawing);
+    if (serial === undefined) {
+      serial = ++this.serial;
+      this.serials.set(drawing, serial);
+    }
+    return serial;
   }
 
   private drawShape(ctx: CanvasRenderingContext2D, shape: PlacedShape): void {
     const { drawing, segment } = shape;
     const { style } = drawing;
     const options = TOOL_OPTIONS[drawing.tool];
+    // A channel's or pitchfork's bands under its lines, its levels under its main lines.
+    for (const fill of shape.fills) fillArea(ctx, fill.points, fill.color, fill.opacity);
+    for (const look of shape.looks) strokeSegments(ctx, [[look.a, look.b]], look);
     const text = options.text ? this.textLayout(ctx, shape) : null;
     const lines = text?.gap
       ? shape.lines.flatMap((line) => cutSegment(line, text.gap as [Pt, Pt]))
@@ -173,16 +272,35 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       ctx.restore();
     }
     if (text) drawText(ctx, text);
+    if (shape.label) {
+      const { at, text: value, color, size } = shape.label;
+      drawLabel(ctx, at, value, color, fontOf(size, this.host.fontFamily));
+    }
     if (options.stats && segment) this.drawStats(ctx, shape, segment);
   }
 
   /** Where the drawing's text goes, by tool (the capture's layouts; provisional, §11). */
   private textLayout(ctx: CanvasRenderingContext2D, shape: PlacedShape): TextLayout | null {
-    const { drawing, segment, size } = shape;
+    const { drawing, segment, size, frame } = shape;
     const { text } = drawing.style;
     if (!text.value || !shape.own) return null;
     const family = this.host.fontFamily;
     const [point] = shape.points;
+    if (frame) {
+      // A channel's text (TradingView's blog, 21 August 2023: Top, Inside or Bottom; left,
+      // centre or right): over its upper line, between its lines, or under its lower one. Its
+      // lines stay whole (provisional, §11).
+      const { upper, lower } = frame;
+      const inside: [Pt, Pt] = [along(upper[0], lower[0], 0.5), along(upper[1], lower[1], 0.5)];
+      const [line, side]: [[Pt, Pt], TextSide] =
+        text.alignV === 'top'
+          ? [upper, 'above']
+          : text.alignV === 'middle'
+            ? [inside, 'on']
+            : [lower, 'below'];
+      const layout = layoutText(ctx, line[0], line[1], text, family, text.alignH, side);
+      return layout ? { ...layout, gap: null } : null;
+    }
     switch (drawing.tool) {
       case 'horizontal-line':
       case 'horizontal-ray': {
@@ -274,13 +392,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         const { drawing } = shape;
         const { style } = drawing;
         const selected = engine.isSelected(drawing.id);
-        const ys = shape.points.map((point) => point?.y ?? null);
         if (drawing.tool === 'vertical-line') continue;
-        // A selected drawing's span between its points' prices.
-        const [y0, y1] = ys;
-        if (selected && y0 !== null && y0 !== undefined && y1 !== null && y1 !== undefined) {
+        // A selected drawing's span between its lowest and highest marked prices.
+        const ys = shape.axis.flatMap((point) => (point.y === null ? [] : [point.y]));
+        if (selected && ys.length >= 2) {
+          const top = Math.min(...ys);
           ctx.fillStyle = withAlpha(style.color, AXIS_BAND);
-          ctx.fillRect(0, Math.min(y0, y1), mediaSize.width, Math.abs(y1 - y0));
+          ctx.fillRect(0, top, mediaSize.width, Math.max(...ys) - top);
         }
         const always =
           drawing.tool === 'horizontal-line' ||
@@ -289,11 +407,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
             ? style.showPrice
             : style.showPriceLabels;
         if (!always && !selected) continue;
-        drawing.points.forEach((point, i) => {
-          const y = ys[i];
-          if (y !== null && y !== undefined)
-            labels.push({ y, price: point.price, color: style.color });
-        });
+        for (const point of shape.axis) {
+          if (point.y !== null) labels.push({ y: point.y, price: point.price, color: style.color });
+        }
       }
       const mask = {
         tickYs: this.host.tickYs(pane),
@@ -332,20 +448,23 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         const { style } = drawing;
         if (drawing.tool === 'horizontal-line') continue;
         const selected = engine.isSelected(drawing.id);
-        const xs = shape.points.map((point) => point?.x ?? null);
-        const [x0, x1] = xs;
-        if (selected && x0 !== null && x0 !== undefined && x1 !== null && x1 !== undefined) {
+        // A selected drawing's span between its first and last marked times.
+        const xs = shape.axis.flatMap((point) => (point.x === null ? [] : [point.x]));
+        if (selected && xs.length >= 2) {
+          const left = Math.min(...xs);
           ctx.fillStyle = withAlpha(style.color, AXIS_BAND);
-          ctx.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), mediaSize.height);
+          ctx.fillRect(left, 0, Math.max(...xs) - left, mediaSize.height);
         }
         const always =
           (drawing.tool === 'vertical-line' || drawing.tool === 'cross-line') && style.showTime;
         if (!always && !selected) continue;
-        drawing.points.forEach((point, i) => {
-          const x = xs[i];
-          if (x !== null && x !== undefined)
-            labels.push({ x, time: point.time, color: style.color });
-        });
+        // A channel's corners share their bars: one label each.
+        const seen = new Set<number>();
+        for (const point of shape.axis) {
+          if (point.x === null || seen.has(point.time)) continue;
+          seen.add(point.time);
+          labels.push({ x: point.x, time: point.time, color: style.color });
+        }
       }
       for (const label of labels) {
         drawTimeLabel(

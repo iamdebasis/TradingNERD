@@ -1,4 +1,9 @@
-import { type Drawing, type DrawingLineStyle, TOOL_OPTIONS } from '@tradingnerd/core';
+import {
+  type Drawing,
+  type DrawingLineStyle,
+  recolorDrawing,
+  TOOL_OPTIONS,
+} from '@tradingnerd/core';
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -46,7 +51,13 @@ export function FloatingToolbar({ drawing, onSettings }: { drawing: Drawing; onS
   const { style } = drawing;
   const options = TOOL_OPTIONS[drawing.tool];
   // A drawing has a line to style unless it's only text (later milestones).
-  const hasLine = options.extend || options.showPrice || options.showTime || options.stats;
+  const hasLine =
+    options.extend ||
+    options.extendMenu ||
+    options.extendLines ||
+    options.showPrice ||
+    options.showTime ||
+    options.stats;
 
   // Gone while its color was being changed (deselected, removed): what was chosen stays.
   useEffect(
@@ -199,9 +210,9 @@ export function FloatingToolbar({ drawing, onSettings }: { drawing: Drawing; onS
         <ColorEditor
           label="Line color"
           color={style.color}
-          onChange={(color) =>
-            drawingStore.preview({ ...drawing, style: { ...drawing.style, color } })
-          }
+          // The whole drawing takes the color: a channel's levels and background, a
+          // pitchfork's levels, a regression's bands too (core's recolorDrawing; §11).
+          onChange={(color) => drawingStore.preview(recolorDrawing(drawing, color))}
           onClose={closeColor}
           style={{ top: 42, left: 0 }}
         />

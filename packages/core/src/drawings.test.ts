@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHANNEL_TOOLS,
   DRAWING_BLUE,
+  DRAWING_RED,
+  type DrawingLevel,
   defaultDrawingStyle,
   defaultVisibility,
   drawingsKey,
   MAX_DRAWING_TEXT,
   MAX_DRAWINGS_PER_SYMBOL,
   newDrawing,
+  PITCHFORK_TOOLS,
   parseDrawing,
   parseDrawingsFile,
   parseSymbolDrawings,
+  recolorDrawing,
+  TOOL_NAMES,
+  TOOL_POINTS,
+  TREND_LINE_TOOLS,
   visibilityRowOf,
   visibleOn,
 } from './drawings.ts';
@@ -168,5 +176,162 @@ describe('visibility on intervals (the Visibility tab)', () => {
     expect(visibleOn(rows, res('240'))).toBe(true);
     expect(visibleOn(rows, res('720'))).toBe(false);
     expect(visibleOn(rows, res('1D'))).toBe(true);
+  });
+});
+
+const channel = () =>
+  newDrawing('c1', 'parallel-channel', [
+    { time: 1_700_000_000, price: 10 },
+    { time: 1_700_864_000, price: 20 },
+    { time: 1_700_000_000, price: 14 },
+  ]);
+
+describe('the channels and pitchforks (D2)', () => {
+  it('follow the Lines in TradingView’s menu, as the user’s screenshot names them', () => {
+    expect(TREND_LINE_TOOLS.slice(9).map((tool) => TOOL_NAMES[tool])).toEqual([
+      'Parallel channel',
+      'Regression trend',
+      'Flat top/bottom',
+      'Disjoint channel',
+      'Pitchfork',
+      'Schiff pitchfork',
+      'Modified Schiff pitchfork',
+      'Inside pitchfork',
+    ]);
+  });
+
+  it('take three points, but a regression trend two', () => {
+    for (const tool of [...CHANNEL_TOOLS, ...PITCHFORK_TOOLS]) {
+      expect(TOOL_POINTS[tool]).toBe(tool === 'regression-trend' ? 2 : 3);
+    }
+  });
+
+  it('start a parallel channel blue at 2 px, filled at 20%, with only its dashed middle level on', () => {
+    const style = defaultDrawingStyle('parallel-channel');
+    expect([style.color, style.width, style.lineStyle]).toEqual([DRAWING_BLUE, 2, 'solid']);
+    expect(style.fill).toEqual({ on: true, color: '#2962FF33' });
+    expect(style.levels.map((level) => level.coeff)).toEqual([-0.25, 0.25, 0.5, 0.75, 1.25]);
+    expect(style.levels.filter((level) => level.visible)).toEqual([
+      { coeff: 0.5, visible: true, color: DRAWING_BLUE, width: 1, lineStyle: 'dashed' },
+    ]);
+    expect([style.text.alignH, style.text.alignV, style.text.size]).toEqual(['left', 'bottom', 14]);
+  });
+
+  it('start a regression trend at ±2 deviations of the closes, its base red and dashed', () => {
+    const style = defaultDrawingStyle('regression-trend');
+    expect([style.color, style.width, style.lineStyle]).toEqual([DRAWING_RED, 1, 'dashed']);
+    const { regression } = style;
+    expect([regression.upperDeviation, regression.lowerDeviation, regression.source]).toEqual([
+      2,
+      -2,
+      'close',
+    ]);
+    expect([regression.useUpperDeviation, regression.useLowerDeviation]).toEqual([true, true]);
+    expect(regression.up).toEqual({
+      visible: true,
+      color: DRAWING_BLUE,
+      width: 2,
+      lineStyle: 'solid',
+    });
+    expect(regression.down).toEqual(regression.up);
+    expect(regression.showPearsons).toBe(true);
+    expect(style.fill.color.slice(7)).toBe('4D');
+  });
+
+  it('start a flat top/bottom orange and a disjoint channel green, each filled at 20%', () => {
+    expect(defaultDrawingStyle('flat-top-bottom').color).toBe('#FF9800');
+    expect(defaultDrawingStyle('flat-top-bottom').fill).toEqual({ on: true, color: '#FF980033' });
+    expect(defaultDrawingStyle('disjoint-channel').color).toBe('#089981');
+    expect(defaultDrawingStyle('disjoint-channel').fill).toEqual({ on: true, color: '#08998133' });
+  });
+
+  it('start every pitchfork with a red median and its 0.5 and 1 levels on', () => {
+    for (const tool of PITCHFORK_TOOLS) {
+      const style = defaultDrawingStyle(tool);
+      expect([style.color, style.width, style.lineVisible]).toEqual([DRAWING_RED, 2, true]);
+      expect(style.levels).toHaveLength(9);
+      expect(
+        style.levels.filter((level) => level.visible).map((level) => [level.coeff, level.color]),
+      ).toEqual([
+        [0.5, '#089981'],
+        [1, DRAWING_BLUE],
+      ]);
+      expect(style.fill).toEqual({ on: true, color: '#00000033' });
+    }
+  });
+
+  it('read back as written, with their levels, fill and inputs', () => {
+    const drawing = channel();
+    drawing.style.levels[0] = {
+      ...(drawing.style.levels[0] as DrawingLevel),
+      visible: true,
+      coeff: -0.5,
+    };
+    drawing.style.fill = { on: false, color: '#FF000080' };
+    expect(parseDrawing(JSON.parse(JSON.stringify(drawing)))).toEqual(drawing);
+    const regression = newDrawing('r1', 'regression-trend', [
+      { time: 1, price: 1 },
+      { time: 2, price: 2 },
+    ]);
+    regression.style.regression.source = 'hlc3';
+    regression.style.regression.useUpperDeviation = false;
+    expect(parseDrawing(JSON.parse(JSON.stringify(regression)))).toEqual(regression);
+  });
+
+  it('read a D1 file’s drawing, written before these fields, with their defaults', () => {
+    const stored = JSON.parse(JSON.stringify(line()));
+    for (const key of ['lineVisible', 'extendLines', 'levels', 'fill', 'regression']) {
+      delete stored.style[key];
+    }
+    expect(parseDrawing(stored)).toEqual(line());
+  });
+
+  it('keep a tool’s own number of levels, each bad value its default', () => {
+    const stored = JSON.parse(JSON.stringify(channel()));
+    stored.style.levels = [
+      { coeff: 1e9, visible: 'yes', color: 'red', width: 9, lineStyle: 'wavy' },
+      null,
+      ...stored.style.levels.slice(2),
+      { coeff: 3, visible: true, color: '#000000', width: 1, lineStyle: 'solid' },
+    ];
+    const levels = parseDrawing(stored)?.style.levels;
+    const defaults = defaultDrawingStyle('parallel-channel').levels;
+    expect(levels).toHaveLength(5);
+    expect(levels?.[0]).toEqual({ ...defaults[0], coeff: 100 });
+    expect(levels?.slice(1)).toEqual(defaults.slice(1));
+  });
+
+  it('are refused without their third point', () => {
+    const stored = JSON.parse(JSON.stringify(channel()));
+    expect(parseDrawing({ ...stored, points: stored.points.slice(0, 2) })).toBeNull();
+  });
+});
+
+describe('one color for the whole drawing (the floating toolbar’s Line color)', () => {
+  it('colors a line tool’s line and nothing else', () => {
+    const recolored = recolorDrawing(line(), '#FF0000');
+    expect(recolored.style).toEqual({ ...line().style, color: '#FF0000' });
+  });
+
+  it('colors a channel’s lines and levels, its background keeping its opacity, its text its color', () => {
+    const recolored = recolorDrawing(channel(), '#FF0000');
+    expect(recolored.style.color).toBe('#FF0000');
+    expect(recolored.style.levels.every((level) => level.color === '#FF0000')).toBe(true);
+    expect(recolored.style.fill.color).toBe('#FF000033');
+    expect(recolored.style.text.color).toBe(DRAWING_BLUE);
+    expect(channel().style.levels[2]?.color).toBe(DRAWING_BLUE);
+  });
+
+  it('colors a regression trend’s base, Up and Down lines', () => {
+    const drawing = newDrawing('r', 'regression-trend', [
+      { time: 1, price: 1 },
+      { time: 2, price: 2 },
+    ]);
+    const { style } = recolorDrawing(drawing, '#00FF00');
+    expect([style.color, style.regression.up.color, style.regression.down.color]).toEqual([
+      '#00FF00',
+      '#00FF00',
+      '#00FF00',
+    ]);
   });
 });

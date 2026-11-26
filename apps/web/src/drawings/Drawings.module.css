@@ -219,3 +219,16 @@
   gap: 6px;
   width: 220px;
 }
+
+/* The settings dialog's level rows: a check, the coefficient, then its line. */
+.levelCoeff {
+  width: 84px;
+}
+
+/* A pitchfork's Background: its opacity. */
+.opacityControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 160px;
+}

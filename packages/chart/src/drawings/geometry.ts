@@ -27,12 +27,17 @@ export const HANDLE_HIT = 12;
 
 /** Beyond the pane's edges a line still runs this far, so its end never shows. */
 const MARGIN = 4;
+/**
+ * How far past the pane a filled area's edges are carried (CSS px): far enough that the edge
+ * closing it never crosses the pane, near enough to keep the canvas' numbers small.
+ */
+export const FILL_REACH = 100_000;
 
 /**
  * The part of the line through `a` and `b` a drawing shows on the pane: from `a` to `b`, carried
  * on past `b` when it extends right and back past `a` when it extends left, so a ray runs from
  * its first point through its second (the direction, not the screen's right). Clipped to the
- * pane; null when none of it is on the pane.
+ * pane (and `margin` beyond it); null when none of it is there.
  */
 export function lineSegment(
   a: Pt,
@@ -40,11 +45,12 @@ export function lineSegment(
   extendLeft: boolean,
   extendRight: boolean,
   size: Size,
+  margin = MARGIN,
 ): [Pt, Pt] | null {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   if (dx === 0 && dy === 0) return [a, b];
-  const range = clipRange(a, dx, dy, size);
+  const range = clipRange(a, dx, dy, size, margin);
   if (!range) return null;
   const from = Math.max(extendLeft ? Number.NEGATIVE_INFINITY : 0, range[0]);
   const to = Math.min(extendRight ? Number.POSITIVE_INFINITY : 1, range[1]);
@@ -56,14 +62,20 @@ export function lineSegment(
 }
 
 /** Where the line a + t·(dx, dy) is on the pane, as its range of t (Liang–Barsky). */
-function clipRange(a: Pt, dx: number, dy: number, size: Size): [number, number] | null {
+function clipRange(
+  a: Pt,
+  dx: number,
+  dy: number,
+  size: Size,
+  margin: number,
+): [number, number] | null {
   let from = Number.NEGATIVE_INFINITY;
   let to = Number.POSITIVE_INFINITY;
   const sides: [number, number][] = [
-    [-dx, a.x + MARGIN],
-    [dx, size.width + MARGIN - a.x],
-    [-dy, a.y + MARGIN],
-    [dy, size.height + MARGIN - a.y],
+    [-dx, a.x + margin],
+    [dx, size.width + margin - a.x],
+    [-dy, a.y + margin],
+    [dy, size.height + margin - a.y],
   ];
   for (const [p, q] of sides) {
     if (p === 0) {
@@ -158,4 +170,22 @@ export function formatAngle(degrees: number): string {
 /** The screen point a fraction `t` of the way from `a` to `b`. */
 export function along(a: Pt, b: Pt, t: number): Pt {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+/** Whether `p` is inside the polygon with these corners (even-odd, its edges counting in). */
+export function insidePolygon(p: Pt, corners: readonly Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+    const a = corners[i] as Pt;
+    const b = corners[j] as Pt;
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** A "#RRGGBBAA" color's opacity, 0 to 1 ("#RRGGBB" is opaque). */
+export function opacityOf(color: string): number {
+  return color.length === 9 ? Number.parseInt(color.slice(7, 9), 16) / 255 : 1;
 }

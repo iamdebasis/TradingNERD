@@ -213,7 +213,7 @@ export class ChartSession {
       chart.setInstrument(instrumentOf(info, resolution, this.hours, timezone, this.schedule));
       chart.setSessionShading(this.shading());
       chart.setExtendedPrice(null);
-      chart.setBars(bars, fromListing);
+      chart.setBars(bars, fromListing, hasMore);
       chart.showLatest();
       this.hasMore = hasMore;
       this.loaded = true;
@@ -252,7 +252,7 @@ export class ChartSession {
         this.hours,
       );
       if (this.disposed) return;
-      chart.prependBars(bars, fromListing);
+      chart.prependBars(bars, fromListing, hasMore);
       this.hasMore = hasMore;
     } catch {
       // Keep hasMore; the next scroll after the pause tries again.

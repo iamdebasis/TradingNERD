@@ -9,8 +9,10 @@ import type { Bar, Resolution } from '@tradingnerd/core';
  * length, so a drawing reaches into the future as TradingView's do.
  */
 export class TimeMap {
-  private readonly times: readonly number[];
-  private readonly step: number;
+  /** Each bar's time, UTC seconds, oldest first. */
+  readonly times: readonly number[];
+  /** The interval, seconds: how far apart bars past the ends sit. */
+  readonly step: number;
 
   /** `times`: each bar's time in UTC seconds, oldest first; `step`: the interval, seconds. */
   constructor(times: readonly number[], step: number) {

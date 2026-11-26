@@ -111,6 +111,19 @@
   color: var(--color-axis-text);
   font-size: 14px;
   line-height: 18px;
+  /* The trend line tools' three sections are about 791 px tall: in a shorter window the menu
+     scrolls (ours, provisional). */
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+}
+
+/* Between a menu's sections: 1 px #303030, 5 px in from each side, 6 px above and below (the
+   user's screenshot, measured between Lines, Channels and Pitchforks). */
+.divider {
+  height: 1px;
+  margin: 6px 5px;
+  border: 0;
+  background: #303030;
 }
 
 .section {

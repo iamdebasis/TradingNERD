@@ -10,7 +10,10 @@ import type { Resolution } from './resolution.ts';
  * Defaults are TradingView's as far as they're known: the line tools' blue #2962FF at 2 px comes
  * from a third-party capture of TradingView's factory defaults (deepentropy/lightweight-charts-
  * drawing, MIT) and agrees with TradingView's own Path tool default (Charting Library docs,
- * PathLineToolOverrides). Provisional until measured from the user's screenshots (§11).
+ * PathLineToolOverrides). The channels' and pitchforks' (D2) are TradingView's own, from its
+ * Charting Library docs' overrides for each tool (read 2026-11-25), but the parallel channel's
+ * extra levels, which the docs don't list yet, from the same third-party capture. Provisional
+ * until measured from the user's screenshots (§11).
  */
 
 /** The Lines section of TradingView's trend line tools, in its menu's order (the user's screenshot). */
@@ -26,12 +29,36 @@ export const LINE_TOOLS = [
   'cross-line',
 ] as const;
 
-/** Every tool a drawing can be made with (D2 adds channels and pitchforks). */
-export const DRAWING_TOOLS = LINE_TOOLS;
+/** The Channels section, under the Lines (the user's screenshot of 25 November; D2). */
+export const CHANNEL_TOOLS = [
+  'parallel-channel',
+  'regression-trend',
+  'flat-top-bottom',
+  'disjoint-channel',
+] as const;
+
+/** The Pitchforks section, under the Channels (D2). */
+export const PITCHFORK_TOOLS = [
+  'pitchfork',
+  'schiff-pitchfork',
+  'modified-schiff-pitchfork',
+  'inside-pitchfork',
+] as const;
+
+/** TradingView's trend line tools: its toolbar's first group, whose menu has these three sections. */
+export const TREND_LINE_TOOLS = [...LINE_TOOLS, ...CHANNEL_TOOLS, ...PITCHFORK_TOOLS] as const;
+
+/** Every tool a drawing can be made with (later milestones add shapes, text and measuring). */
+export const DRAWING_TOOLS = TREND_LINE_TOOLS;
 export type DrawingTool = (typeof DRAWING_TOOLS)[number];
+export type PitchforkTool = (typeof PITCHFORK_TOOLS)[number];
 
 export function isDrawingTool(value: unknown): value is DrawingTool {
   return typeof value === 'string' && (DRAWING_TOOLS as readonly string[]).includes(value);
+}
+
+export function isPitchforkTool(value: unknown): value is PitchforkTool {
+  return typeof value === 'string' && (PITCHFORK_TOOLS as readonly string[]).includes(value);
 }
 
 /** TradingView's names, as its menu writes them (the user's screenshot of 25 November). */
@@ -45,10 +72,22 @@ export const TOOL_NAMES: Record<DrawingTool, string> = {
   'horizontal-ray': 'Horizontal ray',
   'vertical-line': 'Vertical line',
   'cross-line': 'Crossline',
+  'parallel-channel': 'Parallel channel',
+  'regression-trend': 'Regression trend',
+  'flat-top-bottom': 'Flat top/bottom',
+  'disjoint-channel': 'Disjoint channel',
+  pitchfork: 'Pitchfork',
+  'schiff-pitchfork': 'Schiff pitchfork',
+  'modified-schiff-pitchfork': 'Modified Schiff pitchfork',
+  'inside-pitchfork': 'Inside pitchfork',
 };
 
-/** How many points place each tool: one click, or two. */
-export const TOOL_POINTS: Record<DrawingTool, 1 | 2> = {
+/**
+ * How many points place each tool: one click, two, or three. A regression trend's two are bars
+ * (its prices come from them); the channels' and pitchforks' third sets their width (TradingView's
+ * Help Center for each tool; the third-party capture's point counts).
+ */
+export const TOOL_POINTS: Record<DrawingTool, 1 | 2 | 3> = {
   'trend-line': 2,
   ray: 2,
   'info-line': 2,
@@ -58,6 +97,14 @@ export const TOOL_POINTS: Record<DrawingTool, 1 | 2> = {
   'horizontal-ray': 1,
   'vertical-line': 1,
   'cross-line': 1,
+  'parallel-channel': 3,
+  'regression-trend': 2,
+  'flat-top-bottom': 3,
+  'disjoint-channel': 3,
+  pitchfork: 3,
+  'schiff-pitchfork': 3,
+  'modified-schiff-pitchfork': 3,
+  'inside-pitchfork': 3,
 };
 
 /**
@@ -65,8 +112,12 @@ export const TOOL_POINTS: Record<DrawingTool, 1 | 2> = {
  * provisional until measured from screenshots, §11).
  */
 export interface ToolOptions {
-  /** Extend left and right. */
+  /** Extend left and right, two checkboxes. */
   extend: boolean;
+  /** Extend as one drop-down: none, left, right or both (Flat top/bottom, Disjoint channel). */
+  extendMenu: boolean;
+  /** Extend lines, one checkbox: a pitchfork's back from their start, a regression's right. */
+  extendLines: boolean;
   /** Left and right end: plain or an arrow. */
   ends: boolean;
   /** A point in the line's middle. */
@@ -81,20 +132,23 @@ export interface ToolOptions {
   showTime: boolean;
   /** The Text tab. */
   text: boolean;
+  /** The levels: a parallel channel's extra lines, a pitchfork's lines beside its median. */
+  levels: boolean;
+  /**
+   * The Background row: a color of its own (the channels), an opacity over its lines' colors
+   * (the pitchforks), or none (a regression's bands are always filled, in its lines' colors).
+   */
+  fill: 'none' | 'color' | 'opacity';
+  /** The main line can be hidden: a pitchfork's Median, a regression's Base. */
+  hideLine: boolean;
+  /** A regression trend's Inputs tab and its Up and Down lines. */
+  regression: boolean;
 }
 
-const TREND_OPTIONS: ToolOptions = {
-  extend: true,
-  ends: true,
-  middlePoint: true,
-  priceLabels: true,
-  stats: true,
-  showPrice: false,
-  showTime: false,
-  text: true,
-};
 const NO_OPTIONS: ToolOptions = {
   extend: false,
+  extendMenu: false,
+  extendLines: false,
   ends: false,
   middlePoint: false,
   priceLabels: false,
@@ -102,6 +156,36 @@ const NO_OPTIONS: ToolOptions = {
   showPrice: false,
   showTime: false,
   text: false,
+  levels: false,
+  fill: 'none',
+  hideLine: false,
+  regression: false,
+};
+const TREND_OPTIONS: ToolOptions = {
+  ...NO_OPTIONS,
+  extend: true,
+  ends: true,
+  middlePoint: true,
+  priceLabels: true,
+  stats: true,
+  text: true,
+};
+/** Flat top/bottom and Disjoint channel: Line with its ends, Extend, Prices, Background, Text. */
+const ANGLED_CHANNEL_OPTIONS: ToolOptions = {
+  ...NO_OPTIONS,
+  extendMenu: true,
+  ends: true,
+  priceLabels: true,
+  text: true,
+  fill: 'color',
+};
+/** The pitchforks: Median, Levels, Extend lines, Background (Help Center, each pitchfork). */
+const PITCHFORK_OPTIONS: ToolOptions = {
+  ...NO_OPTIONS,
+  extendLines: true,
+  levels: true,
+  fill: 'opacity',
+  hideLine: true,
 };
 
 export const TOOL_OPTIONS: Record<DrawingTool, ToolOptions> = {
@@ -121,6 +205,17 @@ export const TOOL_OPTIONS: Record<DrawingTool, ToolOptions> = {
   'horizontal-ray': { ...NO_OPTIONS, showPrice: true, text: true },
   'vertical-line': { ...NO_OPTIONS, showTime: true, text: true },
   'cross-line': { ...NO_OPTIONS, showPrice: true, showTime: true },
+  // Help Center, Parallel channel: its levels, Extend left and right line, Background; Text.
+  'parallel-channel': { ...NO_OPTIONS, extend: true, text: true, levels: true, fill: 'color' },
+  // Help Center, Regression trend: Inputs (deviations, source); Base, Up, Down, Extend lines,
+  // Pearson's R. No Text tab and no Background row.
+  'regression-trend': { ...NO_OPTIONS, extendLines: true, hideLine: true, regression: true },
+  'flat-top-bottom': ANGLED_CHANNEL_OPTIONS,
+  'disjoint-channel': ANGLED_CHANNEL_OPTIONS,
+  pitchfork: PITCHFORK_OPTIONS,
+  'schiff-pitchfork': PITCHFORK_OPTIONS,
+  'modified-schiff-pitchfork': PITCHFORK_OPTIONS,
+  'inside-pitchfork': PITCHFORK_OPTIONS,
 };
 
 /** A drawing's anchor: a bar's time (UTC seconds) and a price, on its pane's scale. */
@@ -165,13 +260,81 @@ export interface DrawingText {
   alignV: VAlign;
 }
 
-export interface DrawingStyle {
-  /** "#RRGGBB" or "#RRGGBBAA". */
+/**
+ * A level of a parallel channel or a pitchfork (TradingView's levels: on or off, a coefficient,
+ * and a line of its own). A channel's level `coeff` sits that share of the way from its first
+ * line to its second (0.5 its middle line); a pitchfork's that share of its half-width out from
+ * the median on each side (1 the lines through its second and third points).
+ */
+export interface DrawingLevel {
+  coeff: number;
+  visible: boolean;
   color: string;
   width: number;
   lineStyle: DrawingLineStyle;
+}
+
+/** A line of its own look that can be hidden: a regression trend's Up and Down lines. */
+export interface DrawingLine {
+  visible: boolean;
+  color: string;
+  width: number;
+  lineStyle: DrawingLineStyle;
+}
+
+/**
+ * The background: shown or not, in a color with its opacity ("#RRGGBBAA"). A pitchfork's and a
+ * regression trend's bands take their lines' colors, so only this opacity counts for them.
+ */
+export interface DrawingFill {
+  on: boolean;
+  color: string;
+}
+
+/** TradingView's price sources, as the indicators' Source inputs list them. */
+export const PRICE_SOURCES = [
+  'open',
+  'high',
+  'low',
+  'close',
+  'hl2',
+  'hlc3',
+  'ohlc4',
+  'hlcc4',
+] as const;
+export type PriceSource = (typeof PRICE_SOURCES)[number];
+
+/** A regression trend's inputs and its Up and Down lines (Help Center, Regression trend). */
+export interface RegressionSettings {
+  /** How many standard deviations its Up line sits above the base line. */
+  upperDeviation: number;
+  /** And its Down line: negative is below. */
+  lowerDeviation: number;
+  /** Off: the Up line reaches the highest high instead (provisional, §11). */
+  useUpperDeviation: boolean;
+  /** Off: the Down line reaches the lowest low instead. */
+  useLowerDeviation: boolean;
+  source: PriceSource;
+  up: DrawingLine;
+  down: DrawingLine;
+  /** Pearson's correlation coefficient under the drawing. */
+  showPearsons: boolean;
+}
+
+export interface DrawingStyle {
+  /**
+   * The main line's look, "#RRGGBB" or "#RRGGBBAA": a line tool's line, a channel's lines (a
+   * parallel channel's first and second), a pitchfork's median, a regression trend's base line.
+   */
+  color: string;
+  width: number;
+  lineStyle: DrawingLineStyle;
+  /** The main line shows (a pitchfork's Median and a regression's Base can be turned off). */
+  lineVisible: boolean;
   extendLeft: boolean;
   extendRight: boolean;
+  /** Extend lines: a pitchfork's back from their start, a regression trend's to the right. */
+  extendLines: boolean;
   leftEnd: LineEnd;
   rightEnd: LineEnd;
   showMiddlePoint: boolean;
@@ -183,10 +346,16 @@ export interface DrawingStyle {
   alwaysShowStats: boolean;
   statsPosition: HAlign;
   text: DrawingText;
+  /** A tool's levels, as many as TradingView's (none for the line tools). */
+  levels: DrawingLevel[];
+  fill: DrawingFill;
+  regression: RegressionSettings;
 }
 
 /** TradingView's blue, its line tools' color (provisional, §11). */
 export const DRAWING_BLUE = '#2962FF';
+/** TradingView's red: a pitchfork's median and a regression trend's base line. */
+export const DRAWING_RED = '#F23645';
 
 const NO_STATS: DrawingStats = {
   priceRange: false,
@@ -198,12 +367,61 @@ const NO_STATS: DrawingStats = {
   angle: false,
 };
 
+/**
+ * A parallel channel's levels beside its two lines (coefficients 0 and 1), off but its dashed
+ * middle line: TradingView added them in October 2024 (blog, Parallel channel gets more levels);
+ * their coefficients and looks are the third-party capture's, the middle line TradingView's own
+ * (Charting Library docs: showMidline, 1 px, dashed). Provisional (§11).
+ */
+export const PARALLEL_CHANNEL_LEVELS: readonly DrawingLevel[] = [
+  { coeff: -0.25, visible: false, color: DRAWING_BLUE, width: 1, lineStyle: 'solid' },
+  { coeff: 0.25, visible: false, color: DRAWING_BLUE, width: 1, lineStyle: 'solid' },
+  { coeff: 0.5, visible: true, color: DRAWING_BLUE, width: 1, lineStyle: 'dashed' },
+  { coeff: 0.75, visible: false, color: DRAWING_BLUE, width: 1, lineStyle: 'solid' },
+  { coeff: 1.25, visible: false, color: DRAWING_BLUE, width: 1, lineStyle: 'solid' },
+];
+
+/**
+ * A pitchfork's nine levels (Charting Library docs, PitchforkLineToolOverrides): 0.5 and 1 on,
+ * TradingView's "two additional sets of lines" (Help Center, Pitchfork), the rest off.
+ */
+export const PITCHFORK_LEVELS: readonly DrawingLevel[] = [
+  { coeff: 0.25, visible: false, color: '#FFB74D', width: 2, lineStyle: 'solid' },
+  { coeff: 0.382, visible: false, color: '#81C784', width: 2, lineStyle: 'solid' },
+  { coeff: 0.5, visible: true, color: '#089981', width: 2, lineStyle: 'solid' },
+  { coeff: 0.618, visible: false, color: '#089981', width: 2, lineStyle: 'solid' },
+  { coeff: 0.75, visible: false, color: '#00BCD4', width: 2, lineStyle: 'solid' },
+  { coeff: 1, visible: true, color: DRAWING_BLUE, width: 2, lineStyle: 'solid' },
+  { coeff: 1.5, visible: false, color: '#9C27B0', width: 2, lineStyle: 'solid' },
+  { coeff: 1.75, visible: false, color: '#E91E63', width: 2, lineStyle: 'solid' },
+  { coeff: 2, visible: false, color: '#F77C80', width: 2, lineStyle: 'solid' },
+];
+
+/** A level's coefficient stays within this, either way. */
+export const MAX_LEVEL_COEFF = 100;
+/** A regression's deviations stay within this, either way. */
+export const MAX_DEVIATION = 100;
+
+/** Charting Library docs, RegressiontrendLineToolOverrides: ±2 deviations of the closes. */
+const DEFAULT_REGRESSION: RegressionSettings = {
+  upperDeviation: 2,
+  lowerDeviation: -2,
+  useUpperDeviation: true,
+  useLowerDeviation: true,
+  source: 'close',
+  up: { visible: true, color: DRAWING_BLUE, width: 2, lineStyle: 'solid' },
+  down: { visible: true, color: DRAWING_BLUE, width: 2, lineStyle: 'solid' },
+  showPearsons: true,
+};
+
 const BASE_STYLE: DrawingStyle = {
   color: DRAWING_BLUE,
   width: 2,
   lineStyle: 'solid',
+  lineVisible: true,
   extendLeft: false,
   extendRight: false,
+  extendLines: false,
   leftEnd: 'normal',
   rightEnd: 'normal',
   showMiddlePoint: false,
@@ -222,16 +440,37 @@ const BASE_STYLE: DrawingStyle = {
     alignH: 'center',
     alignV: 'bottom',
   },
+  levels: [],
+  fill: { on: false, color: '#2962FF33' },
+  regression: DEFAULT_REGRESSION,
 };
 
 /** A style of one's own, nothing shared with the one it came from. */
 export function copyStyle(style: DrawingStyle): DrawingStyle {
-  return { ...style, stats: { ...style.stats }, text: { ...style.text } };
+  return {
+    ...style,
+    stats: { ...style.stats },
+    text: { ...style.text },
+    levels: style.levels.map((level) => ({ ...level })),
+    fill: { ...style.fill },
+    regression: {
+      ...style.regression,
+      up: { ...style.regression.up },
+      down: { ...style.regression.down },
+    },
+  };
 }
 
 /** Each tool's style as TradingView starts it (provisional, §11). */
 export function defaultDrawingStyle(tool: DrawingTool): DrawingStyle {
   const style = copyStyle(BASE_STYLE);
+  // The channels' text starts at their left, under them (Charting Library docs: labelHorzAlign
+  // left, labelVertAlign bottom), in their color.
+  const channelText = (color: string) => {
+    style.text.alignH = 'left';
+    style.text.alignV = 'bottom';
+    style.text.color = color;
+  };
   switch (tool) {
     case 'ray':
       style.extendRight = true;
@@ -273,10 +512,69 @@ export function defaultDrawingStyle(tool: DrawingTool): DrawingStyle {
       style.showTime = true;
       style.text.color = '#FFFFFF';
       break;
+    // The channels and pitchforks: TradingView's own defaults (Charting Library docs, each
+    // tool's overrides, read 2026-11-25).
+    case 'parallel-channel':
+      style.fill = { on: true, color: '#2962FF33' };
+      style.levels = PARALLEL_CHANNEL_LEVELS.map((level) => ({ ...level }));
+      channelText(DRAWING_BLUE);
+      break;
+    case 'regression-trend':
+      // The base line red, 1 px, dashed; the bands filled in their lines' colors at 30%
+      // (transparency 70).
+      style.color = DRAWING_RED;
+      style.width = 1;
+      style.lineStyle = 'dashed';
+      style.fill = { on: true, color: '#0000004D' };
+      break;
+    case 'flat-top-bottom':
+      style.color = '#FF9800';
+      style.fill = { on: true, color: '#FF980033' };
+      channelText('#FF9800');
+      break;
+    case 'disjoint-channel':
+      style.color = '#089981';
+      style.fill = { on: true, color: '#08998133' };
+      channelText('#089981');
+      break;
+    case 'pitchfork':
+    case 'schiff-pitchfork':
+    case 'modified-schiff-pitchfork':
+    case 'inside-pitchfork':
+      // The median red at 2 px; each band between levels in its level's color at 20%
+      // (transparency 80).
+      style.color = DRAWING_RED;
+      style.fill = { on: true, color: '#00000033' };
+      style.levels = PITCHFORK_LEVELS.map((level) => ({ ...level }));
+      break;
     default:
       break;
   }
   return style;
+}
+
+/** A fill's color with another color's hue, its own opacity kept. */
+function hueOf(color: string, fill: string): string {
+  return color.slice(0, 7).toUpperCase() + fill.slice(7);
+}
+
+/**
+ * The drawing in one color, as the floating toolbar's Line color sets it: every line of it (its
+ * main line, its levels, a regression's Up and Down) and a channel's background, which keeps its
+ * opacity; its text keeps its own color (ours: TradingView's toolbar for these tools isn't
+ * measured yet, provisional §11).
+ */
+export function recolorDrawing(drawing: Drawing, color: string): Drawing {
+  const options = TOOL_OPTIONS[drawing.tool];
+  const style = copyStyle(drawing.style);
+  style.color = color;
+  if (options.levels) for (const level of style.levels) level.color = color;
+  if (options.regression) {
+    style.regression.up.color = color;
+    style.regression.down.color = color;
+  }
+  if (options.fill === 'color') style.fill.color = hueOf(color, style.fill.color);
+  return { ...drawing, style };
 }
 
 // ---- visibility on intervals ----
@@ -423,23 +721,77 @@ const number = (value: unknown, min: number, max: number, fallback: number): num
     ? Math.min(max, Math.max(min, value))
     : fallback;
 
+const lineWidth = (value: unknown, fallback: number): number =>
+  (LINE_WIDTHS as readonly number[]).includes(value as number) ? (value as number) : fallback;
+
+function parseLine(value: unknown, base: DrawingLine): DrawingLine {
+  if (!isRecord(value)) return { ...base };
+  return {
+    visible: bool(value.visible, base.visible),
+    color: color(value.color, base.color),
+    width: lineWidth(value.width, base.width),
+    lineStyle: oneOf(LINE_STYLES, value.lineStyle, base.lineStyle),
+  };
+}
+
+/** A tool's levels: always its own count of them, each read over its default. */
+function parseLevels(value: unknown, base: readonly DrawingLevel[]): DrawingLevel[] {
+  const stored = Array.isArray(value) ? value : [];
+  return base.map((level, i) => {
+    const item: unknown = stored[i];
+    if (!isRecord(item)) return { ...level };
+    return {
+      coeff: number(item.coeff, -MAX_LEVEL_COEFF, MAX_LEVEL_COEFF, level.coeff),
+      visible: bool(item.visible, level.visible),
+      color: color(item.color, level.color),
+      width: lineWidth(item.width, level.width),
+      lineStyle: oneOf(LINE_STYLES, item.lineStyle, level.lineStyle),
+    };
+  });
+}
+
+function parseRegression(value: unknown, base: RegressionSettings): RegressionSettings {
+  const stored = isRecord(value) ? value : {};
+  return {
+    upperDeviation: number(
+      stored.upperDeviation,
+      -MAX_DEVIATION,
+      MAX_DEVIATION,
+      base.upperDeviation,
+    ),
+    lowerDeviation: number(
+      stored.lowerDeviation,
+      -MAX_DEVIATION,
+      MAX_DEVIATION,
+      base.lowerDeviation,
+    ),
+    useUpperDeviation: bool(stored.useUpperDeviation, base.useUpperDeviation),
+    useLowerDeviation: bool(stored.useLowerDeviation, base.useLowerDeviation),
+    source: oneOf(PRICE_SOURCES, stored.source, base.source),
+    up: parseLine(stored.up, base.up),
+    down: parseLine(stored.down, base.down),
+    showPearsons: bool(stored.showPearsons, base.showPearsons),
+  };
+}
+
 /**
  * A style as stored, each field checked and filled from the tool's defaults where it's missing
- * or wrong, so an older file reads in a newer app.
+ * or wrong, so an older file reads in a newer app (a D1 drawing takes D2's fields' defaults).
  */
 export function parseDrawingStyle(value: unknown, tool: DrawingTool): DrawingStyle {
   const base = defaultDrawingStyle(tool);
   if (!isRecord(value)) return base;
   const stats = isRecord(value.stats) ? value.stats : {};
   const text = isRecord(value.text) ? value.text : {};
+  const fill = isRecord(value.fill) ? value.fill : {};
   return {
     color: color(value.color, base.color),
-    width: (LINE_WIDTHS as readonly number[]).includes(value.width as number)
-      ? (value.width as number)
-      : base.width,
+    width: lineWidth(value.width, base.width),
     lineStyle: oneOf(LINE_STYLES, value.lineStyle, base.lineStyle),
+    lineVisible: bool(value.lineVisible, base.lineVisible),
     extendLeft: bool(value.extendLeft, base.extendLeft),
     extendRight: bool(value.extendRight, base.extendRight),
+    extendLines: bool(value.extendLines, base.extendLines),
     leftEnd: oneOf(LINE_ENDS, value.leftEnd, base.leftEnd),
     rightEnd: oneOf(LINE_ENDS, value.rightEnd, base.rightEnd),
     showMiddlePoint: bool(value.showMiddlePoint, base.showMiddlePoint),
@@ -467,6 +819,9 @@ export function parseDrawingStyle(value: unknown, tool: DrawingTool): DrawingSty
       alignH: oneOf(H_ALIGNS, text.alignH, base.text.alignH),
       alignV: oneOf(V_ALIGNS, text.alignV, base.text.alignV),
     },
+    levels: parseLevels(value.levels, base.levels),
+    fill: { on: bool(fill.on, base.fill.on), color: color(fill.color, base.fill.color) },
+    regression: parseRegression(value.regression, base.regression),
   };
 }
 

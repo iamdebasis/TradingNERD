@@ -1,6 +1,14 @@
 import type { CursorMode } from '@tradingnerd/chart';
-import { type DrawingTool, LINE_TOOLS, TOOL_NAMES } from '@tradingnerd/core';
 import {
+  CHANNEL_TOOLS,
+  type DrawingTool,
+  LINE_TOOLS,
+  PITCHFORK_TOOLS,
+  TOOL_NAMES,
+  TREND_LINE_TOOLS,
+} from '@tradingnerd/core';
+import {
+  Fragment,
   type ReactNode,
   type RefObject,
   useEffect,
@@ -55,11 +63,18 @@ export function hideShortcut(mac = isMac()): string {
 
 type MenuName = 'cursors' | 'lines' | 'magnet' | 'remove';
 
+/** The trend line tools' menu: Lines, Channels and Pitchforks (the user's screenshot). */
+const TREND_SECTIONS: readonly { name: string; tools: readonly DrawingTool[] }[] = [
+  { name: 'Lines', tools: LINE_TOOLS },
+  { name: 'Channels', tools: CHANNEL_TOOLS },
+  { name: 'Pitchforks', tools: PITCHFORK_TOOLS },
+];
+
 /**
- * TradingView's left drawing toolbar, milestone D1 (docs/SPEC.md §5.27): the cursors and the
- * trend line tools, each group's button holding its last choice and a tab opening its menu;
- * then the magnet (weak or strong), Keep drawing, Lock all drawings, Hide all drawings and
- * Remove objects. Later milestones add their groups (channels, shapes, text, measuring).
+ * TradingView's left drawing toolbar (docs/SPEC.md §5.27): the cursors and the trend line tools
+ * (Lines, D1; Channels and Pitchforks, D2), each group's button holding its last choice and a
+ * tab opening its menu; then the magnet (weak or strong), Keep drawing, Lock all drawings, Hide
+ * all drawings and Remove objects. Later milestones add their groups (shapes, text, measuring).
  */
 export function DrawingToolbar() {
   const { tool, prefs, drawings } = useDrawings();
@@ -73,7 +88,7 @@ export function DrawingToolbar() {
   };
   const toggle = (name: MenuName) => setMenu((open) => (open === name ? null : name));
   const lineTool = prefs.lineTool;
-  const drawingLine = tool !== null && (LINE_TOOLS as readonly string[]).includes(tool);
+  const drawingLine = tool !== null && (TREND_LINE_TOOLS as readonly string[]).includes(tool);
   const CursorIcon = CURSOR_ICONS[prefs.cursor];
   const LineIcon = TOOL_ICONS[lineTool];
   const close = () => setMenu(null);
@@ -198,24 +213,29 @@ export function DrawingToolbar() {
       )}
       {menu === 'lines' && (
         <ToolMenu anchor={anchors.lines} toolbar={toolbar} label="Trend line tools" onClose={close}>
-          <h3 className={styles.section}>Lines</h3>
-          {LINE_TOOLS.map((item) => {
-            const Icon = TOOL_ICONS[item];
-            const key = TOOL_KEYS[item];
-            return (
-              <MenuItem
-                key={item}
-                icon={<Icon />}
-                name={TOOL_NAMES[item]}
-                shortcut={key ? altShortcut(key) : undefined}
-                checked={tool === item}
-                onSelect={() => {
-                  close();
-                  drawingStore.setTool(item);
-                }}
-              />
-            );
-          })}
+          {TREND_SECTIONS.map(({ name, tools }, i) => (
+            <Fragment key={name}>
+              {i > 0 && <hr className={styles.divider} />}
+              <h3 className={styles.section}>{name}</h3>
+              {tools.map((item) => {
+                const Icon = TOOL_ICONS[item];
+                const key = TOOL_KEYS[item];
+                return (
+                  <MenuItem
+                    key={item}
+                    icon={<Icon />}
+                    name={TOOL_NAMES[item]}
+                    shortcut={key ? altShortcut(key) : undefined}
+                    checked={tool === item}
+                    onSelect={() => {
+                      close();
+                      drawingStore.setTool(item);
+                    }}
+                  />
+                );
+              })}
+            </Fragment>
+          ))}
         </ToolMenu>
       )}
       {menu === 'magnet' && (

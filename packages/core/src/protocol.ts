@@ -19,8 +19,10 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 11: Pine scripts: My scripts and their versions (/api/scripts).
  * 12: Pine libraries the scripts import, their code pasted by the user (/api/libraries).
  * 13: the user's drawings, per symbol (/api/drawings).
+ * 14: channels and pitchforks among the drawings: three-point tools, levels, fills and a
+ *     regression trend's inputs.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {
