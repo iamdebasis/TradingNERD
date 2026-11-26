@@ -7,6 +7,7 @@ import {
   DEFAULT_FLAG_STATE,
   DEFAULT_WATCHLIST,
   type Drawing,
+  type DrawingTemplates,
   drawingsKey,
   type ExchangeSummary,
   evaluateFormula,
@@ -21,6 +22,7 @@ import {
   parseResolution,
   parseSymbolDrawings,
   parseSymbolId,
+  parseToolTemplates,
   parseWatchlist,
   parseWatchlistName,
   replaceSymbols,
@@ -33,6 +35,7 @@ import {
   type SymbolKind,
   searchCatalog,
   sessionClock,
+  type ToolTemplates,
   uniqueListName,
   type Watchlist,
   type WatchlistSection,
@@ -611,6 +614,10 @@ export interface MockMarket {
   readonly drawingSaves: SymbolDrawings[];
   /** While true, drawings loads and saves fail as if the gateway were unreachable. */
   failDrawings(failing: boolean): void;
+  /** The drawing templates GET /api/drawing-templates serves; PUTs replace a tool's (D3b). */
+  templates: DrawingTemplates;
+  /** Every templates save the page made, in order. */
+  readonly templateSaves: ToolTemplates[];
   /** Every flag state the page saved, in order. */
   readonly flagSaves: FlagState[];
   /** While true, watchlist loads fail as if the gateway were unreachable. */
@@ -790,6 +797,8 @@ class MockGateway implements MockMarket {
   readonly flagSaves: FlagState[] = [];
   drawings = new Map<string, Drawing[]>();
   readonly drawingSaves: SymbolDrawings[] = [];
+  templates: DrawingTemplates = { tools: {} };
+  readonly templateSaves: ToolTemplates[] = [];
   readonly barRequests: URLSearchParams[] = [];
   readonly barSubscriptions: [string, string][] = [];
   readonly barSymbols: [string, string][] = [];
@@ -902,6 +911,24 @@ class MockGateway implements MockMarket {
       }
       const symbol = drawingsKey(new URL(request.url()).searchParams.get('symbol') ?? '');
       return route.fulfill({ json: { symbol, drawings: this.drawings.get(symbol) ?? [] } });
+    });
+    // The user's drawing templates (apps/gateway/src/routes/drawingTemplates.ts): never the
+    // real file.
+    await this.page.route(/\/api\/drawing-templates$/, (route) => {
+      const request = route.request();
+      if (this.failingDrawings) return route.abort('connectionrefused');
+      if (request.method() === 'PUT') {
+        const saved = parseToolTemplates(request.postDataJSON());
+        if (!saved)
+          return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'x' } });
+        const tools = { ...this.templates.tools };
+        if (saved.templates.length > 0) tools[saved.tool] = saved.templates;
+        else delete tools[saved.tool];
+        this.templates = { tools };
+        this.templateSaves.push(saved);
+        return route.fulfill({ json: saved });
+      }
+      return route.fulfill({ json: this.templates });
     });
     // The user's lists, as the gateway keeps them (apps/gateway/src/routes/watchlist.ts).
     await this.page.route(/\/api\/watchlists(\/[^?]*)?$/, (route) => {

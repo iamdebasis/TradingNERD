@@ -2,7 +2,9 @@ import {
   type Bar,
   type Drawing,
   type DrawingPoint,
+  type DrawingStyle,
   type DrawingTool,
+  defaultDrawingStyle,
   newDrawing,
   type Resolution,
 } from '@tradingnerd/core';
@@ -716,6 +718,69 @@ describe('the chart around it', () => {
     engine.setSettings({ tool: 'ray' });
     engine.pointerMove(input(155, 275), false);
     expect(host.cursor).toBe('crosshair');
+  });
+});
+
+describe('a tool’s last style (D3b)', () => {
+  /** The app's last styles: a trend line red, 4 px, dashed, with text the new one mustn't take. */
+  const red = () => {
+    const style = defaultDrawingStyle('trend-line');
+    style.color = '#F23645';
+    style.width = 4;
+    style.lineStyle = 'dashed';
+    style.text.value = 'not carried';
+    return style;
+  };
+  const withLastStyles = (styles: Partial<Record<DrawingTool, DrawingStyle>>) => {
+    engine = new DrawingEngine(host, {
+      onEdit: (drawings) => edits.push(drawings),
+      newId: () => `n${++ids}`,
+      styleOf: (tool) => styles[tool],
+    });
+  };
+
+  it('gives a new drawing the style the app has for its tool, without its text', () => {
+    withLastStyles({ 'trend-line': red() });
+    engine.setSettings({ tool: 'trend-line', keepDrawing: true });
+    click(105, 300);
+    // The line being placed shows in it too.
+    engine.pointerMove(input(205, 250), false);
+    expect(engine.shapes(0)[0]?.drawing.style.color).toBe('#F23645');
+    click(205, 250);
+    const style = lastEdit()[0]?.style;
+    expect(style).toEqual({ ...red(), text: { ...red().text, value: '' } });
+    // Another tool, with none, starts from its defaults.
+    engine.setSettings({ tool: 'ray' });
+    click(105, 200);
+    click(205, 150);
+    expect(lastEdit()[1]?.style).toEqual(defaultDrawingStyle('ray'));
+  });
+
+  it('shows a three-point tool’s first line in its last look', () => {
+    const wide = defaultDrawingStyle('parallel-channel');
+    wide.color = '#089981';
+    wide.width = 3;
+    withLastStyles({ 'parallel-channel': wide });
+    engine.setSettings({ tool: 'parallel-channel' });
+    click(105, 200);
+    engine.pointerMove(input(305, 100), false);
+    const preview = engine.shapes(0).find((shape) => shape.drawing.id === 'preview');
+    expect([preview?.drawing.style.color, preview?.drawing.style.width]).toEqual(['#089981', 3]);
+    click(305, 100);
+    click(205, 190);
+    expect(lastEdit()[0]?.style).toEqual(wide);
+  });
+
+  it('keeps no hold on the app’s style: a later change to it leaves the drawing as drawn', () => {
+    const style = red();
+    withLastStyles({ 'trend-line': style });
+    engine.setSettings({ tool: 'trend-line' });
+    click(105, 300);
+    click(205, 250);
+    style.color = '#000000';
+    style.levels.push({ coeff: 1, visible: true, color: '#000000', width: 1, lineStyle: 'solid' });
+    expect(lastEdit()[0]?.style.color).toBe('#F23645');
+    expect(lastEdit()[0]?.style.levels).toEqual([]);
   });
 });
 

@@ -2,12 +2,14 @@ import {
   type Bar,
   type Drawing,
   type DrawingPoint,
+  type DrawingStyle,
   type DrawingTool,
   defaultDrawingStyle,
   isPitchforkTool,
   newDrawing,
   newDrawingId,
   type Resolution,
+  styleWithoutText,
   TOOL_POINTS,
   visibleOn,
 } from '@tradingnerd/core';
@@ -45,7 +47,8 @@ import { TimeMap } from './timeMap';
  * + click to add to the selection, Ctrl/⌘ + drag to clone or to draw a box that selects, the
  * eraser), the arrow keys' moves, a right-click's drawing, and the toolbar's modes (magnet, keep
  * drawing, lock and hide all). The app keeps the drawings (per symbol, saved, with undo); the
- * engine tells it of each edit and is given the new list back.
+ * engine tells it of each edit and is given the new list back. A new drawing, and the one being
+ * placed, take the style the app gives its tool: the last one given a drawing of it (D3b).
  */
 
 /** TradingView's cursors (the left toolbar's first button). */
@@ -116,6 +119,11 @@ export interface DrawingEvents {
   onMenu?(id: string, clientX: number, clientY: number): void;
   /** A new drawing's id. */
   newId?(): string;
+  /**
+   * The style a new drawing of a tool starts with: the last one given a drawing of it (D3b), its
+   * text left out; its tool's defaults when there's none.
+   */
+  styleOf?(tool: DrawingTool): DrawingStyle | undefined;
 }
 
 /** A pointer event on a pane, in that pane's CSS px. */
@@ -777,6 +785,18 @@ export class DrawingEngine {
     return this.events.newId?.() ?? newDrawingId();
   }
 
+  /** A new drawing of a tool, in the style the app gives it (its last, D3b) or its defaults. */
+  private newOf(
+    id: string,
+    tool: DrawingTool,
+    points: DrawingPoint[],
+    key: string | null,
+  ): Drawing {
+    const drawing = newDrawing(id, tool, points, key);
+    const style = this.events.styleOf?.(tool);
+    return style ? { ...drawing, style: styleWithoutText(style) } : drawing;
+  }
+
   /** The drawings selected, in drawing order. */
   private selectedDrawings(): Drawing[] {
     const chosen = new Set(this.selected);
@@ -856,9 +876,9 @@ export class DrawingEngine {
    */
   private preview(placing: Placing): Drawing {
     const { tool, points, key, index } = placing;
-    if (index >= points.length - 1) return newDrawing(PREVIEW_ID, tool, points, key);
+    if (index >= points.length - 1) return this.newOf(PREVIEW_ID, tool, points, key);
     const first = newDrawing(PREVIEW_ID, 'trend-line', points.slice(0, 2), key);
-    const look = defaultDrawingStyle(tool);
+    const look = this.events.styleOf?.(tool) ?? defaultDrawingStyle(tool);
     first.style.color = look.color;
     first.style.width = look.width;
     first.style.lineStyle = look.lineStyle;
@@ -1272,7 +1292,7 @@ export class DrawingEngine {
     this.stopPlacing();
     const points = this.placedOf(placing);
     if (!degenerate(placing.tool, points)) {
-      const drawing = newDrawing(this.newId(), placing.tool, points, placing.key);
+      const drawing = this.newOf(this.newId(), placing.tool, points, placing.key);
       this.edit([...this.drawings, drawing]);
       this.setSelection([drawing.id]);
     }

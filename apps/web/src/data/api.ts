@@ -1,6 +1,7 @@
 import {
   API_PREFIX,
   type BarsResponse,
+  type DrawingTemplates,
   type ErrorCode,
   type ExchangeSummary,
   type FlagState,
@@ -12,6 +13,7 @@ import {
   type OlderCapsStatus,
   parseApiError,
   parseBarsResponse,
+  parseDrawingTemplates,
   parseExchangeList,
   parseFlagState,
   parseLibrariesIndex,
@@ -26,6 +28,7 @@ import {
   parseSymbolDrawings,
   parseSymbolInfo,
   parseSymbolSearchResponse,
+  parseToolTemplates,
   parseWatchlistSummary,
   parseWatchlistsIndex,
   type SavedLibrary,
@@ -38,6 +41,7 @@ import {
   type SymbolDrawings,
   type SymbolInfo,
   type SymbolSearchResponse,
+  type ToolTemplates,
   type Watchlist,
   type WatchlistSection,
   type WatchlistSummary,
@@ -279,6 +283,27 @@ export const drawingsApi = {
 };
 
 export type DrawingsApi = typeof drawingsApi;
+
+/**
+ * The user's drawing templates (docs/SPEC.md §5.27, D3b), which the gateway keeps in
+ * data/drawing-templates.json: every tool's loaded at once, a tool's whole list saved at a time.
+ */
+export const drawingTemplatesApi = {
+  load: async (signal?: AbortSignal): Promise<DrawingTemplates> =>
+    checked(
+      parseDrawingTemplates(await getJson(`${API_PREFIX}/drawing-templates`, signal)),
+      'template list',
+    ),
+  save: async (templates: ToolTemplates): Promise<ToolTemplates> =>
+    checked(
+      parseToolTemplates(
+        await getJson(`${API_PREFIX}/drawing-templates`, undefined, sendJson('PUT', templates)),
+      ),
+      'template list',
+    ),
+};
+
+export type DrawingTemplatesApi = typeof drawingTemplatesApi;
 
 /** Flagged symbols, kept by the gateway in data/flags.json. */
 export const flagsApi = {

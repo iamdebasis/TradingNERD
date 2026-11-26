@@ -1,5 +1,6 @@
 import type { ChartController } from '@tradingnerd/chart';
 import {
+  applyDrawingStyle,
   type Drawing,
   type DrawingFill,
   type DrawingLevel,
@@ -33,10 +34,13 @@ import { createPortal } from 'react-dom';
 import { Dropdown } from '../chart/Dropdown';
 import frame from '../indicators/IndicatorSettingsDialog.module.css';
 import { CloseIcon } from '../toolbar/icons';
+import { PopupMenu } from '../watchlist/PopupMenu';
 import { ColorField } from './ColorEditor';
 import { joinColor, splitColor } from './color';
 import styles from './Drawings.module.css';
 import { drawingStore, useDrawings } from './drawingStore';
+import { templateDialogs, templateEntries } from './TemplateMenu';
+import { useTemplates } from './templateStore';
 
 type Tab = 'inputs' | 'style' | 'text' | 'coordinates' | 'visibility';
 
@@ -89,8 +93,10 @@ const TEXT_SIZES = [10, 11, 12, 14, 16, 20, 24, 28, 32, 40];
 /**
  * A drawing's settings (TradingView's dialog: Style, Text, Coordinates, Visibility; Help Center,
  * Trendline drawing tool). Changes show on the chart at once; Ok keeps them as one undo step,
- * Cancel, Escape and ✕ put the drawing back. The rows each tool has, and the look, are
- * provisional until measured from screenshots (docs/SPEC.md §11).
+ * Cancel, Escape and ✕ put the drawing back. Template, at the bottom left (D3b), saves the style
+ * shown as a template, or shows a template or the tool's defaults, kept on Ok as the rest is. The
+ * rows each tool has, and the look, are provisional until measured from screenshots
+ * (docs/SPEC.md §11).
  */
 export function DrawingSettingsDialog({
   id,
@@ -110,6 +116,13 @@ export function DrawingSettingsDialog({
     drawing && TOOL_OPTIONS[drawing.tool].regression ? 'inputs' : 'style',
   );
   const dialog = useRef<HTMLDivElement>(null);
+  const templates = useTemplates();
+  /** The Template menu, open at this place in the window. */
+  const [templateAt, setTemplateAt] = useState<{ x: number; y: number } | null>(null);
+  const templateButton = useRef<HTMLButtonElement>(null);
+  /** Escape is the Template menu's, or its question's, while either is open. */
+  const templateOpen = useRef(false);
+  templateOpen.current = templateAt !== null;
 
   const cancel = () => {
     drawingStore.finishPreview(before, false);
@@ -126,6 +139,7 @@ export function DrawingSettingsDialog({
     dialog.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (templateOpen.current || templateDialogs.get() !== null) return;
       event.preventDefault();
       cancelRef.current();
     };
@@ -208,6 +222,23 @@ export function DrawingSettingsDialog({
           )}
         </div>
         <footer className={frame.footer}>
+          <button
+            ref={templateButton}
+            type="button"
+            className={frame.secondary}
+            aria-haspopup="menu"
+            aria-expanded={templateAt !== null}
+            onClick={(event) => {
+              if (templateAt) {
+                setTemplateAt(null);
+                return;
+              }
+              const at = event.currentTarget.getBoundingClientRect();
+              setTemplateAt({ x: Math.round(at.left), y: Math.round(at.bottom + 4) });
+            }}
+          >
+            Template
+          </button>
           <span style={{ marginRight: 'auto' }} />
           <button type="button" className={frame.secondary} onClick={cancel}>
             Cancel
@@ -216,11 +247,30 @@ export function DrawingSettingsDialog({
             Ok
           </button>
         </footer>
+        {templateAt && (
+          <PopupMenu
+            x={templateAt.x}
+            y={templateAt.y}
+            label="Template"
+            anchor={templateButton.current}
+            layer={TEMPLATE_MENU_LAYER}
+            items={templateEntries({
+              tool: drawing.tool,
+              state: templates,
+              style: () => drawing.style,
+              onApply: (style) => set(applyDrawingStyle(drawing, style)),
+            })}
+            onClose={() => setTemplateAt(null)}
+          />
+        )}
       </div>
     </div>,
     document.body,
   );
 }
+
+/** The Template menu over the dialogs (their z-index is 200). */
+const TEMPLATE_MENU_LAYER = 210;
 
 /**
  * Settings with several drawings selected (TradingView's blog, Customizable visibility of multiple

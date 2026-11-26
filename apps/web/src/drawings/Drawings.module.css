@@ -211,6 +211,12 @@
   background: var(--color-separator);
 }
 
+/* The favorites toolbar's tools (D3b): the chosen one on the left toolbar's #303030 (ours,
+   §11). */
+.favorite[aria-pressed="true"] {
+  background: #303030;
+}
+
 /* The settings dialog's Visibility rows: a check, then from and to. */
 .range2 {
   display: flex;

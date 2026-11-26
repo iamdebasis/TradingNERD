@@ -1,6 +1,9 @@
 import type { CursorMode, MagnetMode } from '@tradingnerd/chart';
 import {
+  applyDrawingStyle,
+  DRAWING_TOOLS,
   type Drawing,
+  type DrawingStyle,
   type DrawingTool,
   drawingsKey,
   type IntervalPreset,
@@ -18,13 +21,15 @@ import { useSyncExternalStore } from 'react';
 import { type DrawingsApi, drawingsApi } from '../data/api';
 import { indicatorStore } from '../indicators/indicatorStore';
 import { readJson, writeJson } from '../lib/storage';
+import { type ToolStyles, toolStyles } from './toolStyles';
 
 /**
  * The user's drawings on the chart (docs/SPEC.md §5.27, §6.24): the chart symbol's, loaded from
  * the gateway when the symbol changes and saved there after each edit; their undo and redo; the
  * selection the chart reports; edits to several at once (visual order, intervals visibility,
- * lock, clone, copy and paste: D3a); and the left toolbar's tool and modes, which this browser
- * keeps. A load or save that fails is tried again every DRAWINGS_RETRY_MS, the chart saying so
+ * lock, clone, copy and paste: D3a); templates applied, each tool's last style and the favorite
+ * tools (D3b); and the left toolbar's tool and modes, which this browser keeps. A load or save
+ * that fails is tried again every DRAWINGS_RETRY_MS, the chart saying so
  * meanwhile, and a symbol's list not yet saved is what the chart shows when it comes back to it.
  */
 
@@ -63,6 +68,11 @@ export interface ToolbarPrefs {
   lineTool: DrawingTool;
   /** The drawings toolbar shows (TradingView's Drawings toolbar switch; shown at first). */
   toolbarShown: boolean;
+  /**
+   * The drawing tools starred in the toolbar's menus, in the order starred: the favorites
+   * toolbar's buttons (D3b; TradingView's Charting Library keeps them in the browser too).
+   */
+  favorites: readonly DrawingTool[];
 }
 
 export const DEFAULT_TOOLBAR: Readonly<ToolbarPrefs> = Object.freeze({
@@ -74,6 +84,7 @@ export const DEFAULT_TOOLBAR: Readonly<ToolbarPrefs> = Object.freeze({
   hideAll: false,
   lineTool: 'trend-line',
   toolbarShown: true,
+  favorites: Object.freeze([]),
 });
 
 export function sanitizeToolbar(value: unknown): ToolbarPrefs {
@@ -95,7 +106,15 @@ export function sanitizeToolbar(value: unknown): ToolbarPrefs {
         ? raw.lineTool
         : DEFAULT_TOOLBAR.lineTool,
     toolbarShown: bool('toolbarShown'),
+    favorites: favoritesOf(raw.favorites),
   };
+}
+
+/** The favorite tools as kept: each known tool once, in the order starred. */
+function favoritesOf(value: unknown): DrawingTool[] {
+  if (!Array.isArray(value)) return [];
+  const tools = value.filter(isDrawingTool).slice(0, DRAWING_TOOLS.length);
+  return tools.filter((tool, i) => tools.indexOf(tool) === i);
 }
 
 export interface DrawingsState {
@@ -147,15 +166,19 @@ export class DrawingStore {
   private cancelLoadRetry: (() => void) | null = null;
   /** Copy's drawings in this page, for when this browser's storage can't keep them. */
   private clipboard: readonly Drawing[] = [];
+  /** Each tool's last style, which a style edit sets (D3b). */
+  private readonly styles: Pick<ToolStyles, 'remember' | 'set'> | null;
 
   constructor(
     api: Pick<DrawingsApi, 'load' | 'save'> = drawingsApi,
     panes: () => ReadonlySet<string> = () => new Set(),
     schedule: Later = later,
+    styles: Pick<ToolStyles, 'remember' | 'set'> | null = null,
   ) {
     this.api = api;
     this.panes = panes;
     this.later = schedule;
+    this.styles = styles;
     this.value = {
       symbol: null,
       drawings: [],
@@ -261,7 +284,25 @@ export class DrawingStore {
       changed ||= next !== drawing;
       return next;
     });
-    if (changed) this.apply(drawings, true);
+    if (!changed) return;
+    this.styles?.remember(this.value.drawings, drawings);
+    this.apply(drawings, true);
+  }
+
+  /**
+   * A template, or the tool's defaults ("Apply default drawing template"), on the drawings of
+   * that tool among these: one undo step, each keeping its own text (docs/SPEC.md §5.27, D3b).
+   * The tool's next drawing starts in it too.
+   */
+  applyStyle(ids: readonly string[], tool: DrawingTool, style: DrawingStyle): void {
+    const chosen = new Set(
+      this.value.drawings
+        .filter((drawing) => drawing.tool === tool && ids.includes(drawing.id))
+        .map((drawing) => drawing.id),
+    );
+    if (chosen.size === 0) return;
+    this.updateMany([...chosen], (drawing) => applyDrawingStyle(drawing, style));
+    this.styles?.set(tool, style);
   }
 
   remove(ids: readonly string[]): void {
@@ -389,6 +430,7 @@ export class DrawingStore {
       return;
     }
     if (before === this.value.drawings) return;
+    this.styles?.remember(before, this.value.drawings);
     this.pushHistory(before);
     this.commit({ ...this.value, ...this.undoFlags() });
     this.queueSave();
@@ -441,6 +483,16 @@ export class DrawingStore {
     // Choosing a cursor puts the tool down, as on TradingView.
     const tool = change.cursor !== undefined ? null : this.value.tool;
     this.commit({ ...this.value, prefs, tool });
+  }
+
+  /** A tool's star in the toolbar's menus: on puts it last on the favorites toolbar (D3b). */
+  toggleFavorite(tool: DrawingTool): void {
+    const { favorites } = this.value.prefs;
+    this.setPrefs({
+      favorites: favorites.includes(tool)
+        ? favorites.filter((item) => item !== tool)
+        : [...favorites, tool],
+    });
   }
 
   /**
@@ -560,7 +612,7 @@ const indicatorIds = (): ReadonlySet<string> =>
   new Set(indicatorStore.get().list.map((indicator) => indicator.id));
 
 /** The drawings the app uses. */
-export const drawingStore = new DrawingStore(drawingsApi, indicatorIds);
+export const drawingStore = new DrawingStore(drawingsApi, indicatorIds, later, toolStyles);
 
 // An indicator removed from the chart takes the drawings on its pane with it.
 let indicatorsBefore = indicatorIds();

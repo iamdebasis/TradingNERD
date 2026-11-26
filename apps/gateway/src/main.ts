@@ -20,6 +20,7 @@ import { buildServer } from './server.ts';
 import { DIRECTORY_URLS, UsListings } from './stocks/UsListings.ts';
 import { UsStocksMarket } from './stocks/UsStocksMarket.ts';
 import { DrawingsStore } from './storage/DrawingsStore.ts';
+import { DrawingTemplatesStore } from './storage/DrawingTemplatesStore.ts';
 import { FlagStore } from './storage/FlagStore.ts';
 import { LibrariesStore } from './storage/LibrariesStore.ts';
 import { ScriptsStore } from './storage/ScriptsStore.ts';
@@ -135,6 +136,7 @@ const watchlist = new WatchlistsStore(config.dataDir, warn('data'));
 const flags = new FlagStore(config.dataDir, warn('data'));
 const scripts = new ScriptsStore(config.dataDir, warn('data'));
 const drawings = new DrawingsStore(config.dataDir, warn('data'));
+const drawingTemplates = new DrawingTemplatesStore(config.dataDir, warn('data'));
 const libraries = new LibrariesStore(config.dataDir, warn('data'));
 
 const logos = new LogoService({
@@ -151,6 +153,7 @@ const app = await buildServer(config, {
   logos,
   scripts,
   drawings,
+  drawingTemplates,
   libraries,
   stocks,
   olderCaps: { older: cryptocap.older, coins: cryptocap.olderCoins },

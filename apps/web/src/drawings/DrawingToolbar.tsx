@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { altShortcut, commandShortcut, isMac } from '../lib/platform';
+import { StarIcon } from '../toolbar/icons';
 import styles from './DrawingToolbar.module.css';
 import { drawingStore, useDrawings } from './drawingStore';
 import {
@@ -75,6 +76,7 @@ const TREND_SECTIONS: readonly { name: string; tools: readonly DrawingTool[] }[]
  * (Lines, D1; Channels and Pitchforks, D2), each group's button holding its last choice and a
  * tab opening its menu; then the magnet (weak or strong), Keep drawing, Lock all drawings, Hide
  * all drawings and Remove objects. Later milestones add their groups (shapes, text, measuring).
+ * Each drawing tool's row has a star that makes it a favorite, on the favorites toolbar (D3b).
  */
 export function DrawingToolbar() {
   const { tool, prefs, drawings } = useDrawings();
@@ -227,6 +229,8 @@ export function DrawingToolbar() {
                     name={TOOL_NAMES[item]}
                     shortcut={key ? altShortcut(key) : undefined}
                     checked={tool === item}
+                    favorite={prefs.favorites.includes(item)}
+                    onFavorite={() => drawingStore.toggleFavorite(item)}
                     onSelect={() => {
                       close();
                       drawingStore.setTool(item);
@@ -417,6 +421,8 @@ function MenuItem({
   shortcut,
   checked,
   disabled = false,
+  favorite = false,
+  onFavorite,
   onSelect,
 }: {
   icon: ReactNode;
@@ -424,9 +430,13 @@ function MenuItem({
   shortcut?: string | undefined;
   checked?: boolean;
   disabled?: boolean;
+  /** A drawing tool's: starred, on the favorites toolbar (D3b). */
+  favorite?: boolean;
+  /** Its star: on or off (a drawing tool's row has one). */
+  onFavorite?: () => void;
   onSelect(): void;
 }) {
-  return (
+  const item = (
     <button
       type="button"
       className={styles.item}
@@ -440,6 +450,23 @@ function MenuItem({
       <span className={styles.itemName}>{name}</span>
       {shortcut && <span className={styles.itemKey}>{shortcut}</span>}
     </button>
+  );
+  if (!onFavorite) return item;
+  const title = favorite ? 'Remove from favorites' : 'Add to favorites';
+  return (
+    <div className={styles.row} data-favorite={favorite}>
+      {item}
+      <button
+        type="button"
+        className={styles.star}
+        aria-pressed={favorite}
+        aria-label={favorite ? `Remove ${name} from favorites` : `Add ${name} to favorites`}
+        title={title}
+        onClick={onFavorite}
+      >
+        <StarIcon filled={favorite} />
+      </button>
+    </div>
   );
 }
 

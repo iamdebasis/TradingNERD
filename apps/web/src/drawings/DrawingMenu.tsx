@@ -10,6 +10,8 @@ import { commandShortcut, isMac } from '../lib/platform';
 import { PopupMenu, type PopupMenuEntry } from '../watchlist/PopupMenu';
 import { drawingStore, useDrawings } from './drawingStore';
 import { GearIcon, PadlockIcon, TrashIcon } from './icons';
+import { templateEntries } from './TemplateMenu';
+import { useTemplates } from './templateStore';
 
 /**
  * The menu of the drawings selected (docs/SPEC.md §5.27, D3a): a drawing's right-click menu, and
@@ -17,7 +19,9 @@ import { GearIcon, PadlockIcon, TrashIcon } from './icons';
  * Intervals visibility quick choices, both offered from the right-click and from the ⋯, and its
  * Charting Library the actions Clone, Copy, Lock, Remove and Settings; the items' order, icons
  * and words are provisional until measured from a screenshot (§11). Each acts on every drawing
- * selected; Remove leaves the locked ones, as the Delete key does.
+ * selected; Remove leaves the locked ones, as the Delete key does. Template › (D3b) comes first
+ * while they're all of one tool, as TradingView offers templates only for tools of one type
+ * (Help Center, How to apply a template to several tools of the same type at once?).
  */
 export function DrawingMenu({
   x,
@@ -36,13 +40,30 @@ export function DrawingMenu({
   onClose(): void;
 }) {
   const { drawings, selection, prefs } = useDrawings();
+  const templates = useTemplates();
   const chosen = drawings.filter((drawing) => selection.includes(drawing.id));
-  if (chosen.length === 0) return null;
+  const first = chosen[0];
+  if (!first) return null;
+  const { tool } = first;
+  const oneTool = chosen.every((drawing) => drawing.tool === tool);
   const ids = chosen.map((drawing) => drawing.id);
   const allLocked = chosen.every((drawing) => drawing.locked);
   const removable = !prefs.lockAll && chosen.some((drawing) => !drawing.locked);
   const select = (copies: readonly string[]) => selectAdded(chart, copies);
   const items: PopupMenuEntry[] = [
+    ...(oneTool
+      ? [
+          {
+            label: 'Template',
+            items: templateEntries({
+              tool,
+              state: templates,
+              style: () => first.style,
+              onApply: (style) => drawingStore.applyStyle(ids, tool, style),
+            }),
+          },
+        ]
+      : []),
     {
       label: 'Visual order',
       items: VISUAL_ORDER_MOVES.map((move) => ({

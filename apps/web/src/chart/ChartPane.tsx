@@ -8,7 +8,11 @@ import { DrawingMenu, selectAdded } from '../drawings/DrawingMenu';
 import { DrawingSettingsDialog, SeveralDrawingsDialog } from '../drawings/DrawingSettingsDialog';
 import { drawingKeyAction } from '../drawings/drawingKeys';
 import { DRAWINGS_RETRY_MS, drawingStore, useDrawings } from '../drawings/drawingStore';
+import { FavoritesToolbar } from '../drawings/FavoritesToolbar';
 import { FloatingToolbar } from '../drawings/FloatingToolbar';
+import { TemplateDialogsHost } from '../drawings/TemplateMenu';
+import { templateStore } from '../drawings/templateStore';
+import { toolStyles } from '../drawings/toolStyles';
 import { gestureSettings } from '../gestures/gestureSettings';
 import { definitionOf } from '../indicators/definitions';
 import {
@@ -116,6 +120,11 @@ export function ChartPane({
   const [drawingMenu, setDrawingMenu] = useState<{ x: number; y: number } | null>(null);
   const interval = useMemo(() => parseResolution(resolution), [resolution]);
 
+  // The drawing templates (D3b), loaded once for the Template menus; tried again until they come.
+  useEffect(() => {
+    void templateStore.load();
+  }, []);
+
   // The session talks to the legend; the indicators' rows follow the same bar.
   const legendView = useMemo(
     (): LegendView => ({
@@ -172,6 +181,8 @@ export function ChartPane({
         onToolDone: () => drawingStore.toolDone(),
         onOpen: (id) => setDrawingSettings([id]),
         onMenu: (_id, x, y) => setDrawingMenu({ x, y }),
+        // A new drawing starts in its tool's last style (D3b).
+        styleOf: toolStyles.styleOf,
       },
     });
     values.chart = created;
@@ -502,6 +513,14 @@ export function ChartPane({
       )}
       {drawingSettings !== null && drawingSettings.length > 1 && (
         <SeveralDrawingsDialog ids={drawingSettings} onClose={() => setDrawingSettings(null)} />
+      )}
+      <TemplateDialogsHost />
+      {prefs.favorites.length > 0 && (
+        <FavoritesToolbar
+          favorites={prefs.favorites}
+          tool={tool}
+          rightInset={chart?.priceAxisWidth() ?? 0}
+        />
       )}
       {drawingsProblem && (
         <div className={styles.drawingsNotice} role="status">

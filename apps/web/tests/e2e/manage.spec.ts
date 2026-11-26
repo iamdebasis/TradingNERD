@@ -323,7 +323,7 @@ test.describe('several drawings at once (D3a)', () => {
 });
 
 test.describe('a drawing’s menu (D3a)', () => {
-  test('opens on a right-click with Visual order, Intervals visibility, Clone, Copy, Lock, Remove and Settings', async ({
+  test('opens on a right-click with Template, Visual order, Intervals visibility, Clone, Copy, Lock, Remove and Settings', async ({
     page,
     market,
   }) => {
@@ -334,6 +334,8 @@ test.describe('a drawing’s menu (D3a)', () => {
     // The right-click selects the drawing it's on.
     expect(await selectionOf(page)).toEqual(['a']);
     await expect(menu.locator(':scope > [role="menuitem"]')).toHaveText([
+      // D3b's, while the drawings selected are all of one tool.
+      'Template',
       'Visual order',
       'Intervals visibility',
       'Clone',
@@ -376,6 +378,8 @@ test.describe('a drawing’s menu (D3a)', () => {
     await toolbarOf(page).getByRole('button', { name: 'More' }).click();
     const menu = page.getByRole('menu', { name: 'Drawing', exact: true });
     await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Template' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Visual order' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Intervals visibility' })).toBeFocused();

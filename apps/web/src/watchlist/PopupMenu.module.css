@@ -112,3 +112,42 @@
   font-size: 12px;
   line-height: 16px;
 }
+
+/*
+ * A row with a ✕ at its right (D3b's saved templates): the ✕ shows while the mouse is over the
+ * row, 20 px wide, its cross centred 16 px from the menu's edge, and the row's label stops
+ * short of it; ours, provisional (§11).
+ */
+.removable {
+  position: relative;
+}
+
+.menu .removable .item {
+  padding-right: 32px;
+}
+
+.remove {
+  position: absolute;
+  top: 0;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.removable:hover .remove,
+.removable:focus-within .remove {
+  visibility: visible;
+}
+
+.remove:hover {
+  color: var(--color-text);
+}
