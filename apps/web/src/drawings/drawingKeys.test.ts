@@ -50,6 +50,17 @@ describe('the drawing tools’ keys', () => {
     expect(key('KeyH', 'h', { ctrl: true, alt: true })).toEqual({ kind: 'hide-all' });
   });
 
+  it('copy and paste drawings with Ctrl/⌘ + C and V, nothing else held (D3a)', () => {
+    expect(key('KeyC', 'c', { meta: true })).toEqual({ kind: 'copy' });
+    expect(key('KeyC', 'c', { ctrl: true })).toEqual({ kind: 'copy' });
+    expect(key('KeyV', 'v', { meta: true })).toEqual({ kind: 'paste' });
+    expect(key('KeyV', 'м', { ctrl: true })).toEqual({ kind: 'paste' });
+    expect(key('KeyC', 'C', { meta: true, shift: true })).toBeNull();
+    expect(key('KeyC', 'ç', { meta: true, alt: true })).toBeNull();
+    // Bare, C is the Crossline's ⌥ letter's place and nothing else.
+    expect(key('KeyC', 'c')).toBeNull();
+  });
+
   it('let go with Escape and remove with Delete or Backspace, bare only', () => {
     expect(key('Escape', 'Escape')).toEqual({ kind: 'cancel' });
     expect(key('Delete', 'Delete')).toEqual({ kind: 'delete' });

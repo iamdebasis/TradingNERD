@@ -476,8 +476,10 @@ export class ChartController {
     const onDrawingUp = (event: PointerEvent) => this.drawingUp(event, false);
     const onDrawingCancel = (event: PointerEvent) => this.drawingUp(event, true);
     const onDrawingOpen = (event: MouseEvent) => this.drawingOpen(event);
+    const onDrawingMenu = (event: MouseEvent) => this.drawingMenu(event);
     element.addEventListener('pointerdown', onDrawingDown, { capture: true });
     element.addEventListener('dblclick', onDrawingOpen);
+    element.addEventListener('contextmenu', onDrawingMenu);
     window.addEventListener('pointermove', onDrawingMove);
     window.addEventListener('pointerup', onDrawingUp);
     window.addEventListener('pointercancel', onDrawingCancel);
@@ -496,6 +498,7 @@ export class ChartController {
       () => window.removeEventListener('pointerup', onDrawingUp),
       () => window.removeEventListener('pointercancel', onDrawingCancel),
       () => element.removeEventListener('dblclick', onDrawingOpen),
+      () => element.removeEventListener('contextmenu', onDrawingMenu),
       () => sizes.disconnect(),
       installWheel(this.chart, this.viewport, {
         tuning: () => this.tuning,
@@ -517,6 +520,10 @@ export class ChartController {
         reset: () => this.resetView(),
         zoom: (notches) => this.zoom(notches),
         scrollBars: (bars) => this.scrollBars(bars),
+        // Not while a dialog or a menu has the keys (a menu's arrows move through its items).
+        nudge: (bars, dy) =>
+          document.querySelector('[role="dialog"], [role="menu"]') === null &&
+          this.drawings.nudge(bars, dy),
       }),
     );
     this.scheduleCountdown();
@@ -936,6 +943,14 @@ export class ChartController {
     return this.drawings.removeSelected();
   }
 
+  /**
+   * The arrow keys: the selected drawings moved by `bars` and `dy` px (D3a). True while any is
+   * selected, so the keys don't scroll the chart meanwhile.
+   */
+  nudgeDrawings(bars: number, dy: number): boolean {
+    return this.drawings.nudge(bars, dy);
+  }
+
   /** The bar a drawing's time is on, as its Coordinates tab numbers bars: from the first loaded. */
   drawingBarOf(time: number): number {
     return Math.round(this.drawings.logicalOf(time));
@@ -1189,6 +1204,19 @@ export class ChartController {
     const element = this.chart.chartElement();
     const inside = event.target instanceof Node && element.contains(event.target);
     this.drawings.pointerMove(inside ? this.pointerInput(event) : null, false);
+  }
+
+  /**
+   * A right-click on a drawing opens its menu (D3a), in place of the browser's; elsewhere the
+   * browser's own stays.
+   */
+  private drawingMenu(event: MouseEvent): void {
+    const input = this.pointerInput(event);
+    const id = input ? this.drawings.contextAt(input) : null;
+    if (id === null) return;
+    event.preventDefault();
+    this.drawingPointer = null;
+    this.options.drawings?.onMenu?.(id, event.clientX, event.clientY);
   }
 
   /** A double-click on a drawing opens its settings. */

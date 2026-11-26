@@ -90,6 +90,53 @@ function clipRange(
 }
 
 /** The distance from `p` to the segment from `a` to `b`. */
+/** A box on a pane, its edges in CSS px. */
+export interface Rect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** The box two corners make, whichever way round they are. */
+export function rectOf(a: Pt, b: Pt): Rect {
+  return {
+    left: Math.min(a.x, b.x),
+    top: Math.min(a.y, b.y),
+    right: Math.max(a.x, b.x),
+    bottom: Math.max(a.y, b.y),
+  };
+}
+
+export function insideRect(p: Pt, rect: Rect): boolean {
+  return p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
+}
+
+/** Whether any part of the segment from a to b lies in the box (Liang–Barsky's clipping). */
+export function segmentTouchesRect(a: Pt, b: Pt, rect: Rect): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let from = 0;
+  let to = 1;
+  const sides: [number, number][] = [
+    [-dx, a.x - rect.left],
+    [dx, rect.right - a.x],
+    [-dy, a.y - rect.top],
+    [dy, rect.bottom - a.y],
+  ];
+  for (const [p, q] of sides) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) from = Math.max(from, r);
+    else to = Math.min(to, r);
+    if (from > to) return false;
+  }
+  return true;
+}
+
 export function distanceToSegment(p: Pt, a: Pt, b: Pt): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;

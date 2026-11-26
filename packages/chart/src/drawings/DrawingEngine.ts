@@ -6,6 +6,7 @@ import {
   defaultDrawingStyle,
   isPitchforkTool,
   newDrawing,
+  newDrawingId,
   type Resolution,
   TOOL_POINTS,
   visibleOn,
@@ -21,10 +22,14 @@ import {
   distanceToSegment,
   HANDLE_HIT,
   insidePolygon,
+  insideRect,
   LINE_HIT,
   lineSegment,
   type Pt,
+  type Rect,
+  rectOf,
   type Size,
+  segmentTouchesRect,
   snap45,
 } from './geometry';
 import { type MagnetMode, magnetPrice } from './magnet';
@@ -34,11 +39,13 @@ import { barRange, fitRegression, type RegressionFit, regressionParts } from './
 import { TimeMap } from './timeMap';
 
 /**
- * The user's drawings on the chart (docs/SPEC.md §6.24, milestone D1): which are drawn on each
- * pane and where, the pointer's work on them (placing a tool's points, selecting, dragging a
- * point or the whole drawing, Shift's 45°, Ctrl/⌘ + drag to clone, the eraser) and the toolbar's
- * modes (magnet, keep drawing, lock and hide all). The app keeps the drawings (per symbol, saved,
- * with undo); the engine tells it of each edit and is given the new list back.
+ * The user's drawings on the chart (docs/SPEC.md §6.24, milestones D1 to D3a): which are drawn on
+ * each pane and where, the pointer's work on them (placing a tool's points, selecting one or
+ * several, dragging a point or every drawing selected, Shift's 45° and its straight moves, Ctrl/⌘
+ * + click to add to the selection, Ctrl/⌘ + drag to clone or to draw a box that selects, the
+ * eraser), the arrow keys' moves, a right-click's drawing, and the toolbar's modes (magnet, keep
+ * drawing, lock and hide all). The app keeps the drawings (per symbol, saved, with undo); the
+ * engine tells it of each edit and is given the new list back.
  */
 
 /** TradingView's cursors (the left toolbar's first button). */
@@ -105,6 +112,8 @@ export interface DrawingEvents {
   onToolDone?(): void;
   /** A drawing was double-clicked: its settings open (TradingView's). */
   onOpen?(id: string): void;
+  /** A drawing was right-clicked, at this place in the window: its menu opens (D3a). */
+  onMenu?(id: string, clientX: number, clientY: number): void;
   /** A new drawing's id. */
   newId?(): string;
 }
@@ -197,21 +206,35 @@ interface Placing {
 }
 
 interface Drag {
+  /** The drawing pressed. */
   id: string;
-  /** The point being dragged, or null for the whole drawing. */
+  /** The point being dragged, or null for the whole drawing (and those selected with it). */
   handle: number | null;
   pane: number;
   start: PointerInput;
   startLogical: number | null;
-  original: Drawing;
-  current: Drawing;
-  /** Ctrl/⌘ at the press: the drag moves a copy, the drawing stays. */
-  cloneId: string | null;
+  /** The drawings a drag moves, as they were at the press: none when the one pressed is locked. */
+  originals: Drawing[];
+  /** The same drawings as the drag has them now; copies with ids of their own while cloning. */
+  current: Drawing[];
+  /** Ctrl/⌘ at the press on a drawing's body: a drag moves copies, the drawings stay. */
+  clone: boolean;
+  /** The copies' ids, by their originals', once a cloning drag starts. */
+  cloneIds: Map<string, string> | null;
+  /**
+   * What a click (a press let go without moving) does to the selection: Ctrl/⌘ adds the drawing
+   * or takes it out; a plain click on one of several selected selects it alone.
+   */
+  click: 'toggle' | 'only' | null;
   moved: boolean;
 }
 
-let counter = 0;
-const randomId = () => `d${Date.now().toString(36)}${(counter++).toString(36)}`;
+/** Ctrl/⌘ + drag over no drawing: a box, on the pane it started on, selecting what it touches. */
+interface Box {
+  pane: number;
+  from: Pt;
+  to: Pt;
+}
 
 export class DrawingEngine {
   private readonly host: DrawingHost;
@@ -224,6 +247,7 @@ export class DrawingEngine {
   private hoverHandle: { id: string; point: number } | null = null;
   private placing: Placing | null = null;
   private drag: Drag | null = null;
+  private box: Box | null = null;
   private map: TimeMap | null = null;
   private panningOff = false;
   private cursor: string | null | undefined = undefined;
@@ -272,7 +296,10 @@ export class DrawingEngine {
     const before = this.settings;
     this.settings = { ...before, ...settings };
     if (this.placing && this.settings.tool !== this.placing.tool) this.stopPlacing();
-    if (this.settings.hideAll && !before.hideAll) this.setSelection([]);
+    if (this.settings.hideAll && !before.hideAll) {
+      this.box = null;
+      this.setSelection([]);
+    }
     if (this.settings.tool) this.setHover(null, null);
     this.update();
   }
@@ -299,9 +326,9 @@ export class DrawingEngine {
     this.update();
   }
 
-  /** The pane a drawing being placed or dragged is on: the pointer's moves are read there. */
+  /** The pane a drawing being placed or dragged, or a box, is on: the pointer's moves are read there. */
   activePane(): number | null {
-    return this.placing?.pane ?? this.drag?.pane ?? null;
+    return this.placing?.pane ?? this.drag?.pane ?? this.box?.pane ?? null;
   }
 
   /**
@@ -309,6 +336,12 @@ export class DrawingEngine {
    * True when it did something.
    */
   cancel(): boolean {
+    if (this.box) {
+      this.box = null;
+      this.resume();
+      this.update();
+      return true;
+    }
     if (this.placing) {
       this.stopPlacing();
       this.events.onToolDone?.();
@@ -330,6 +363,55 @@ export class DrawingEngine {
       return true;
     }
     return false;
+  }
+
+  /**
+   * The arrow keys with drawings selected (Charting Library shortcuts: "Move selected drawing
+   * left", "right", "up", "down"): each unlocked one moved by `bars` and `dy` px of its own pane,
+   * as a drag moves it (ours: a bar and a pixel a press, provisional §11). True while any drawing
+   * is selected, so the keys don't scroll the chart under it.
+   */
+  nudge(bars: number, dy: number): boolean {
+    if (this.selected.length === 0 || this.settings.hideAll) return false;
+    if (this.placing || this.drag || this.box || this.settings.lockAll) return true;
+    const chosen = new Set(this.selected);
+    let changed = false;
+    const next = this.drawings.map((drawing) => {
+      if (!chosen.has(drawing.id) || drawing.locked) return drawing;
+      const moved = this.movedBy(drawing, bars, dy);
+      if (!moved || moved === drawing) return drawing;
+      changed = true;
+      return moved;
+    });
+    if (changed) this.edit(next);
+    return true;
+  }
+
+  /**
+   * A right-click: the drawing under it, which it selects unless it's one of those selected, or
+   * null where there's none, or while a tool or a drag has the pointer.
+   */
+  contextAt(input: PointerInput): string | null {
+    // A Mac's Ctrl + click is its right-click: the press it began, still unmoved, is let go.
+    if (this.drag && !this.drag.moved) this.endDrag();
+    const box = this.box;
+    if (box && box.from.x === box.to.x && box.from.y === box.to.y) {
+      this.box = null;
+      this.resume();
+    }
+    if (this.placing || this.drag || this.box || this.settings.tool) return null;
+    if (this.host.paneKey(input.pane) === undefined) return null;
+    const hit = this.hitTest(input.pane, input.x, input.y);
+    if (!hit) return null;
+    if (!this.selected.includes(hit.id)) this.setSelection([hit.id]);
+    this.update();
+    return hit.id;
+  }
+
+  /** The box Ctrl/⌘ + drag is drawing on a pane, or null. */
+  selectionBox(pane: number): Rect | null {
+    const box = this.box;
+    return box && box.pane === pane ? rectOf(box.from, box.to) : null;
   }
 
   /** Delete: the selected drawings go, but locked ones (TradingView's lock). True when any went. */
@@ -357,6 +439,15 @@ export class DrawingEngine {
     }
     const hit = this.hitTest(input.pane, input.x, input.y);
     if (!hit) {
+      // Ctrl/⌘ + drag over the chart draws a box that selects what it touches (Help Center,
+      // Selecting several objects at once); a plain press lets the selection go.
+      if (input.mod && cursor !== 'eraser' && !this.settings.hideAll) {
+        const at = { x: input.x, y: input.y };
+        this.box = { pane: input.pane, from: at, to: at };
+        this.suspend();
+        this.update();
+        return true;
+      }
       if (this.selected.length > 0) this.setSelection([]);
       this.update();
       return false;
@@ -373,21 +464,35 @@ export class DrawingEngine {
       this.suspend();
       return true;
     }
-    this.setSelection([drawing.id]);
+    const body = hit.handle === null;
+    const among = this.selected.includes(drawing.id);
+    // Ctrl/⌘ on a drawing's body: a click adds it to the selection or takes it out, a drag clones
+    // it, or every drawing selected with it (Help Center, How to clone drawings: "Multiselected
+    // drawings can be copied as well").
+    const adding = input.mod && body;
+    // A plain press on one of several selected moves them all; let go unmoved, it's selected alone.
+    const group = body && among && this.selected.length > 1;
+    if (!adding && !group) this.setSelection([drawing.id]);
     this.suspend();
-    if (!fixed) {
-      this.drag = {
-        id: drawing.id,
-        handle: hit.handle,
-        pane: input.pane,
-        start: input,
-        startLogical: this.host.xToLogical(input.x),
-        original: drawing,
-        current: drawing,
-        cloneId: input.mod && hit.handle === null ? this.newId() : null,
-        moved: false,
-      };
-    }
+    const movable = (item: Drawing) => !item.locked && !this.settings.lockAll;
+    const moving = fixed
+      ? []
+      : (adding || group) && among
+        ? this.selectedDrawings().filter(movable)
+        : [drawing];
+    this.drag = {
+      id: drawing.id,
+      handle: hit.handle,
+      pane: input.pane,
+      start: input,
+      startLogical: this.host.xToLogical(input.x),
+      originals: moving,
+      current: moving,
+      clone: adding,
+      cloneIds: null,
+      click: adding ? 'toggle' : group ? 'only' : null,
+      moved: false,
+    };
     this.update();
     return true;
   }
@@ -401,6 +506,21 @@ export class DrawingEngine {
     }
     if (this.drag) {
       if (pressed && input) this.moveDrag(input);
+      return;
+    }
+    const box = this.box;
+    if (box) {
+      if (pressed && input && input.pane === box.pane) {
+        // Kept on its pane, however far the pointer goes.
+        const size = this.host.paneSize(box.pane);
+        box.to = size
+          ? {
+              x: Math.min(size.width, Math.max(0, input.x)),
+              y: Math.min(size.height, Math.max(0, input.y)),
+            }
+          : { x: input.x, y: input.y };
+        this.update();
+      }
       return;
     }
     if (pressed) return;
@@ -436,15 +556,38 @@ export class DrawingEngine {
       this.update();
       return;
     }
+    const box = this.box;
+    if (box) {
+      this.box = null;
+      // What it touched joins the selection, in drawing order.
+      const touched = new Set([...this.selected, ...this.boxHits(box)]);
+      this.setSelection(
+        this.drawings.filter((drawing) => touched.has(drawing.id)).map((drawing) => drawing.id),
+      );
+      this.resume();
+      this.update();
+      return;
+    }
     const drag = this.drag;
     if (drag) {
       this.endDrag();
-      if (drag.moved) {
-        const next = drag.cloneId
-          ? [...this.drawings, drag.current]
-          : this.drawings.map((item) => (item.id === drag.id ? drag.current : item));
-        this.edit(next);
-        if (drag.cloneId) this.setSelection([drag.cloneId]);
+      if (drag.moved && drag.current.length > 0) {
+        if (drag.cloneIds) {
+          this.edit([...this.drawings, ...drag.current]);
+          this.setSelection(drag.current.map((drawing) => drawing.id));
+        } else {
+          const moved = new Map(drag.current.map((drawing) => [drawing.id, drawing]));
+          this.edit(this.drawings.map((item) => moved.get(item.id) ?? item));
+        }
+      } else if (!drag.moved && drag.click === 'toggle') {
+        const toggled = this.selected.includes(drag.id)
+          ? this.selected.filter((id) => id !== drag.id)
+          : this.drawings
+              .filter((item) => item.id === drag.id || this.selected.includes(item.id))
+              .map((item) => item.id);
+        this.setSelection(toggled);
+      } else if (!drag.moved && drag.click === 'only') {
+        this.setSelection([drag.id]);
       }
     }
     this.resume();
@@ -505,16 +648,21 @@ export class DrawingEngine {
     return shapes;
   }
 
-  /** The drawing being moved or placed now, or null: every other one stays still meanwhile. */
-  activeId(): string | null {
-    if (this.placing) return PREVIEW_ID;
-    if (this.drag?.moved) return this.drag.cloneId ?? this.drag.id;
+  /** The drawings being moved or placed now, or null: every other one stays still meanwhile. */
+  activeIds(): ReadonlySet<string> | null {
+    if (this.placing) return new Set([PREVIEW_ID]);
+    const drag = this.drag;
+    if (drag?.moved && drag.current.length > 0) {
+      return new Set(drag.current.map((drawing) => drawing.id));
+    }
     return null;
   }
 
   /** Shown selected: its handles with the thicker ring (the drawing being placed is too). */
   isSelected(id: string): boolean {
-    return this.selected.includes(id) || id === PREVIEW_ID || id === this.drag?.cloneId;
+    if (this.selected.includes(id) || id === PREVIEW_ID) return true;
+    const clones = this.drag?.cloneIds;
+    return clones ? this.drag?.current.some((drawing) => drawing.id === id) === true : false;
   }
 
   /** Shows its handles: selected, or hovered while it can be moved. */
@@ -591,6 +739,7 @@ export class DrawingEngine {
     selection: string[];
     placing: { tool: DrawingTool; points: DrawingPoint[]; index: number } | null;
     dragging: string | null;
+    box: Rect | null;
     hover: string | null;
     cursor: string | null;
     settings: DrawingSettings;
@@ -606,6 +755,7 @@ export class DrawingEngine {
           }
         : null,
       dragging: this.drag?.id ?? null,
+      box: this.box ? rectOf(this.box.from, this.box.to) : null,
       hover: this.hover,
       cursor: this.cursor ?? null,
       settings: { ...this.settings },
@@ -624,7 +774,35 @@ export class DrawingEngine {
   }
 
   private newId(): string {
-    return this.events.newId?.() ?? randomId();
+    return this.events.newId?.() ?? newDrawingId();
+  }
+
+  /** The drawings selected, in drawing order. */
+  private selectedDrawings(): Drawing[] {
+    const chosen = new Set(this.selected);
+    return this.drawings.filter((drawing) => chosen.has(drawing.id));
+  }
+
+  /** The drawings a box touches on its pane: a line through it, a handle in it, or inside a fill. */
+  private boxHits(box: Box): string[] {
+    const rect = rectOf(box.from, box.to);
+    // A Ctrl/⌘ + click on no drawing selects nothing more.
+    if (rect.right - rect.left < DRAG_START && rect.bottom - rect.top < DRAG_START) return [];
+    const corners = [
+      { x: rect.left, y: rect.top },
+      { x: rect.right, y: rect.top },
+      { x: rect.right, y: rect.bottom },
+      { x: rect.left, y: rect.bottom },
+    ];
+    const touches = (shape: PlacedShape) =>
+      shape.lines.some(([a, b]) => segmentTouchesRect(a, b, rect)) ||
+      shape.looks.some((look) => segmentTouchesRect(look.a, look.b, rect)) ||
+      shape.handles.some((handle) => insideRect(handle, rect)) ||
+      (shape.fillsTakeClicks &&
+        shape.fills.some((fill) => corners.some((corner) => insidePolygon(corner, fill.points))));
+    return this.shapes(box.pane)
+      .filter((shape) => shape.drawing.id !== PREVIEW_ID && touches(shape))
+      .map((shape) => shape.drawing.id);
   }
 
   private setSelection(ids: string[]): void {
@@ -658,10 +836,13 @@ export class DrawingEngine {
     const list = this.settings.hideAll ? [] : this.drawings.filter(visible);
     const drag = this.drag;
     let shown = list;
-    if (drag?.moved) {
-      shown = drag.cloneId
-        ? [...list, drag.current]
-        : list.map((item) => (item.id === drag.id ? drag.current : item));
+    if (drag?.moved && drag.current.length > 0) {
+      if (drag.cloneIds) {
+        shown = [...list, ...drag.current];
+      } else {
+        const moved = new Map(drag.current.map((drawing) => [drawing.id, drawing]));
+        shown = list.map((item) => moved.get(item.id) ?? item);
+      }
     }
     if (this.placing) {
       shown = [...shown, this.preview(this.placing)];
@@ -1114,21 +1295,27 @@ export class DrawingEngine {
 
   private moveDrag(input: PointerInput): void {
     const drag = this.drag;
-    if (!drag) return;
+    if (!drag || drag.originals.length === 0) return;
     if (!drag.moved && Math.hypot(input.x - drag.start.x, input.y - drag.start.y) < DRAG_START) {
       return;
     }
-    drag.moved = true;
-    const base = drag.original;
-    // A horizontal line has only a price; a vertical line moves only in time.
-    const priceOnly = base.tool === 'horizontal-line';
-    const timeOnly = base.tool === 'vertical-line';
+    if (!drag.moved) {
+      drag.moved = true;
+      // Cloning: the copies get their ids as the drag starts, the originals stay where they are.
+      if (drag.clone) {
+        drag.cloneIds = new Map(drag.originals.map((drawing) => [drawing.id, this.newId()]));
+      }
+    }
     if (drag.handle !== null) {
+      const base = drag.originals[0] as Drawing;
+      // A horizontal line has only a price; a vertical line moves only in time.
+      const priceOnly = base.tool === 'horizontal-line';
+      const timeOnly = base.tool === 'vertical-line';
       if (input.pane !== drag.pane) return;
       const channel = this.dragChannel(base, drag.handle, input);
       if (channel === null) return;
       if (channel) {
-        drag.current = { ...base, points: channel };
+        drag.current = [{ ...base, points: channel }];
         this.update();
         return;
       }
@@ -1141,27 +1328,54 @@ export class DrawingEngine {
         time: priceOnly ? was.time : point.time,
         price: timeOnly ? was.price : point.price,
       };
-      drag.current = { ...base, points };
+      drag.current = [{ ...base, points }];
     } else {
       const logical = this.host.xToLogical(input.x);
       if (logical === null || drag.startLogical === null) return;
-      const bars = priceOnly ? 0 : Math.round(logical - drag.startLogical);
-      // Up and down by the pointer's own pixels, so a log scale moves it as the eye expects;
-      // from another pane (a vertical line crossing it) only in time.
-      const own = this.host.paneIndex(base.pane) === drag.pane;
-      const dy = own && !timeOnly ? input.y - drag.start.y : 0;
-      const map = this.timeMap();
-      const points: DrawingPoint[] = [];
-      for (const point of base.points) {
-        const y = this.host.priceToY(drag.pane, point.price);
-        const price = dy !== 0 && y !== null ? this.host.yToPrice(drag.pane, y + dy) : point.price;
-        if (price === null) return;
-        const time = bars === 0 ? point.time : map.timeOf(map.logicalOf(point.time) + bars);
-        points.push({ time, price });
+      let bars = Math.round(logical - drag.startLogical);
+      // Up and down by the pointer's own pixels, so a log scale moves them as the eye expects.
+      let dy = input.y - drag.start.y;
+      // Shift holds the move to the way the pointer went further: across or up and down
+      // (Charting Library shortcuts: "Move a drawing horizontally or vertically | Drag + Shift").
+      if (input.shift) {
+        if (Math.abs(input.x - drag.start.x) >= Math.abs(dy)) dy = 0;
+        else bars = 0;
       }
-      drag.current = { ...base, id: drag.cloneId ?? base.id, points };
+      const next: Drawing[] = [];
+      for (const base of drag.originals) {
+        // The one pressed from another pane than its own (a vertical line crossing it) moves
+        // only in time; the others selected with it by the same pixels on their own panes.
+        const own = base.id !== drag.id || this.host.paneIndex(base.pane) === drag.pane;
+        const moved = this.movedBy(base, bars, own ? dy : 0);
+        if (!moved) return;
+        const id = drag.cloneIds?.get(base.id) ?? base.id;
+        next.push(id === moved.id ? moved : { ...moved, id });
+      }
+      drag.current = next;
     }
     this.update();
+  }
+
+  /**
+   * A drawing moved by whole bars and by `dy` px of its own pane, as far as its tool moves: a
+   * horizontal line only in price, a vertical line only in time. Itself when it doesn't move;
+   * null when a price can't be placed now.
+   */
+  private movedBy(base: Drawing, bars: number, dy: number): Drawing | null {
+    const across = base.tool === 'horizontal-line' ? 0 : bars;
+    const pane = this.host.paneIndex(base.pane);
+    const down = base.tool === 'vertical-line' || pane === null ? 0 : dy;
+    if (across === 0 && down === 0) return base;
+    const map = this.timeMap();
+    const points: DrawingPoint[] = [];
+    for (const point of base.points) {
+      const y = down !== 0 && pane !== null ? this.host.priceToY(pane, point.price) : null;
+      const price = y !== null && pane !== null ? this.host.yToPrice(pane, y + down) : point.price;
+      if (price === null) return null;
+      const time = across === 0 ? point.time : map.timeOf(map.logicalOf(point.time) + across);
+      points.push({ time, price });
+    }
+    return { ...base, points };
   }
 
   /**
@@ -1198,7 +1412,7 @@ export class DrawingEngine {
   }
 
   private resume(): void {
-    if (!this.panningOff || this.placing || this.drag) return;
+    if (!this.panningOff || this.placing || this.drag || this.box) return;
     this.panningOff = false;
     this.host.setPanning(true);
   }

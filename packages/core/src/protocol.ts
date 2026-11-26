@@ -21,8 +21,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 13: the user's drawings, per symbol (/api/drawings).
  * 14: channels and pitchforks among the drawings: three-point tools, levels, fills and a
  *     regression trend's inputs.
+ * 15: a drawing's place under the chart's bars (`below`), as Visual order's Send to back leaves it.
  */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {

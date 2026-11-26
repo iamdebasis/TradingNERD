@@ -1,8 +1,14 @@
-import { type Drawing, newDrawing, type SymbolDrawings } from '@tradingnerd/core';
+import {
+  type Drawing,
+  MAX_DRAWINGS_PER_SYMBOL,
+  newDrawing,
+  type SymbolDrawings,
+} from '@tradingnerd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TOOLBAR,
   DRAWING_TOOLBAR_KEY,
+  DRAWINGS_CLIPBOARD_KEY,
   DRAWINGS_RETRY_MS,
   DrawingStore,
   sanitizeToolbar,
@@ -306,6 +312,164 @@ describe('the drawings of the chart’s symbol', () => {
     expect(store.get().drawings.map((d) => d.id)).toEqual(['a']);
     await store.whenSaved();
     expect(gateway.held.get('BINANCE:XRPUSDT')?.map((d) => d.id)).toEqual(['a']);
+  });
+});
+
+describe('several drawings at once (D3a)', () => {
+  const ids = (store: DrawingStore) => store.get().drawings.map((d) => d.id);
+  const FOUR_HOURS = { unit: 'minute', count: 240 } as const;
+
+  it('changes several in one undo step', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a'), line('b'), line('c')]);
+    store.updateMany(['a', 'c'], (d) => ({ ...d, locked: true }));
+    expect(store.get().drawings.map((d) => d.locked)).toEqual([true, false, true]);
+    store.undo();
+    expect(store.get().drawings.map((d) => d.locked)).toEqual([false, false, false]);
+  });
+
+  it('shows several as a dialog has them, and keeps them as one step on Ok', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a'), line('b')]);
+    const before = store.get().drawings;
+    store.previewMany(before.map((d) => ({ ...d, hidden: true })));
+    expect(store.get().drawings.map((d) => d.hidden)).toEqual([true, true]);
+    store.finishPreview(before, true);
+    store.undo();
+    expect(store.get().drawings.map((d) => d.hidden)).toEqual([false, false]);
+  });
+
+  it('moves drawings in the visual order as one step, and makes none for a move that changes nothing', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a'), line('b'), line('c')]);
+    store.reorder(['b'], 'send-to-back');
+    expect(ids(store)).toEqual(['b', 'a', 'c']);
+    expect(store.get().drawings[0]?.below).toBe(true);
+    store.undo();
+    expect(ids(store)).toEqual(['a', 'b', 'c']);
+    store.redo();
+    const steps = store.get();
+    store.reorder(['c'], 'bring-to-front');
+    expect(store.get()).toBe(steps);
+  });
+
+  it('sets the intervals drawings show on from the chart’s, as one step', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a'), line('b')]);
+    store.setIntervals(['a', 'b'], 'current-only', FOUR_HOURS);
+    expect(store.get().drawings.map((d) => d.visibility.hours)).toEqual([
+      { on: true, from: 4, to: 4 },
+      { on: true, from: 4, to: 4 },
+    ]);
+    expect(store.get().drawings[0]?.visibility.minutes.on).toBe(false);
+    const after = store.get();
+    store.setIntervals(['a', 'b'], 'current-only', FOUR_HOURS);
+    expect(store.get()).toBe(after);
+    store.undo();
+    expect(store.get().drawings[0]?.visibility.minutes.on).toBe(true);
+  });
+
+  it('removes those not locked, and none while Lock all is on', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a'), { ...line('b'), locked: true }, line('c')]);
+    store.removeUnlocked(['a', 'b']);
+    expect(ids(store)).toEqual(['b', 'c']);
+    store.setPrefs({ lockAll: true });
+    store.removeUnlocked(['c']);
+    expect(ids(store)).toEqual(['b', 'c']);
+  });
+
+  it('clones drawings where they are, over every other, unlocked, with ids of their own', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a'), { ...line('b'), locked: true, below: true }, line('c')]);
+    const copies = store.clone(['b', 'a']);
+    expect(copies).toHaveLength(2);
+    expect(ids(store)).toEqual(['a', 'b', 'c', ...copies]);
+    const [copyA, copyB] = store.get().drawings.slice(3);
+    expect(copyA).toEqual({ ...line('a'), id: copies[0] });
+    expect(copyB).toEqual({ ...line('b'), id: copies[1], locked: false, below: true });
+    store.undo();
+    expect(ids(store)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('copies drawings in this browser and pastes them on another symbol, at their times and prices', async () => {
+    const gateway = new FakeGateway();
+    const store = storeOf(gateway);
+    await ready(store);
+    store.edit([line('a'), line('b')]);
+    expect(store.copy(['b'])).toBe(true);
+    expect(stored.has(DRAWINGS_CLIPBOARD_KEY)).toBe(true);
+    await ready(store, 'BINANCE:ETHUSDT');
+    const pasted = store.paste();
+    expect(pasted).toHaveLength(1);
+    expect(store.get().drawings).toEqual([{ ...line('b'), id: pasted[0] }]);
+    await store.whenSaved();
+    expect(gateway.held.get('BINANCE:ETHUSDT')?.map((d) => d.id)).toEqual(pasted);
+    // And again: each paste its own drawings.
+    const again = store.paste();
+    expect(again[0]).not.toBe(pasted[0]);
+    expect(store.get().drawings).toHaveLength(2);
+  });
+
+  it('pastes a drawing from an indicator’s pane only while that indicator is on the chart', async () => {
+    const store = storeOf(new FakeGateway(), () => new Set(['rsi-1']));
+    await ready(store);
+    store.edit([line('a'), line('r', 'rsi-1')]);
+    store.copy(['a', 'r']);
+    store.edit([line('m', 'macd-1')]);
+    store.copy(['m']);
+    expect(store.paste()).toEqual([]);
+    store.copy(['m']);
+    stored.set(
+      DRAWINGS_CLIPBOARD_KEY,
+      JSON.stringify({
+        version: 1,
+        drawings: [line('a'), line('r', 'rsi-1'), line('m', 'macd-1')],
+      }),
+    );
+    const pasted = store.paste();
+    expect(
+      store
+        .get()
+        .drawings.filter((d) => pasted.includes(d.id))
+        .map((d) => d.pane),
+    ).toEqual([null, 'rsi-1']);
+  });
+
+  it('pastes from this page when this browser can’t keep the copy, and nothing when none was made', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    store.edit([line('a')]);
+    expect(store.paste()).toEqual([]);
+    stored.set(DRAWINGS_CLIPBOARD_KEY, 'not json');
+    expect(store.paste()).toEqual([]);
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('storage is off');
+        },
+        removeItem: () => {},
+      },
+    });
+    expect(store.copy(['a'])).toBe(true);
+    expect(store.paste()).toHaveLength(1);
+  });
+
+  it('keeps a clone or a paste within a symbol’s limit', async () => {
+    const store = storeOf(new FakeGateway());
+    await ready(store);
+    const many = Array.from({ length: MAX_DRAWINGS_PER_SYMBOL - 1 }, (_, i) => line(`d${i}`));
+    store.edit(many);
+    expect(store.clone(['d0', 'd1'])).toHaveLength(1);
+    expect(store.clone(['d0'])).toEqual([]);
+    expect(store.get().drawings).toHaveLength(MAX_DRAWINGS_PER_SYMBOL);
   });
 });
 

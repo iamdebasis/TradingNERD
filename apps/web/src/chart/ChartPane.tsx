@@ -1,10 +1,11 @@
 import { ChartController } from '@tradingnerd/chart';
-import type { SymbolInfo } from '@tradingnerd/core';
+import { parseResolution, type SymbolInfo } from '@tradingnerd/core';
 import type { SymbolContext } from '@tradingnerd/indicators';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { marketApi, searchApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
-import { DrawingSettingsDialog } from '../drawings/DrawingSettingsDialog';
+import { DrawingMenu, selectAdded } from '../drawings/DrawingMenu';
+import { DrawingSettingsDialog, SeveralDrawingsDialog } from '../drawings/DrawingSettingsDialog';
 import { drawingKeyAction } from '../drawings/drawingKeys';
 import { DRAWINGS_RETRY_MS, drawingStore, useDrawings } from '../drawings/drawingStore';
 import { FloatingToolbar } from '../drawings/FloatingToolbar';
@@ -109,8 +110,11 @@ export function ChartPane({
   const [barTip, setBarTip] = useState<{ x: number; label: string } | null>(null);
   /** The user's drawings (docs/SPEC.md §6.24): the symbol's, the toolbar's modes, the selection. */
   const drawings = useDrawings();
-  /** The drawing whose settings are open. */
-  const [drawingSettings, setDrawingSettings] = useState<string | null>(null);
+  /** The drawings whose settings are open: one's own dialog, or several's Visibility (D3a). */
+  const [drawingSettings, setDrawingSettings] = useState<readonly string[] | null>(null);
+  /** The drawings' menu, where it opened (a right-click, or the floating toolbar's ⋯; D3a). */
+  const [drawingMenu, setDrawingMenu] = useState<{ x: number; y: number } | null>(null);
+  const interval = useMemo(() => parseResolution(resolution), [resolution]);
 
   // The session talks to the legend; the indicators' rows follow the same bar.
   const legendView = useMemo(
@@ -166,7 +170,8 @@ export function ChartPane({
         onEdit: (list) => drawingStore.edit(list),
         onSelect: (ids) => drawingStore.setSelection(ids),
         onToolDone: () => drawingStore.toolDone(),
-        onOpen: (id) => setDrawingSettings(id),
+        onOpen: (id) => setDrawingSettings([id]),
+        onMenu: (_id, x, y) => setDrawingMenu({ x, y }),
       },
     });
     values.chart = created;
@@ -390,6 +395,18 @@ export function ChartPane({
           event.preventDefault();
           drawingStore.setPrefs({ hideAll: !drawingStore.get().prefs.hideAll });
           return;
+        case 'copy':
+          // Text selected on the page is the browser's to copy.
+          if (window.getSelection()?.isCollapsed === false) return;
+          if (drawingStore.copy(chart.selectedDrawings())) event.preventDefault();
+          return;
+        case 'paste': {
+          const pasted = drawingStore.paste();
+          if (pasted.length === 0) return;
+          event.preventDefault();
+          selectAdded(chart, pasted);
+          return;
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -411,11 +428,16 @@ export function ChartPane({
   // Volume and overlays sit in the price pane: their rows join the legend's; the others' panes
   // have their own.
   const inPricePane = indicators.list.filter((item) => definitionOf(item).placement !== 'pane');
-  // The floating toolbar shows for one selected drawing.
-  const selected =
-    drawings.selection.length === 1 && !prefs.hideAll
-      ? drawings.drawings.find((drawing) => drawing.id === drawings.selection[0])
-      : undefined;
+  // The floating toolbar shows for the drawings selected, one or several.
+  const selected = prefs.hideAll
+    ? []
+    : drawings.drawings.filter((drawing) => drawings.selection.includes(drawing.id));
+  const selectedIds = selected.map((drawing) => drawing.id);
+  // The drawings' menu goes with the selection it was opened for.
+  const anySelected = selected.length > 0;
+  useEffect(() => {
+    if (!anySelected) setDrawingMenu(null);
+  }, [anySelected]);
 
   // Drawings that couldn't load or be saved: said on the chart until they are (provisional).
   const drawingsProblem =
@@ -452,19 +474,34 @@ export function ChartPane({
       {editing !== null && (
         <IndicatorSettingsDialog id={editing} onClose={() => setEditing(null)} />
       )}
-      {selected && (
+      {selected.length > 0 && (
         <FloatingToolbar
-          key={selected.id}
-          drawing={selected}
-          onSettings={() => setDrawingSettings(selected.id)}
+          key={selectedIds.join(' ')}
+          drawings={selected}
+          lockAll={prefs.lockAll}
+          onSettings={() => setDrawingSettings(selectedIds)}
+          onMore={(at) => setDrawingMenu(at)}
         />
       )}
-      {drawingSettings !== null && (
+      {drawingMenu && selected.length > 0 && (
+        <DrawingMenu
+          x={drawingMenu.x}
+          y={drawingMenu.y}
+          chart={chart}
+          resolution={interval}
+          onSettings={() => setDrawingSettings(selectedIds)}
+          onClose={() => setDrawingMenu(null)}
+        />
+      )}
+      {drawingSettings !== null && drawingSettings.length === 1 && (
         <DrawingSettingsDialog
-          id={drawingSettings}
+          id={drawingSettings[0] as string}
           chart={chart}
           onClose={() => setDrawingSettings(null)}
         />
+      )}
+      {drawingSettings !== null && drawingSettings.length > 1 && (
+        <SeveralDrawingsDialog ids={drawingSettings} onClose={() => setDrawingSettings(null)} />
       )}
       {drawingsProblem && (
         <div className={styles.drawingsNotice} role="status">

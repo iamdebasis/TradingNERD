@@ -3,8 +3,16 @@ import {
   type Drawing,
   type DrawingTool,
   drawingsKey,
+  type IntervalPreset,
+  intervalVisibility,
   isDrawingTool,
+  MAX_DRAWINGS_PER_SYMBOL,
+  newDrawingId,
+  parseDrawing,
+  type Resolution,
+  reorderDrawings,
   TREND_LINE_TOOLS,
+  type VisualOrderMove,
 } from '@tradingnerd/core';
 import { useSyncExternalStore } from 'react';
 import { type DrawingsApi, drawingsApi } from '../data/api';
@@ -14,8 +22,9 @@ import { readJson, writeJson } from '../lib/storage';
 /**
  * The user's drawings on the chart (docs/SPEC.md §5.27, §6.24): the chart symbol's, loaded from
  * the gateway when the symbol changes and saved there after each edit; their undo and redo; the
- * selection the chart reports; and the left toolbar's tool and modes, which this browser keeps.
- * A load or save that fails is tried again every DRAWINGS_RETRY_MS, the chart saying so
+ * selection the chart reports; edits to several at once (visual order, intervals visibility,
+ * lock, clone, copy and paste: D3a); and the left toolbar's tool and modes, which this browser
+ * keeps. A load or save that fails is tried again every DRAWINGS_RETRY_MS, the chart saying so
  * meanwhile, and a symbol's list not yet saved is what the chart shows when it comes back to it.
  */
 
@@ -25,6 +34,11 @@ export const DRAWING_TOOLBAR_KEY = 'tn.drawings.toolbar';
 export const UNDO_LIMIT = 100;
 /** A failed load or save is tried again this long after (as the watchlist's and flags' loads). */
 export const DRAWINGS_RETRY_MS = 3_000;
+/**
+ * Where Copy keeps drawings for Paste: this browser, so a reload or another tab can paste them
+ * on any symbol (TradingView's copying works "within the same browser only", its blog says).
+ */
+export const DRAWINGS_CLIPBOARD_KEY = 'tn.drawings.clipboard';
 
 /** Runs `run` after `ms`; the function it returns cancels it. */
 export type Later = (run: () => void, ms: number) => () => void;
@@ -131,6 +145,8 @@ export class DrawingStore {
   private readonly later: Later;
   private cancelSaveRetry: (() => void) | null = null;
   private cancelLoadRetry: (() => void) | null = null;
+  /** Copy's drawings in this page, for when this browser's storage can't keep them. */
+  private clipboard: readonly Drawing[] = [];
 
   constructor(
     api: Pick<DrawingsApi, 'load' | 'save'> = drawingsApi,
@@ -232,9 +248,15 @@ export class DrawingStore {
 
   /** Changes a drawing (the floating toolbar, a lock): one undo step. */
   update(id: string, change: (drawing: Drawing) => Drawing): void {
+    this.updateMany([id], change);
+  }
+
+  /** Changes each of several drawings (the floating toolbar, the menu): one undo step for all. */
+  updateMany(ids: readonly string[], change: (drawing: Drawing) => Drawing): void {
+    const chosen = new Set(ids);
     let changed = false;
     const drawings = this.value.drawings.map((drawing) => {
-      if (drawing.id !== id) return drawing;
+      if (!chosen.has(drawing.id)) return drawing;
       const next = change(drawing);
       changed ||= next !== drawing;
       return next;
@@ -248,6 +270,98 @@ export class DrawingStore {
     if (drawings.length !== this.value.drawings.length) this.apply(drawings, true);
   }
 
+  /**
+   * Remove from the menu or the floating toolbar: those of the drawings that aren't locked, none
+   * while Lock all is on, as the Delete key (TradingView's lock).
+   */
+  removeUnlocked(ids: readonly string[]): void {
+    if (this.value.prefs.lockAll) return;
+    const chosen = new Set(ids);
+    this.remove(
+      this.value.drawings
+        .filter((drawing) => chosen.has(drawing.id) && !drawing.locked)
+        .map((drawing) => drawing.id),
+    );
+  }
+
+  /** Visual order (docs/SPEC.md §5.27): one undo step when anything moves. */
+  reorder(ids: readonly string[], move: VisualOrderMove): void {
+    const drawings = reorderDrawings(this.value.drawings, ids, move);
+    if (drawings !== this.value.drawings) this.apply(drawings, true);
+  }
+
+  /** Intervals visibility's quick choices, from the chart's interval: one undo step. */
+  setIntervals(ids: readonly string[], preset: IntervalPreset, resolution: Resolution): void {
+    this.updateMany(ids, (drawing) => {
+      const visibility = intervalVisibility(preset, resolution, drawing.visibility);
+      return JSON.stringify(visibility) === JSON.stringify(drawing.visibility)
+        ? drawing
+        : { ...drawing, visibility };
+    });
+  }
+
+  /**
+   * Clone from the menu: a copy of each drawing where it is, over every other, unlocked (ours:
+   * a locked copy on its original couldn't be moved off it; provisional §11). The copies' ids,
+   * for the chart to select.
+   */
+  clone(ids: readonly string[]): string[] {
+    const chosen = new Set(ids);
+    return this.add(this.value.drawings.filter((drawing) => chosen.has(drawing.id)));
+  }
+
+  /**
+   * Copy (Ctrl/⌘ + C, the menu): the drawings as they are, kept for Paste in this browser (and in
+   * this page, should its storage be off). True when there were any.
+   */
+  copy(ids: readonly string[]): boolean {
+    const chosen = new Set(ids);
+    const drawings = this.value.drawings.filter((drawing) => chosen.has(drawing.id));
+    if (drawings.length === 0) return false;
+    this.clipboard = drawings;
+    writeJson(DRAWINGS_CLIPBOARD_KEY, { version: 1, drawings });
+    return true;
+  }
+
+  /** What Copy kept: this browser's, else this page's; none when nothing was copied. */
+  copied(): readonly Drawing[] {
+    const stored = readJson(DRAWINGS_CLIPBOARD_KEY) as { version?: unknown; drawings?: unknown };
+    if (stored && stored.version === 1 && Array.isArray(stored.drawings)) {
+      return stored.drawings
+        .slice(0, MAX_DRAWINGS_PER_SYMBOL)
+        .map(parseDrawing)
+        .filter((drawing): drawing is Drawing => drawing !== null);
+    }
+    return this.clipboard;
+  }
+
+  /**
+   * Paste (Ctrl/⌘ + V): the copied drawings on the chart's symbol, this one or another, at their
+   * times and prices (ours: TradingView doesn't say where a paste lands; provisional §11), over
+   * every other, each with an id of its own and unlocked. One drawn on an indicator's pane comes
+   * only while that indicator is on the chart. The new drawings' ids, for the chart to select.
+   */
+  paste(): string[] {
+    if (!this.value.symbol) return [];
+    const panes = this.panes();
+    return this.add(
+      this.copied().filter((drawing) => drawing.pane === null || panes.has(drawing.pane)),
+    );
+  }
+
+  /** Copies of drawings added over every other, as far as a symbol's limit allows: their ids. */
+  private add(drawings: readonly Drawing[]): string[] {
+    const room = Math.max(0, MAX_DRAWINGS_PER_SYMBOL - this.value.drawings.length);
+    const copies = drawings.slice(0, room).map((drawing) => ({
+      ...drawing,
+      id: newDrawingId(),
+      locked: false,
+    }));
+    if (copies.length === 0) return [];
+    this.apply([...this.value.drawings, ...copies], true);
+    return copies.map((drawing) => drawing.id);
+  }
+
   /** Remove objects → Remove drawings: every drawing of the chart's symbol, one undo step. */
   removeAll(): void {
     if (this.value.drawings.length > 0) this.apply([], true);
@@ -258,7 +372,13 @@ export class DrawingStore {
    * until the dialog's Ok (finishPreview).
    */
   preview(drawing: Drawing): void {
-    const drawings = this.value.drawings.map((item) => (item.id === drawing.id ? drawing : item));
+    this.previewMany([drawing]);
+  }
+
+  /** Several drawings as a dialog or the color editor has them now (see preview). */
+  previewMany(changed: readonly Drawing[]): void {
+    const byId = new Map(changed.map((drawing) => [drawing.id, drawing]));
+    const drawings = this.value.drawings.map((item) => byId.get(item.id) ?? item);
     this.commit({ ...this.value, drawings });
   }
 

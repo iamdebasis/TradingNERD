@@ -9,7 +9,7 @@ import type {
 } from 'lightweight-charts';
 import { AXIS_LABEL, type DrawTarget, drawAxisLabel } from '../plugins/axisLabel';
 import type { DrawingEngine, PlacedShape } from './DrawingEngine';
-import { along, type Pt } from './geometry';
+import { along, type Pt, type Rect } from './geometry';
 import {
   cutSegment,
   drawArrowHead,
@@ -57,16 +57,26 @@ const MIDDLE_POINT_RADIUS = 3;
 /** Horizontal lines' text sits this far in from their ends (the capture's). */
 const H_TEXT_INSET = 3;
 
+/**
+ * The box Ctrl/⌘ + drag draws to select: a thin border in the drawings' blue over a light fill of
+ * it (ours: TradingView's box isn't measured yet, provisional §11).
+ */
+const BOX_COLOR = '#2962FF';
+const BOX_FILL = 0.1;
+
 /** TradingView's vertical alignment says which side of the text meets the line. */
 const SIDE_OF: Record<VAlign, TextSide> = { bottom: 'above', middle: 'on', top: 'below' };
 
 /**
- * From this many drawings standing still round one being moved or placed, those under it and
- * those over it are painted once into bitmaps of their own and copied each frame: a hundred
- * channels' and pitchforks' bands take too long to paint again at every move (measured in the
- * cloud's software canvas, 2026-11-26: 110 to 126 ms a frame).
+ * From this many drawings standing still round those being moved or placed, the still ones under
+ * the lowest moving one and over the highest are painted once into bitmaps of their own and
+ * copied each frame: a hundred channels' and pitchforks' bands take too long to paint again at
+ * every move (measured in the cloud's software canvas, 2026-11-26: 110 to 126 ms a frame).
  */
 const STILL_LAYERS_FROM = 12;
+
+/** The bitmaps: under the moving drawings and over them, for each of the two layers. */
+type StillName = 'bottom-under' | 'bottom-over' | 'top-under' | 'top-over';
 
 interface StillLayer {
   canvas: HTMLCanvasElement;
@@ -76,8 +86,10 @@ interface StillLayer {
 
 /**
  * One pane's user drawings (docs/SPEC.md §6.24), attached to the series whose scale the pane
- * has: the candles on the price pane, an indicator's first plot on its own pane. The pane
- * view paints over the series; the axis views paint under the crosshair's own labels.
+ * has: the candles on the price pane, an indicator's first plot on its own pane. Two pane views:
+ * one under the series for the drawings sent under the bars (Visual order, D3a), one over them
+ * for the rest, every handle and the selecting box; the axis views paint under the crosshair's
+ * own labels.
  */
 export class DrawingLayer implements ISeriesPrimitive<Time> {
   private readonly host: DrawingLayerHost;
@@ -86,18 +98,18 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   private readonly timeAxis: readonly IPrimitivePaneView[];
   private series: ISeriesApi<SeriesType> | null = null;
   private redraw: (() => void) | null = null;
-  /** The still drawings under and over the one moving, while one does. */
-  private still: { below: StillLayer | null; above: StillLayer | null } = {
-    below: null,
-    above: null,
-  };
+  /** The still drawings under and over those moving, while some do. */
+  private readonly still = new Map<StillName, StillLayer>();
   /** A number for each drawing object, so a still layer knows when one changed. */
   private readonly serials = new WeakMap<object, number>();
   private serial = 0;
 
   constructor(host: DrawingLayerHost) {
     this.host = host;
-    this.pane = [{ zOrder: () => 'top', renderer: () => ({ draw: (t) => this.drawPane(t) }) }];
+    this.pane = [
+      { zOrder: () => 'bottom', renderer: () => ({ draw: (t) => this.drawPane(t, true) }) },
+      { zOrder: () => 'top', renderer: () => ({ draw: (t) => this.drawPane(t, false) }) },
+    ];
     this.priceAxis = [
       { zOrder: () => 'normal', renderer: () => ({ draw: (t) => this.drawPriceAxis(t) }) },
     ];
@@ -145,39 +157,82 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     return this.timeAxis;
   }
 
-  private drawPane(target: DrawTarget): void {
+  /**
+   * The pane's drawings under the bars (`under`) or over them; the upper layer also paints every
+   * handle, over every drawing, and the box Ctrl/⌘ + drag is drawing.
+   */
+  private drawPane(target: DrawTarget, under: boolean): void {
     const pane = this.paneIndex();
     if (pane === null) return;
     const { engine } = this.host;
-    const shapes = engine.shapes(pane);
-    if (shapes.length === 0) return;
-    const active = engine.activeId();
-    const at = active === null ? -1 : shapes.findIndex((shape) => shape.drawing.id === active);
-    if (at < 0 || shapes.length - 1 < STILL_LAYERS_FROM) {
-      this.still = { below: null, above: null };
+    const all = engine.shapes(pane);
+    const shapes = all.filter((shape) => shape.drawing.below === under);
+    const box = under ? null : engine.selectionBox(pane);
+    const prefix = under ? 'bottom' : 'top';
+    const active = engine.activeIds();
+    let first = -1;
+    let last = -1;
+    if (active) {
+      for (const [i, shape] of shapes.entries()) {
+        if (!active.has(shape.drawing.id)) continue;
+        if (first < 0) first = i;
+        last = i;
+      }
+    }
+    const still = shapes.length - (first < 0 ? 0 : last - first + 1);
+    if (first < 0 || still < STILL_LAYERS_FROM) {
+      this.still.delete(`${prefix}-under`);
+      this.still.delete(`${prefix}-over`);
+      if (shapes.length === 0 && (under || (all.length === 0 && !box))) return;
       target.useMediaCoordinateSpace(({ context: ctx }) => {
         for (const shape of shapes) this.drawShape(ctx, shape);
-        this.drawHandles(ctx, shapes);
+        if (!under) this.drawOverlay(ctx, all, box);
       });
       return;
     }
-    // One drawing moving among many: the rest copied from their bitmaps, in the same order.
+    // Some moving among many: the still ones under the lowest moving drawing and over the highest
+    // copied from their bitmaps, those between painted afresh, all in the same order.
     target.useBitmapCoordinateSpace(
       ({ context: ctx, bitmapSize, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
-        const below = this.stillLayer('below', shapes.slice(0, at), bitmapSize, h, v);
-        const above = this.stillLayer('above', shapes.slice(at + 1), bitmapSize, h, v);
+        const below = this.stillLayer(`${prefix}-under`, shapes.slice(0, first), bitmapSize, h, v);
+        const above = this.stillLayer(`${prefix}-over`, shapes.slice(last + 1), bitmapSize, h, v);
         if (below) ctx.drawImage(below, 0, 0);
         ctx.save();
         ctx.scale(h, v);
-        this.drawShape(ctx, shapes[at] as PlacedShape);
+        for (const shape of shapes.slice(first, last + 1)) this.drawShape(ctx, shape);
         ctx.restore();
         if (above) ctx.drawImage(above, 0, 0);
+        if (under) return;
         ctx.save();
         ctx.scale(h, v);
-        this.drawHandles(ctx, shapes);
+        this.drawOverlay(ctx, all, box);
         ctx.restore();
       },
     );
+  }
+
+  /** Over every drawing: the handles, then the selecting box. */
+  private drawOverlay(
+    ctx: CanvasRenderingContext2D,
+    shapes: readonly PlacedShape[],
+    box: Rect | null,
+  ): void {
+    this.drawHandles(ctx, shapes);
+    if (!box) return;
+    const width = box.right - box.left;
+    const height = box.bottom - box.top;
+    ctx.save();
+    ctx.fillStyle = withAlpha(BOX_COLOR, BOX_FILL);
+    ctx.fillRect(box.left, box.top, width, height);
+    ctx.strokeStyle = BOX_COLOR;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(
+      Math.round(box.left) + 0.5,
+      Math.round(box.top) + 0.5,
+      Math.round(width),
+      Math.round(height),
+    );
+    ctx.restore();
   }
 
   /** Handles over every line: a selected drawing's, a hovered one's. */
@@ -198,9 +253,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     }
   }
 
-  /** The still drawings under (or over) the moving one, painted once while they stay so. */
+  /** The still drawings under (or over) the moving ones, painted once while they stay so. */
   private stillLayer(
-    which: 'below' | 'above',
+    which: StillName,
     shapes: readonly PlacedShape[],
     size: { width: number; height: number },
     h: number,
@@ -220,7 +275,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         return `${this.serialOf(drawing)}${state}:${at}`;
       }),
     ].join('|');
-    const kept = this.still[which];
+    const kept = this.still.get(which);
     if (kept?.key === key) return kept.canvas;
     const canvas = kept?.canvas ?? document.createElement('canvas');
     canvas.width = size.width;
@@ -229,7 +284,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!ctx) return null;
     ctx.setTransform(h, 0, 0, v, 0, 0);
     for (const shape of shapes) this.drawShape(ctx, shape);
-    this.still[which] = { canvas, key };
+    this.still.set(which, { canvas, key });
     return canvas;
   }
 
