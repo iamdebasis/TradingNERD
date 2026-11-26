@@ -1,6 +1,7 @@
 import { defaultDrawingStyle } from '@tradingnerd/core';
 import { describe, expect, it } from 'vitest';
-import { pitchfork, pitchforkFrame } from './pitchforks';
+import type { Pt } from './geometry';
+import { pitchfork, pitchforkFrame, pitchforkGuides } from './pitchforks';
 
 const pane = { width: 1_000, height: 600 };
 const pt = (x: number, y: number) => ({ x, y });
@@ -34,6 +35,44 @@ describe('where each pitchfork’s median starts and which way it runs', () => {
 
   it('has none when point 1 sits on the middle of points 2 and 3', () => {
     expect(pitchforkFrame('pitchfork', [pt(250, 150), pt(200, 100), pt(300, 200)])).toBeNull();
+  });
+});
+
+describe('the lines a pitchfork draws from point 1, as TradingView does (its screenshot, 26 November)', () => {
+  it('draws none for a Pitchfork, whose median starts at point 1', () => {
+    expect(pitchforkGuides('pitchfork', points)).toEqual([]);
+  });
+
+  it('draws a Schiff’s and a Modified Schiff’s from point 1 to point 2', () => {
+    for (const tool of ['schiff-pitchfork', 'modified-schiff-pitchfork'] as const) {
+      expect(pitchforkGuides(tool, points), tool).toEqual([[pt(100, 300), pt(200, 100)]]);
+    }
+  });
+
+  it('draws an Inside’s from point 1 to point 2, and from that line’s middle to point 3', () => {
+    expect(pitchforkGuides('inside-pitchfork', points)).toEqual([
+      [pt(100, 300), pt(200, 100)],
+      [pt(150, 200), pt(300, 200)],
+    ]);
+  });
+
+  it('starts a Modified Schiff’s median at the middle of its line from point 1', () => {
+    const [[a, b]] = pitchforkGuides('modified-schiff-pitchfork', points) as [[Pt, Pt]];
+    expect(pitchforkFrame('modified-schiff-pitchfork', points)?.origin).toEqual(
+      pt((a.x + b.x) / 2, (a.y + b.y) / 2),
+    );
+  });
+
+  it('runs an Inside’s median parallel to its second line', () => {
+    const [, [a, b]] = pitchforkGuides('inside-pitchfork', points) as [[Pt, Pt], [Pt, Pt]];
+    const direction = pitchforkFrame('inside-pitchfork', points)?.direction as Pt;
+    expect(direction.x * (b.y - a.y) - direction.y * (b.x - a.x)).toBe(0);
+  });
+
+  it('leaves out a line of no length', () => {
+    expect(pitchforkGuides('schiff-pitchfork', [pt(100, 300), pt(100, 300), pt(300, 200)])).toEqual(
+      [],
+    );
   });
 });
 
@@ -87,6 +126,50 @@ describe('a pitchfork as drawn', () => {
     expect([tine?.a, tine?.b]).toEqual([pt(300, 200), pt(1_004, 200)]);
   });
 
+  it('draws its lines from point 1 after its median and its line from point 2 to 3', () => {
+    for (const tool of ['schiff-pitchfork', 'modified-schiff-pitchfork'] as const) {
+      expect(
+        pitchfork(tool, points, defaultDrawingStyle(tool), pane)?.lines.slice(1),
+        tool,
+      ).toEqual([
+        [pt(200, 100), pt(300, 200)],
+        [pt(100, 300), pt(200, 100)],
+      ]);
+    }
+    const inside = pitchfork(
+      'inside-pitchfork',
+      points,
+      defaultDrawingStyle('inside-pitchfork'),
+      pane,
+    );
+    expect(inside?.lines.slice(1)).toEqual([
+      [pt(200, 100), pt(300, 200)],
+      [pt(100, 300), pt(200, 100)],
+      [pt(150, 200), pt(300, 200)],
+    ]);
+  });
+
+  it('keeps its lines from point 1 with its median turned off, as its line from point 2 to 3', () => {
+    const style = defaultDrawingStyle('schiff-pitchfork');
+    style.lineVisible = false;
+    expect(pitchfork('schiff-pitchfork', points, style, pane)?.lines).toEqual([
+      [pt(200, 100), pt(300, 200)],
+      [pt(100, 300), pt(200, 100)],
+    ]);
+  });
+
+  it('cuts a line from point 1 at the pane’s edge, 4 px past it', () => {
+    const off = [pt(-200, 300), pt(200, 100), pt(300, 200)];
+    const [, guide] =
+      pitchfork(
+        'schiff-pitchfork',
+        off,
+        defaultDrawingStyle('schiff-pitchfork'),
+        pane,
+      )?.lines.slice(1) ?? [];
+    expect(guide).toEqual([pt(-4, 202), pt(200, 100)]);
+  });
+
   it('runs to the left edge when drawn leftwards', () => {
     const left = [pt(900, 300), pt(800, 100), pt(700, 200)];
     expect(pitchfork('pitchfork', left, defaultDrawingStyle('pitchfork'), pane)?.lines[0]).toEqual([
@@ -102,6 +185,21 @@ describe('a pitchfork as drawn', () => {
     const parts = pitchfork('pitchfork', points, style, pane);
     expect(parts?.lines).toEqual([[pt(200, 100), pt(300, 200)]]);
     expect(parts?.fills).toEqual([]);
+  });
+
+  it('draws an Inside’s lines from point 1 though its median has no direction', () => {
+    // Point 3 at the middle of points 1 and 2: the second line has no length, the median none.
+    const flat = [pt(100, 300), pt(200, 100), pt(150, 200)];
+    const parts = pitchfork(
+      'inside-pitchfork',
+      flat,
+      defaultDrawingStyle('inside-pitchfork'),
+      pane,
+    );
+    expect(parts?.lines).toEqual([
+      [pt(200, 100), pt(150, 200)],
+      [pt(100, 300), pt(200, 100)],
+    ]);
   });
 
   it('draws only the line from point 2 to 3 when it has no direction, and keeps its handles', () => {
