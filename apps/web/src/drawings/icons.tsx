@@ -385,6 +385,20 @@ export function GearIcon() {
   );
 }
 
+/**
+ * Templates (D3b): three line samples in a frame, a thick one under two thin ones (ours:
+ * TradingView's icon isn't traced yet, provisional §11).
+ */
+export function TemplatesIcon() {
+  return (
+    <Icon>
+      <rect x="5.5" y="5.5" width="17" height="17" rx="2" />
+      <path d="M9 10.5h10M9 14.5h10" />
+      <path d="M9 18.5h10" strokeWidth="2" strokeLinecap="butt" />
+    </Icon>
+  );
+}
+
 /** The floating toolbar's More (⋯): three dots across, opening the drawing's menu (D3a). */
 export function MoreIcon() {
   return (

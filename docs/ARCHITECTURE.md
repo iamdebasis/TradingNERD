@@ -25,6 +25,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 │ Open interest (_OI): Binance's archive and APIs, Bybit, OKX      │
  │ My scripts: the Pine Editor's saved scripts and their versions   │
  │ Drawings: the user's, per symbol (data/drawings.json)            │
+ │ Drawing templates: per tool (data/drawing-templates.json)        │
  │ Storage: JSON files in data/ (gitignored, owner-only)            │
  └──────────────────────────┬───────────────────────────────────────┘
                             ▼ HTTPS and WebSockets to the providers only
@@ -55,8 +56,8 @@ A map of the code for anyone picking up the work. The details, with the reasons 
 | `openinterest/` | **P4:** TradingView's `_OI` symbols as an exchange of their own, one adapter per exchange (`OpenInterestExchange.ts`): names and units (`symbols.ts`), Binance's archive and APIs, Bybit and OKX (`sources.ts`, `zip.ts`), the points kept by month in `data/oi/` (`series.ts`), bars from points and live polls (`bars.ts`). `MarketService` sends a ticker ending `_OI` there |
 | `formula/` | `FormulaExchange.ts`: a typed formula (TOTAL2/XRPUSD) as its own exchange, built from its symbols' bars; serves up to a day, and the market service builds longer bars from its days (A6) |
 | `logos/` | CoinGecko's coin and exchange logos, cached in `data/logos/`; CoinGecko's client and its monthly call count |
-| `storage/` | Watchlists, flags, My scripts (`ScriptsStore.ts`, P1), the Pine libraries (`LibrariesStore.ts`, P2), the user's drawings (`DrawingsStore.ts`, D1), secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
-| `routes/` | REST: bars, symbols, watchlists, flags, scripts (`scripts.ts`), libraries (`libraries.ts`), drawings (`drawings.ts`), logos, the stock key, older caps |
+| `storage/` | Watchlists, flags, My scripts (`ScriptsStore.ts`, P1), the Pine libraries (`LibrariesStore.ts`, P2), the user's drawings (`DrawingsStore.ts`, D1), their templates (`DrawingTemplatesStore.ts`, D3b), secrets (`secrets.ts`), atomic JSON files (`jsonFile.ts`) |
+| `routes/` | REST: bars, symbols, watchlists, flags, scripts (`scripts.ts`), libraries (`libraries.ts`), drawings (`drawings.ts`), drawing templates (`drawingTemplates.ts`), logos, the stock key, older caps |
 | `ws/session.ts` | One WebSocket per browser tab: subscriptions to bars, quotes and live candles |
 
 ## How data flows
@@ -95,7 +96,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   2. `ChartPane` hands them to `apps/web/src/chart/requestLoader.ts` on each update: it loads each from `GET /api/bars` (pages back to 300 bars before the chart's first) and follows it on the WebSocket, and drops what no script asks for. When older chart bars come in, the indicator layer tells it the chart's new first bar first (`reachBack`), and a script whose contexts then page back waits for them.
   3. Each context's bars reach the engine through the loader (a `RequestFeed`); when one comes in, the scripts run afresh, and on its live updates only their live bar.
   4. Open interest symbols (`BINANCE:BTCUSDT.P_OI`) are just symbols to all this: the gateway's `openinterest/` adapters make their bars.
-- **Drawings** (D1 to D3a), the user's own on the chart:
+- **Drawings** (D1 to D3b), the user's own on the chart:
   1. The left toolbar (`apps/web/src/drawings/DrawingToolbar.tsx`) chooses a tool or a cursor and the modes; `drawingStore.ts` keeps them in this browser, and `ChartPane` hands them to `ChartController.setDrawingSettings`.
   2. The chart takes the pointer before Lightweight Charts does (`pointerdown` in the capture phase): `DrawingEngine` places, selects and drags drawings, and the chart's own panning pauses while it does.
   3. Each edit goes to the app (`onEdit`), which keeps it as an undo step and saves the symbol's whole list to the gateway (`PUT /api/drawings`); the list comes back to the chart (`setDrawings`). A save that fails is tried again every 3 s, with a notice on the chart.
@@ -103,6 +104,7 @@ A map of the code for anyone picking up the work. The details, with the reasons 
   5. Each pane's `DrawingLayer` draws its drawings above the crosshair, those sent to back under the series (D3a), and their labels on the price and time axes. While some drawings move among many, the still ones under and over them are painted once into bitmaps and copied each frame (D2, D3a).
   6. A regression trend (D2) is worked out from the chart's bars between its points; when its first is older than the chart's first bar, the engine asks the chart for that history (`needHistory`, the same pages scrolling back loads) and works it out once every bar is in.
   7. Several at once (D3a): the engine reports the selection (`onSelect`), and a right-click on a drawing (`onMenu`, from `ChartController`'s `contextmenu`); the app's menu and floating toolbar edit every drawing selected through `drawingStore` (one undo step each), and select what a clone or a paste added (`selectAdded`). Copy keeps drawings in this browser (`tn.drawings.clipboard`); Paste adds them to the chart's symbol, whichever it is.
+  8. Templates, last styles and favorites (D3b): the Template menus (`TemplateMenu.tsx`) apply a template through `drawingStore.applyStyle` and save one through `templateStore.ts`, which loads every tool's once (`GET /api/drawing-templates`) and saves a tool's whole list (`PUT`), the gateway keeping them in `data/drawing-templates.json`. Each style change sets its tool's last style (`toolStyles.ts`, in this browser), which the engine gives a new drawing (`styleOf`). The favorites are kept with the toolbar's modes; `FavoritesToolbar.tsx` shows them over the chart.
 - **US stocks:** Alpaca's free plan, 15 minutes delayed, under the market clock (sessions, holidays, extended hours).
 
 ## CRYPTOCAP (`apps/gateway/src/cryptocap/`)
@@ -129,6 +131,7 @@ SPEC §6.8 lists every file. The ones to protect:
 - `watchlists.json` and `flags.json`: the user's own lists.
 - `scripts.json`: My scripts and every saved version of each (P1).
 - `drawings.json`: the user's drawings, every symbol's (D1; the channels' and pitchforks' since D2, protocol 14; whether each is under the bars since D3a, protocol 15).
+- `drawing-templates.json`: the user's drawing templates, every tool's (D3b, protocol 16).
 - `cryptocap/anchors.json`: the kept days, which can't be downloaded again.
 - `cryptocap/older-coins/`: M9f's downloads, a few days of free requests.
 - `oi/`: open interest (P4). Binance's archive can be downloaded again; the points recorded beyond Bybit's and OKX's own windows can't.

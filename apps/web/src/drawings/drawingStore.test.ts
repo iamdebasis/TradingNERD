@@ -1,7 +1,9 @@
 import {
   type Drawing,
+  defaultDrawingStyle,
   MAX_DRAWINGS_PER_SYMBOL,
   newDrawing,
+  recolorDrawing,
   type SymbolDrawings,
 } from '@tradingnerd/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +16,7 @@ import {
   sanitizeToolbar,
   UNDO_LIMIT,
 } from './drawingStore';
+import { ToolStyles } from './toolStyles';
 
 let stored: Map<string, string>;
 
@@ -561,6 +564,103 @@ describe('when the gateway can’t be reached', () => {
     gateway.finishSave();
     await store.whenSaved();
     expect(gateway.held.get('BINANCE:XRPUSDT')?.map((d) => d.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('templates, last styles and favorites (D3b)', () => {
+  /** A ready store with a tool's last styles, on three drawings: two trend lines and a ray. */
+  async function styled() {
+    const gateway = new FakeGateway();
+    const styles = new ToolStyles();
+    const store = new DrawingStore(gateway, () => new Set(), new FakeLater().later, styles);
+    await ready(store);
+    const a = line('a');
+    a.style.text.value = 'Breakout';
+    const ray = newDrawing('r', 'ray', [
+      { time: 1_700_000_000, price: 1 },
+      { time: 1_700_003_600, price: 2 },
+    ]);
+    store.edit([a, line('b'), ray]);
+    return { store, styles };
+  }
+  const red = () => ({ ...defaultDrawingStyle('trend-line'), color: '#F23645', width: 4 });
+
+  it('applies a template to the drawings of its tool as one step, each keeping its text', async () => {
+    const { store, styles } = await styled();
+    const before = store.get().drawings;
+    store.applyStyle(['a', 'b', 'r'], 'trend-line', red());
+    const [a, b, r] = store.get().drawings;
+    expect([a?.style.color, b?.style.color, r?.style.color]).toEqual([
+      '#F23645',
+      '#F23645',
+      '#2962FF',
+    ]);
+    expect([a?.style.text.value, b?.style.text.value]).toEqual(['Breakout', '']);
+    // The tool's next drawing starts in it.
+    expect(styles.styleOf('trend-line')).toEqual(red());
+    expect(styles.styleOf('ray')).toBeUndefined();
+    store.undo();
+    expect(store.get().drawings).toBe(before);
+  });
+
+  it('gives the tool its defaults back with Apply default, even on a drawing already in them', async () => {
+    const { store, styles } = await styled();
+    styles.set('trend-line', red());
+    const before = store.get().drawings;
+    store.applyStyle(['b'], 'trend-line', defaultDrawingStyle('trend-line'));
+    // Nothing to change on the drawing: no undo step, but the next one starts from the defaults.
+    expect(store.get().drawings).toBe(before);
+    expect(store.get().canUndo).toBe(true);
+    store.undo();
+    expect(store.get().canUndo).toBe(false);
+    expect(styles.styleOf('trend-line')).toEqual(defaultDrawingStyle('trend-line'));
+  });
+
+  it('remembers the style the floating toolbar gives, but not a lock or a move', async () => {
+    const { store, styles } = await styled();
+    store.updateMany(['a'], (drawing) => ({ ...drawing, locked: true }));
+    store.edit(
+      store
+        .get()
+        .drawings.map((drawing) =>
+          drawing.id === 'b'
+            ? { ...drawing, points: drawing.points.map((p) => ({ ...p, price: p.price + 1 })) }
+            : drawing,
+        ),
+    );
+    expect(styles.styleOf('trend-line')).toBeUndefined();
+    store.updateMany(['b'], (drawing) => recolorDrawing(drawing, '#089981'));
+    expect(styles.styleOf('trend-line')?.color).toBe('#089981');
+  });
+
+  it('remembers the style a settings dialog keeps on Ok, and not one put back on Cancel', async () => {
+    const { store, styles } = await styled();
+    const before = store.get().drawings;
+    const b = before[1] as Drawing;
+    store.preview({ ...b, style: { ...b.style, width: 3 } });
+    store.finishPreview(before, false);
+    expect(styles.styleOf('trend-line')).toBeUndefined();
+    store.preview({ ...b, style: { ...b.style, width: 3 } });
+    store.finishPreview(before, true);
+    expect(styles.styleOf('trend-line')?.width).toBe(3);
+  });
+
+  it('stars tools in the order starred, kept in this browser', () => {
+    const store = new DrawingStore(new FakeGateway());
+    store.toggleFavorite('ray');
+    store.toggleFavorite('pitchfork');
+    store.toggleFavorite('trend-line');
+    store.toggleFavorite('pitchfork');
+    expect(store.get().prefs.favorites).toEqual(['ray', 'trend-line']);
+    expect(new DrawingStore(new FakeGateway()).get().prefs.favorites).toEqual([
+      'ray',
+      'trend-line',
+    ]);
+    // What isn't a tool, and a tool twice, aren't kept.
+    expect(
+      sanitizeToolbar({ favorites: ['ray', 'brush', 'ray', 7, 'pitchfork'] }).favorites,
+    ).toEqual(['ray', 'pitchfork']);
+    expect(sanitizeToolbar({ favorites: 'ray' }).favorites).toEqual([]);
   });
 });
 

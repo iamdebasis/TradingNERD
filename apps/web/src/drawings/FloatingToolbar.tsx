@@ -14,6 +14,7 @@ import {
   useState,
 } from 'react';
 import { readJson, writeJson } from '../lib/storage';
+import { PopupMenu } from '../watchlist/PopupMenu';
 import { ColorEditor, LineStyles, LineWidths } from './ColorEditor';
 import styles from './Drawings.module.css';
 import { drawingStore } from './drawingStore';
@@ -24,8 +25,11 @@ import {
   LineStyleIcon,
   MoreIcon,
   PadlockIcon,
+  TemplatesIcon,
   TrashIcon,
 } from './icons';
+import { templateEntries } from './TemplateMenu';
+import { useTemplates } from './templateStore';
 
 /** Where the floating toolbar was dragged to, kept in this browser. */
 export const FLOATING_TOOLBAR_KEY = 'tn.drawings.floatingToolbar';
@@ -64,8 +68,10 @@ function hasLine(tool: DrawingTool): boolean {
  * grip and left where it's put; the line's color, thickness and style, the settings, Lock and
  * Remove, and More (⋯), the drawings' menu (D3a). With several selected each button sets every
  * one of them (TradingView's blog, Change the color of multiple tools at once), showing the
- * first's; Remove leaves the locked ones, as the Delete key does. Its buttons and look are
- * provisional until measured from a screenshot (§11).
+ * first's; Remove leaves the locked ones, as the Delete key does. Templates (D3b), first after
+ * the grip, shows while they're all of one tool (Help Center, How to apply a template to several
+ * tools of the same type at once?). Its buttons and look are provisional until measured from a
+ * screenshot (§11).
  */
 export function FloatingToolbar({
   drawings,
@@ -84,6 +90,10 @@ export function FloatingToolbar({
   const box = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<Place | null>(readPlace);
   const [popup, setPopup] = useState<Popup | null>(null);
+  /** The Templates menu, open at this place in the window. */
+  const [templatesAt, setTemplatesAt] = useState<Place | null>(null);
+  const templatesButton = useRef<HTMLButtonElement>(null);
+  const templates = useTemplates();
   /** The drawings before the color editor opened: its changes are one undo step. */
   const before = useRef<readonly Drawing[] | null>(null);
   const drawing = drawings[0] as Drawing;
@@ -92,6 +102,8 @@ export function FloatingToolbar({
   const lined = drawings.some((item) => hasLine(item.tool));
   const allLocked = drawings.every((item) => item.locked);
   const removable = !lockAll && !allLocked;
+  const { tool } = drawing;
+  const oneTool = drawings.every((item) => item.tool === tool);
 
   // Gone while its color was being changed (deselected, removed): what was chosen stays.
   useEffect(
@@ -174,6 +186,27 @@ export function FloatingToolbar({
       <span className={styles.grip} title="Drag" onPointerDown={grab}>
         <GripIcon />
       </span>
+      {oneTool && (
+        <button
+          ref={templatesButton}
+          type="button"
+          className={styles.tool}
+          aria-label="Templates"
+          title="Templates"
+          aria-haspopup="menu"
+          aria-expanded={templatesAt !== null}
+          onClick={(event) => {
+            if (templatesAt) {
+              setTemplatesAt(null);
+              return;
+            }
+            const at = event.currentTarget.getBoundingClientRect();
+            setTemplatesAt({ x: Math.round(at.left), y: Math.round(at.bottom + 4) });
+          }}
+        >
+          <TemplatesIcon />
+        </button>
+      )}
       {lined && (
         <>
           <button
@@ -256,6 +289,21 @@ export function FloatingToolbar({
       >
         <MoreIcon />
       </button>
+      {templatesAt && oneTool && (
+        <PopupMenu
+          x={templatesAt.x}
+          y={templatesAt.y}
+          label="Templates"
+          anchor={templatesButton.current}
+          items={templateEntries({
+            tool,
+            state: templates,
+            style: () => drawing.style,
+            onApply: (style) => drawingStore.applyStyle(ids, tool, style),
+          })}
+          onClose={() => setTemplatesAt(null)}
+        />
+      )}
       {popup === 'color' && (
         <ColorEditor
           label="Line color"

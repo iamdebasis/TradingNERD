@@ -55,7 +55,7 @@ That is the whole list. Each provider also sees the Mac's IP address and which s
 - **Commit only as the project's identity, in UTC** (AGENTS.md, "Git"), and check before any push. Never put a personal email, name, home folder or time zone into a commit or a file.
 - **Screenshots** added to the repository have account names, avatars and anything identifying covered first. Keep the pixels the tests measure, and prove nothing else changed.
 - **Never get around a block** (bot checks, rate limits, refused requests). Back off, or ask the user.
-- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts and `data/libraries.json` the libraries they pasted: a check never saves, renames or deletes one (the browser tests fake `/api/scripts` and `/api/libraries`).
+- **Live checks against the user's app are read-only** (AGENTS.md). `data/scripts.json` holds the user's own scripts, `data/libraries.json` the libraries they pasted and `data/drawing-templates.json` their drawing templates: a check never saves, renames or deletes one (the browser tests fake `/api/scripts`, `/api/libraries` and `/api/drawing-templates`).
 
 ## Checks to run before a hand-over
 

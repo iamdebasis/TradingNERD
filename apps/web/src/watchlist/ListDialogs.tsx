@@ -64,12 +64,15 @@ function Dialog({
 
 /**
  * "Create new list…" and "Make a copy…": a name for the list (provisional look, docs/SPEC.md
- * §11). A name another list has gets " (1)" after it, as TradingView's do.
+ * §11). A name another list has gets " (1)" after it, as TradingView's do. A drawing template's
+ * name too (D3b), with its own label and length.
  */
 export function ListNameDialog({
   title,
   action,
   initialName,
+  label = 'List name',
+  maxLength = MAX_WATCHLIST_NAME,
   onSubmit,
   onClose,
 }: {
@@ -77,6 +80,9 @@ export function ListNameDialog({
   /** The button: "Create", "Copy". */
   action: string;
   initialName: string;
+  /** The field's label and placeholder. */
+  label?: string;
+  maxLength?: number;
   onSubmit(name: string): void;
   onClose(): void;
 }) {
@@ -85,12 +91,12 @@ export function ListNameDialog({
   return (
     <Dialog title={title} onClose={onClose} onSubmit={() => ready && onSubmit(name.trim())}>
       <label className={styles.field}>
-        <span className={styles.label}>List name</span>
+        <span className={styles.label}>{label}</span>
         <input
           className={styles.input}
           value={name}
-          maxLength={MAX_WATCHLIST_NAME}
-          placeholder="List name"
+          maxLength={maxLength}
+          placeholder={label}
           autoFocus
           onFocus={(event) => event.currentTarget.select()}
           onChange={(event) => setName(event.target.value)}

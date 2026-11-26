@@ -20,6 +20,13 @@ export interface PopupMenuItem {
   /** A submenu, opening beside the item (a › marks it); the item itself then does nothing. */
   items?: readonly PopupMenuEntry[];
   onSelect?(): void;
+  /**
+   * A ✕ at the row's right, shown while the mouse is over it (as TradingView's lists of saved
+   * things have, D3b): it closes the menu and calls this. Delete or Backspace on the row too.
+   */
+  onRemove?(): void;
+  /** The ✕'s label, "Remove" and the item's label by default. */
+  removeLabel?: string;
 }
 
 /** An item, a dividing line, or a row of its own (e.g. flag colors). */
@@ -30,6 +37,9 @@ const isItem = (entry: PopupMenuEntry): entry is PopupMenuItem =>
 
 /** A submenu sits this far from its item's row: its rows level with the item's (ours, §11). */
 const SUBMENU_INSET = 6;
+
+/** A level's items: its rows, and those inside a removable row's wrapper. */
+const ROWS = ':scope > [role="menuitem"], :scope > [data-removable] > [role="menuitem"]';
 
 /**
  * A menu at a point (right-click) or under a button: 32 px rows and full-width dividers. With
@@ -44,6 +54,8 @@ export function PopupMenu({
   label,
   items,
   note,
+  anchor,
+  layer,
   onClose,
 }: {
   x: number;
@@ -52,6 +64,10 @@ export function PopupMenu({
   items: readonly PopupMenuEntry[];
   /** A line of text under the items, e.g. a data credit. */
   note?: string | undefined;
+  /** The button it opened from: a press on it leaves the menu to the button, which toggles it. */
+  anchor?: HTMLElement | null | undefined;
+  /** Its z-index, over a dialog it's opened in (the dialogs' 200); the page's menus' 150 else. */
+  layer?: number | undefined;
   onClose(): void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
@@ -66,14 +82,20 @@ export function PopupMenu({
   openRef.current = open;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
 
-  // Keep it inside the window, on whole pixels so its text stays sharp.
+  // Keep it inside the window, on whole pixels so its text stays sharp. Opened under a button
+  // with no room left below it, it goes above the button rather than over it.
   useLayoutEffect(() => {
     const box = menu.current?.getBoundingClientRect();
     if (!box) return;
+    const button = anchorRef.current?.getBoundingClientRect();
+    const roomBelow = y + box.height <= window.innerHeight - 4;
+    const top = button && !roomBelow ? button.top - 4 - box.height : y;
     setPosition({
       left: Math.round(Math.max(4, Math.min(x, window.innerWidth - box.width - 4))),
-      top: Math.round(Math.max(4, Math.min(y, window.innerHeight - box.height - 4))),
+      top: Math.round(Math.max(4, Math.min(top, window.innerHeight - box.height - 4))),
     });
   }, [x, y]);
 
@@ -104,7 +126,9 @@ export function PopupMenu({
   useEffect(() => {
     firstItem(menu.current)?.focus();
     const onPointerDown = (event: PointerEvent) => {
-      if (!menu.current?.contains(event.target as Node)) closeRef.current();
+      const target = event.target as Node;
+      if (menu.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      closeRef.current();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -132,6 +156,15 @@ export function PopupMenu({
     item.onSelect?.();
   };
 
+  const remove = (item: PopupMenuItem) => {
+    if (!item.onRemove) return;
+    onClose();
+    item.onRemove();
+  };
+
+  const opened = open === null ? undefined : items[open];
+  const subItems = opened !== undefined && isItem(opened) ? opened.items : undefined;
+
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const level = target.closest<HTMLElement>('[role="menu"]');
@@ -141,7 +174,7 @@ export function PopupMenu({
       case 'ArrowDown':
       case 'ArrowUp': {
         event.preventDefault();
-        const rows = [...level.querySelectorAll<HTMLElement>(':scope > [role="menuitem"]')].filter(
+        const rows = [...level.querySelectorAll<HTMLElement>(ROWS)].filter(
           (row) => !(row as HTMLButtonElement).disabled,
         );
         if (rows.length === 0) return;
@@ -170,11 +203,18 @@ export function PopupMenu({
         menu.current?.querySelector<HTMLElement>(`[data-entry="${at}"]`)?.focus();
         return;
       }
+      case 'Delete':
+      case 'Backspace': {
+        // A removable row's ✕ from the keyboard; never the chart's Delete under the menu.
+        const list = inSub ? subItems : items;
+        const item = list?.[Number(target.dataset.entry)];
+        if (item === undefined || !isItem(item) || !item.onRemove) return;
+        event.preventDefault();
+        remove(item);
+        return;
+      }
     }
   };
-
-  const opened = open === null ? undefined : items[open];
-  const subItems = opened !== undefined && isItem(opened) ? opened.items : undefined;
 
   return createPortal(
     <div
@@ -183,7 +223,7 @@ export function PopupMenu({
       role="menu"
       aria-label={label}
       data-icons={hasIcons(items) ? '' : undefined}
-      style={position}
+      style={layer === undefined ? position : { ...position, zIndex: layer }}
       onKeyDown={onKeyDown}
     >
       {items.map((entry, i) => (
@@ -196,6 +236,7 @@ export function PopupMenu({
           onHover={() => setOpen(isItem(entry) && entry.items && !entry.disabled ? i : null)}
           onOpen={() => setOpen(open === i ? null : i)}
           onChoose={choose}
+          onRemove={remove}
         />
       ))}
       {note && <p className={styles.note}>{note}</p>}
@@ -218,6 +259,7 @@ export function PopupMenu({
               onHover={() => {}}
               onOpen={() => {}}
               onChoose={choose}
+              onRemove={remove}
             />
           ))}
         </div>
@@ -234,6 +276,7 @@ function Entry({
   onHover,
   onOpen,
   onChoose,
+  onRemove,
 }: {
   entry: PopupMenuEntry;
   index: number;
@@ -241,11 +284,12 @@ function Entry({
   onHover(): void;
   onOpen(): void;
   onChoose(item: PopupMenuItem): void;
+  onRemove(item: PopupMenuItem): void;
 }) {
   if (entry === 'separator') return <hr className={styles.separator} />;
   if ('custom' in entry) return <div className={styles.custom}>{entry.custom}</div>;
   const parent = entry.items !== undefined;
-  return (
+  const row = (
     <button
       type="button"
       role="menuitem"
@@ -263,6 +307,22 @@ function Entry({
       {parent && <ChevronIcon />}
     </button>
   );
+  if (!entry.onRemove) return row;
+  return (
+    <div className={styles.removable} data-removable="">
+      {row}
+      <button
+        type="button"
+        className={styles.remove}
+        tabIndex={-1}
+        aria-label={entry.removeLabel ?? `Remove ${entry.label}`}
+        title="Remove"
+        onClick={() => onRemove(entry)}
+      >
+        <RemoveIcon />
+      </button>
+    </div>
+  );
 }
 
 /** As in TradingView, a menu with icons keeps a column for them, labels or not. */
@@ -270,7 +330,8 @@ const hasIcons = (items: readonly PopupMenuEntry[]) =>
   items.some((item) => item !== 'separator' && ('custom' in item || item.icon !== undefined));
 
 const firstItem = (level: HTMLElement | null) =>
-  level?.querySelector<HTMLButtonElement>(':scope > [role="menuitem"]:not(:disabled)') ?? null;
+  [...(level?.querySelectorAll<HTMLButtonElement>(ROWS) ?? [])].find((row) => !row.disabled) ??
+  null;
 
 /** The › of an item with a submenu, as the row menu's "Add to watchlist" (traced, §11). */
 function ChevronIcon() {
@@ -284,6 +345,20 @@ function ChevronIcon() {
       aria-hidden="true"
     >
       <path d="M1.5 1.5 6.5 7l-5 5.5" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+/** The ✕ of a removable row (the size of the watchlist's remove crosses; ours, §11). */
+function RemoveIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+      <path
+        d="m1.5 1.5 7 7m0-7-7 7"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

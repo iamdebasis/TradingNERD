@@ -2,6 +2,7 @@ export * from './clock.ts';
 export * from './config.ts';
 export * from './drawingOrder.ts';
 export * from './drawings.ts';
+export * from './drawingTemplates.ts';
 export * from './flags.ts';
 export * from './formula.ts';
 export * from './intervals.ts';

@@ -650,6 +650,11 @@ export class ChartController {
     this.layoutFrame = requestAnimationFrame(() => this.options.onLayout?.());
   }
 
+  /** The price scale's width in px: what an overlay at the chart's right keeps clear of (D3b). */
+  priceAxisWidth(): number {
+    return this.chart.priceScale('right').width();
+  }
+
   /**
    * Each pane's place in the chart (CSS px from its top), the price pane first, and the
    * indicator in it (none for the price pane), for the panes' legends.

@@ -187,6 +187,52 @@
 }
 
 /*
+ * A drawing tool's favorite star (D3b), at its row's right: shown on hover, gray, lighter under
+ * the mouse; a favorite's always shown, in TradingView's orange (its staff Masterclass: "the gray
+ * star ... turns orange"). Its size and place are the interval menu's measured star's, 15.5 px
+ * with its right edge 16 px in (provisional here, docs/SPEC.md §11).
+ */
+.row {
+  position: relative;
+}
+
+.star {
+  position: absolute;
+  top: 0;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15.5px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.row:hover .star,
+.star:focus-visible {
+  visibility: visible;
+}
+
+.star:hover {
+  color: var(--color-text);
+}
+
+.row[data-favorite="true"] .star {
+  color: #ff9800;
+  visibility: visible;
+}
+
+.star:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/*
  * Hiding the toolbar (TradingView's Drawings toolbar switch, in its main menu; the Charting
  * Library's toolbar hider arrow): an arrow at its foot, and once hidden a tab over the chart's
  * left edge that takes no room. Placement and look provisional (docs/SPEC.md §11).
