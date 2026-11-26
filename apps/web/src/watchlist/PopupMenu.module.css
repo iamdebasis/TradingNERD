@@ -47,9 +47,32 @@
 
 .item:hover,
 .item:focus-visible,
+.item[aria-expanded="true"],
 .custom:hover {
   background: var(--color-gutter);
   outline: none;
+}
+
+/* An item that can't be chosen now: its text in the shortcut's gray, no hover (ours, §11). */
+.item:disabled {
+  color: var(--color-avatar-text);
+  cursor: default;
+}
+
+.item:disabled:hover {
+  background: transparent;
+}
+
+/* A submenu beside its item (D3a): the same menu, over its parent. */
+.submenu {
+  z-index: 151;
+}
+
+/* The › of an item with a submenu, where a shortcut would end. */
+.chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--color-text-secondary);
 }
 
 .icon {

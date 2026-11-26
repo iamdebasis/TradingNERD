@@ -1,6 +1,7 @@
 import {
   type Drawing,
   type DrawingLineStyle,
+  type DrawingTool,
   recolorDrawing,
   TOOL_OPTIONS,
 } from '@tradingnerd/core';
@@ -16,7 +17,15 @@ import { readJson, writeJson } from '../lib/storage';
 import { ColorEditor, LineStyles, LineWidths } from './ColorEditor';
 import styles from './Drawings.module.css';
 import { drawingStore } from './drawingStore';
-import { GearIcon, GripIcon, LineColorIcon, LineStyleIcon, PadlockIcon, TrashIcon } from './icons';
+import {
+  GearIcon,
+  GripIcon,
+  LineColorIcon,
+  LineStyleIcon,
+  MoreIcon,
+  PadlockIcon,
+  TrashIcon,
+} from './icons';
 
 /** Where the floating toolbar was dragged to, kept in this browser. */
 export const FLOATING_TOOLBAR_KEY = 'tn.drawings.floatingToolbar';
@@ -37,27 +46,52 @@ function readPlace(): Place | null {
     : null;
 }
 
-/**
- * TradingView's floating toolbar for a selected drawing (docs/SPEC.md §5.27): moved by its grip
- * and left where it's put; the line's color, thickness and style, the settings, Lock and Remove.
- * Its buttons and look are provisional until measured from a screenshot (§11).
- */
-export function FloatingToolbar({ drawing, onSettings }: { drawing: Drawing; onSettings(): void }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<Place | null>(readPlace);
-  const [popup, setPopup] = useState<Popup | null>(null);
-  /** The drawings before the color editor opened: its changes are one undo step. */
-  const before = useRef<readonly Drawing[] | null>(null);
-  const { style } = drawing;
-  const options = TOOL_OPTIONS[drawing.tool];
-  // A drawing has a line to style unless it's only text (later milestones).
-  const hasLine =
+/** A drawing has a line to style unless it's only text (later milestones). */
+function hasLine(tool: DrawingTool): boolean {
+  const options = TOOL_OPTIONS[tool];
+  return (
     options.extend ||
     options.extendMenu ||
     options.extendLines ||
     options.showPrice ||
     options.showTime ||
-    options.stats;
+    options.stats
+  );
+}
+
+/**
+ * TradingView's floating toolbar for the drawings selected (docs/SPEC.md §5.27): moved by its
+ * grip and left where it's put; the line's color, thickness and style, the settings, Lock and
+ * Remove, and More (⋯), the drawings' menu (D3a). With several selected each button sets every
+ * one of them (TradingView's blog, Change the color of multiple tools at once), showing the
+ * first's; Remove leaves the locked ones, as the Delete key does. Its buttons and look are
+ * provisional until measured from a screenshot (§11).
+ */
+export function FloatingToolbar({
+  drawings,
+  lockAll,
+  onSettings,
+  onMore,
+}: {
+  /** The drawings selected, in drawing order: one at least. */
+  drawings: readonly Drawing[];
+  /** Lock all drawings is on: none can be removed. */
+  lockAll: boolean;
+  onSettings(): void;
+  /** More (⋯): the drawings' menu, opening at this place in the window. */
+  onMore(at: { x: number; y: number }): void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<Place | null>(readPlace);
+  const [popup, setPopup] = useState<Popup | null>(null);
+  /** The drawings before the color editor opened: its changes are one undo step. */
+  const before = useRef<readonly Drawing[] | null>(null);
+  const drawing = drawings[0] as Drawing;
+  const ids = drawings.map((item) => item.id);
+  const { style } = drawing;
+  const lined = drawings.some((item) => hasLine(item.tool));
+  const allLocked = drawings.every((item) => item.locked);
+  const removable = !lockAll && !allLocked;
 
   // Gone while its color was being changed (deselected, removed): what was chosen stays.
   useEffect(
@@ -110,7 +144,7 @@ export function FloatingToolbar({ drawing, onSettings }: { drawing: Drawing; onS
   };
 
   const change = (next: Partial<Drawing['style']>) =>
-    drawingStore.update(drawing.id, (current) => ({
+    drawingStore.updateMany(ids, (current) => ({
       ...current,
       style: { ...current.style, ...next },
     }));
@@ -140,7 +174,7 @@ export function FloatingToolbar({ drawing, onSettings }: { drawing: Drawing; onS
       <span className={styles.grip} title="Drag" onPointerDown={grab}>
         <GripIcon />
       </span>
-      {hasLine && (
+      {lined && (
         <>
           <button
             type="button"
@@ -188,31 +222,49 @@ export function FloatingToolbar({ drawing, onSettings }: { drawing: Drawing; onS
       <button
         type="button"
         className={styles.tool}
-        aria-label={drawing.locked ? 'Unlock' : 'Lock'}
-        title={drawing.locked ? 'Unlock' : 'Lock'}
-        aria-pressed={drawing.locked}
+        aria-label={allLocked ? 'Unlock' : 'Lock'}
+        title={allLocked ? 'Unlock' : 'Lock'}
+        aria-pressed={allLocked}
         onClick={() =>
-          drawingStore.update(drawing.id, (current) => ({ ...current, locked: !current.locked }))
+          drawingStore.updateMany(ids, (current) =>
+            current.locked === !allLocked ? current : { ...current, locked: !allLocked },
+          )
         }
       >
-        <PadlockIcon locked={drawing.locked} />
+        <PadlockIcon locked={allLocked} />
       </button>
       <button
         type="button"
         className={styles.tool}
         aria-label="Remove"
         title="Remove"
-        onClick={() => drawingStore.remove([drawing.id])}
+        disabled={!removable}
+        onClick={() => drawingStore.removeUnlocked(ids)}
       >
         <TrashIcon />
+      </button>
+      <button
+        type="button"
+        className={styles.tool}
+        aria-label="More"
+        title="More"
+        aria-haspopup="menu"
+        onClick={(event) => {
+          const at = event.currentTarget.getBoundingClientRect();
+          onMore({ x: Math.round(at.left), y: Math.round(at.bottom + 4) });
+        }}
+      >
+        <MoreIcon />
       </button>
       {popup === 'color' && (
         <ColorEditor
           label="Line color"
           color={style.color}
-          // The whole drawing takes the color: a channel's levels and background, a
+          // Each drawing takes the color whole: a channel's levels and background, a
           // pitchfork's levels, a regression's bands too (core's recolorDrawing; §11).
-          onChange={(color) => drawingStore.preview(recolorDrawing(drawing, color))}
+          onChange={(color) =>
+            drawingStore.previewMany(drawings.map((item) => recolorDrawing(item, color)))
+          }
           onClose={closeColor}
           style={{ top: 42, left: 0 }}
         />

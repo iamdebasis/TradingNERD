@@ -4,12 +4,15 @@ import {
   DRAWING_BLUE,
   DRAWING_RED,
   type DrawingLevel,
+  type DrawingVisibility,
   defaultDrawingStyle,
   defaultVisibility,
   drawingsKey,
+  intervalVisibility,
   MAX_DRAWING_TEXT,
   MAX_DRAWINGS_PER_SYMBOL,
   newDrawing,
+  newDrawingId,
   PITCHFORK_TOOLS,
   parseDrawing,
   parseDrawingsFile,
@@ -121,6 +124,25 @@ describe('a stored drawing', () => {
     const base = JSON.parse(JSON.stringify(line()));
     expect(parseDrawing({ ...base, pane: 'rsi-1' })?.pane).toBe('rsi-1');
   });
+
+  it('sits over the bars unless sent under them, an older file’s over them (protocol 15)', () => {
+    const base = JSON.parse(JSON.stringify(line()));
+    expect(line().below).toBe(false);
+    expect(parseDrawing({ ...base, below: true })?.below).toBe(true);
+    delete base.below;
+    expect(parseDrawing(base)?.below).toBe(false);
+    expect(parseDrawing({ ...base, below: 'yes' })?.below).toBe(false);
+  });
+});
+
+describe('a new drawing’s id', () => {
+  it('is never the same twice, and is letters and digits as a stored id must be', () => {
+    const ids = new Set(Array.from({ length: 10_000 }, () => newDrawingId()));
+    expect(ids.size).toBe(10_000);
+    for (const id of [...ids].slice(0, 50)) {
+      expect(parseDrawing({ ...JSON.parse(JSON.stringify(line())), id })?.id).toBe(id);
+    }
+  });
 });
 
 describe('a symbol’s drawings', () => {
@@ -176,6 +198,76 @@ describe('visibility on intervals (the Visibility tab)', () => {
     expect(visibleOn(rows, res('240'))).toBe(true);
     expect(visibleOn(rows, res('720'))).toBe(false);
     expect(visibleOn(rows, res('1D'))).toBe(true);
+  });
+});
+
+describe('the Intervals visibility menu’s quick choices (D3a)', () => {
+  const EVERY = ['1T', '10S', '1', '30', '60', '240', '720', '1D', '1W', '1M', '12M'];
+  const shownOn = (rows: DrawingVisibility, list: readonly string[] = EVERY) =>
+    list.filter((text) => visibleOn(rows, res(text)));
+  const hiddenEverywhere = () => {
+    const rows = defaultVisibility();
+    for (const row of Object.values(rows)) row.on = false;
+    return rows;
+  };
+
+  it('shows a drawing on 4 hours and longer with “Current interval and above” on 4h', () => {
+    const rows = intervalVisibility('current-and-above', res('240'), defaultVisibility());
+    expect(shownOn(rows)).toEqual(['240', '720', '1D', '1W', '1M', '12M']);
+    expect(rows.hours).toEqual({ on: true, from: 4, to: 24 });
+    expect(rows.minutes.on).toBe(false);
+    expect(rows.days).toEqual({ on: true, from: 1, to: 366 });
+  });
+
+  it('shows it on 4 hours and shorter with “Current interval and below”', () => {
+    const rows = intervalVisibility('current-and-below', res('240'), hiddenEverywhere());
+    expect(shownOn(rows)).toEqual(['1T', '10S', '1', '30', '60', '240']);
+    expect(rows.hours).toEqual({ on: true, from: 1, to: 4 });
+    expect(rows.seconds).toEqual({ on: true, from: 1, to: 59 });
+  });
+
+  it('shows it on 4 hours alone with “Current interval only”', () => {
+    const rows = intervalVisibility('current-only', res('240'), defaultVisibility());
+    expect(shownOn(rows)).toEqual(['240']);
+    expect(rows.hours).toEqual({ on: true, from: 4, to: 4 });
+  });
+
+  it('shows it everywhere again with “All intervals”', () => {
+    expect(intervalVisibility('all', res('240'), hiddenEverywhere())).toEqual(defaultVisibility());
+  });
+
+  it('reads each interval in its own row: ticks, seconds, minutes, days and months', () => {
+    const from = defaultVisibility();
+    expect(shownOn(intervalVisibility('current-only', res('1'), from))).toEqual(['1']);
+    expect(shownOn(intervalVisibility('current-only', res('10S'), from))).toEqual(['10S']);
+    expect(shownOn(intervalVisibility('current-only', res('1T'), from))).toEqual(['1T']);
+    expect(shownOn(intervalVisibility('current-and-above', res('1T'), from))).toEqual(EVERY);
+    expect(shownOn(intervalVisibility('current-and-above', res('1D'), from))).toEqual([
+      '1D',
+      '1W',
+      '1M',
+      '12M',
+    ]);
+    expect(shownOn(intervalVisibility('current-and-below', res('1M'), from))).toEqual(
+      EVERY.slice(0, -1),
+    );
+    expect(shownOn(intervalVisibility('current-and-above', res('12M'), from))).toEqual(['12M']);
+  });
+
+  it('keeps the counts around an interval that isn’t a whole one of its row (90 minutes)', () => {
+    const only = intervalVisibility('current-only', res('90'), defaultVisibility());
+    expect(only.hours).toEqual({ on: true, from: 1, to: 2 });
+    expect(shownOn(only, ['30', '60', '90', '120', '180'])).toEqual(['60', '90', '120']);
+    const above = intervalVisibility('current-and-above', res('90'), defaultVisibility());
+    expect(shownOn(above, ['30', '90', '180', '1D'])).toEqual(['90', '180', '1D']);
+  });
+
+  it('leaves Ranges as it was, but for All intervals', () => {
+    const from = hiddenEverywhere();
+    expect(intervalVisibility('current-and-above', res('60'), from).ranges.on).toBe(false);
+    from.ranges.on = true;
+    expect(intervalVisibility('current-only', res('60'), from).ranges.on).toBe(true);
+    expect(intervalVisibility('all', res('60'), hiddenEverywhere()).ranges.on).toBe(true);
   });
 });
 

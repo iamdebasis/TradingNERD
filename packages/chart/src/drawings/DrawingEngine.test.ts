@@ -375,6 +375,195 @@ describe('editing', () => {
   });
 });
 
+describe('several drawings at once (D3a)', () => {
+  // a: bars 10 to 20, prices 200 to 250 (its middle at x 155, y 275); b: bars 40 to 50, prices
+  // 100 to 150 (x 405 to 505, y 400 to 350); r on the RSI pane: bars 10 to 20, values 30 to 50.
+  const a = () =>
+    given('a', 'trend-line', [
+      [10, 200],
+      [20, 250],
+    ]);
+  const b = (options: Partial<Drawing> = {}) =>
+    given(
+      'b',
+      'trend-line',
+      [
+        [40, 100],
+        [50, 150],
+      ],
+      options,
+    );
+  const r = () => ({
+    ...given('r', 'trend-line', [
+      [10, 30],
+      [20, 50],
+    ]),
+    pane: 'rsi',
+  });
+
+  it('adds a drawing to the selection with Ctrl/⌘ + click, and takes it out again', () => {
+    engine.setDrawings([a(), b({ locked: true })]);
+    click(155, 275);
+    click(455, 375, { mod: true });
+    expect(engine.selection()).toEqual(['a', 'b']);
+    click(155, 275, { mod: true });
+    expect(engine.selection()).toEqual(['b']);
+    expect(edits).toHaveLength(0);
+  });
+
+  it('selects one of several alone on a plain click', () => {
+    engine.setDrawings([a(), b()]);
+    engine.select(['a', 'b']);
+    click(155, 275);
+    expect(engine.selection()).toEqual(['a']);
+  });
+
+  it('selects what a Ctrl/⌘ box touches, adding it to the selection', () => {
+    engine.setDrawings([a(), b(), given('c', 'horizontal-line', [[5, 50]])]);
+    engine.select(['c']);
+    expect(engine.pointerDown(input(90, 240, { mod: true }))).toBe(true);
+    engine.pointerMove(input(300, 300, { mod: true }), true);
+    expect(engine.selectionBox(0)).toEqual({ left: 90, top: 240, right: 300, bottom: 300 });
+    expect(engine.selectionBox(1)).toBeNull();
+    expect(host.panning.at(-1)).toBe(false);
+    engine.pointerMove(input(520, 410, { mod: true }), true);
+    engine.pointerUp(input(520, 410, { mod: true }));
+    expect(engine.selection()).toEqual(['a', 'b', 'c']);
+    expect(engine.selectionBox(0)).toBeNull();
+    expect(host.panning.at(-1)).toBe(true);
+    expect(edits).toHaveLength(0);
+  });
+
+  it('takes only what the box touches, and nothing on a Ctrl/⌘ click on no drawing', () => {
+    engine.setDrawings([a(), b()]);
+    drag([90, 240], [260, 310], { mod: true });
+    expect(engine.selection()).toEqual(['a']);
+    click(700, 50, { mod: true });
+    expect(engine.selection()).toEqual(['a']);
+  });
+
+  it('lets go of a box on Escape, the selection as it was', () => {
+    engine.setDrawings([a(), b()]);
+    engine.select(['b']);
+    engine.pointerDown(input(90, 240, { mod: true }));
+    engine.pointerMove(input(260, 310, { mod: true }), true);
+    expect(engine.cancel()).toBe(true);
+    engine.pointerUp(input(260, 310, { mod: true }));
+    expect(engine.selection()).toEqual(['b']);
+    expect(engine.selectionBox(0)).toBeNull();
+  });
+
+  it('moves every selected drawing together, by the same bars and pixels on their own panes', () => {
+    engine.setDrawings([a(), b({ locked: true }), r()]);
+    engine.select(['a', 'b', 'r']);
+    engine.pointerDown(input(155, 275));
+    engine.pointerMove(input(175, 255), true);
+    expect(engine.activeIds()).toEqual(new Set(['a', 'r']));
+    engine.pointerUp(input(175, 255));
+    const [movedA, keptB, movedR] = lastEdit();
+    expect(movedA?.points).toEqual([
+      { time: at(12), price: 220 },
+      { time: at(22), price: 270 },
+    ]);
+    // A locked one stays where it is.
+    expect(keptB).toEqual(b({ locked: true }));
+    // 20 px up on the RSI pane is 10 of its values.
+    expect(movedR?.points).toEqual([
+      { time: at(12), price: 40 },
+      { time: at(22), price: 60 },
+    ]);
+    expect(engine.selection()).toEqual(['a', 'b', 'r']);
+  });
+
+  it('clones every selected drawing with Ctrl/⌘ + drag, selecting the copies', () => {
+    engine.setDrawings([a(), b()]);
+    engine.select(['a', 'b']);
+    drag([155, 275], [175, 255], { mod: true });
+    const [keptA, keptB, copyA, copyB] = lastEdit();
+    expect([keptA, keptB]).toEqual([a(), b()]);
+    expect(copyA?.id).toBe('n1');
+    expect(copyA?.points[0]).toEqual({ time: at(12), price: 220 });
+    expect(copyB?.id).toBe('n2');
+    expect(copyB?.points[0]).toEqual({ time: at(42), price: 120 });
+    expect(engine.selection()).toEqual(['n1', 'n2']);
+  });
+
+  it('clones only the drawing pressed when it isn’t one of those selected', () => {
+    engine.setDrawings([a(), b()]);
+    engine.select(['b']);
+    drag([155, 275], [175, 255], { mod: true });
+    expect(lastEdit().map((drawing) => drawing.id)).toEqual(['a', 'b', 'n1']);
+    expect(engine.selection()).toEqual(['n1']);
+  });
+
+  it('holds a drag with Shift to across, or to up and down, the way the pointer went further', () => {
+    engine.setDrawings([a()]);
+    drag([155, 275], [195, 265], { shift: true });
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(14), price: 200 },
+      { time: at(24), price: 250 },
+    ]);
+    engine.setDrawings([a()]);
+    drag([155, 275], [165, 235], { shift: true });
+    expect(lastEdit()[0]?.points).toEqual([
+      { time: at(10), price: 240 },
+      { time: at(20), price: 290 },
+    ]);
+  });
+
+  it('moves the selection with the arrow keys, a bar across or a pixel up or down', () => {
+    engine.setDrawings([a(), b({ locked: true })]);
+    expect(engine.nudge(1, 0)).toBe(false);
+    engine.select(['a', 'b']);
+    expect(engine.nudge(1, 0)).toBe(true);
+    expect(engine.nudge(0, -1)).toBe(true);
+    const [movedA, keptB] = lastEdit();
+    expect(movedA?.points).toEqual([
+      { time: at(11), price: 201 },
+      { time: at(21), price: 251 },
+    ]);
+    expect(keptB).toEqual(b({ locked: true }));
+    // Lock all: the keys still belong to the selection, but nothing moves.
+    engine.setSettings({ lockAll: true });
+    expect(engine.nudge(1, 0)).toBe(true);
+    expect(edits).toHaveLength(2);
+  });
+
+  it('gives a right-click’s drawing, selecting it unless it’s one of those selected', () => {
+    engine.setDrawings([a(), b()]);
+    expect(engine.contextAt(input(155, 275))).toBe('a');
+    expect(engine.selection()).toEqual(['a']);
+    engine.select(['a', 'b']);
+    expect(engine.contextAt(input(455, 375))).toBe('b');
+    expect(engine.selection()).toEqual(['a', 'b']);
+    expect(engine.contextAt(input(700, 50))).toBeNull();
+    engine.setSettings({ tool: 'trend-line' });
+    expect(engine.contextAt(input(155, 275))).toBeNull();
+  });
+
+  it('opens the menu on a Mac’s Ctrl + click, its right-click, leaving the selection alone', () => {
+    engine.setDrawings([a(), b()]);
+    engine.select(['b']);
+    // The press comes first, with Ctrl: it would add a to the selection on its release.
+    engine.pointerDown(input(155, 275, { mod: true }));
+    expect(engine.contextAt(input(155, 275, { mod: true }))).toBe('a');
+    engine.pointerUp(input(155, 275, { mod: true }));
+    expect(engine.selection()).toEqual(['a']);
+    expect(host.panning.at(-1)).toBe(true);
+    // On no drawing, the box it began goes too.
+    engine.pointerDown(input(700, 50, { mod: true }));
+    expect(engine.contextAt(input(700, 50, { mod: true }))).toBeNull();
+    expect(engine.selectionBox(0)).toBeNull();
+  });
+
+  it('lets a selection go on a plain press elsewhere, all of it', () => {
+    engine.setDrawings([a(), b()]);
+    engine.select(['a', 'b']);
+    expect(engine.pointerDown(input(700, 50))).toBe(false);
+    expect(engine.selection()).toEqual([]);
+  });
+});
+
 describe('what shows', () => {
   it('runs a ray from its first point through its second to the pane’s edge', () => {
     engine.setDrawings([

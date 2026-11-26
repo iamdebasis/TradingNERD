@@ -384,3 +384,14 @@ export function GearIcon() {
     </Icon>
   );
 }
+
+/** The floating toolbar's More (⋯): three dots across, opening the drawing's menu (D3a). */
+export function MoreIcon() {
+  return (
+    <Icon>
+      {[8.5, 14, 19.5].map((x) => (
+        <circle key={x} cx={x} cy="14" r="1.5" fill="currentColor" stroke="none" />
+      ))}
+    </Icon>
+  );
+}

@@ -3,8 +3,10 @@ import type { DrawingTool } from '@tradingnerd/core';
 /**
  * The drawing tools' keys (docs/SPEC.md §5.27): TradingView's ⌥T, ⌥H, ⌥J, ⌥V and ⌥C for the
  * Lines tools (the user's screenshot of its menu), Ctrl/⌘ + Z to undo and Ctrl+Y or ⌘⇧Z to redo,
- * Ctrl+Alt+H (⌘⌥H) to hide every drawing, Escape to let go and Delete (a Mac's delete key is
- * Backspace) to remove the selection.
+ * Ctrl+Alt+H (⌘⌥H) to hide every drawing, Escape to let go, Delete (a Mac's delete key is
+ * Backspace) to remove the selection, and Ctrl/⌘ + C and V to copy and paste drawings (D3a;
+ * Charting Library shortcuts: "Copy selected object", "Paste object"). The arrows that move the
+ * selection are the chart's own keys (packages/chart, keyboard.ts).
  */
 export type DrawingKeyAction =
   | { kind: 'tool'; tool: DrawingTool }
@@ -12,7 +14,9 @@ export type DrawingKeyAction =
   | { kind: 'redo' }
   | { kind: 'hide-all' }
   | { kind: 'cancel' }
-  | { kind: 'delete' };
+  | { kind: 'delete' }
+  | { kind: 'copy' }
+  | { kind: 'paste' };
 
 /** ⌥ and a letter, read from the key's place: ⌥ changes the letter typed on a Mac. */
 const ALT_TOOLS: Record<string, DrawingTool> = {
@@ -45,6 +49,9 @@ export function drawingKeyAction(event: KeyInput): DrawingKeyAction | null {
     const letter = letterOf(event);
     if (letter === 'z') return event.shiftKey ? { kind: 'redo' } : { kind: 'undo' };
     if (letter === 'y' && event.ctrlKey && !event.shiftKey) return { kind: 'redo' };
+    if (event.shiftKey || event.altKey) return null;
+    if (letter === 'c') return { kind: 'copy' };
+    if (letter === 'v') return { kind: 'paste' };
     return null;
   }
   if (event.shiftKey) return null;

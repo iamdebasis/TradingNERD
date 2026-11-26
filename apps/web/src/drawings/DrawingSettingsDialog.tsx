@@ -222,6 +222,99 @@ export function DrawingSettingsDialog({
   );
 }
 
+/**
+ * Settings with several drawings selected (TradingView's blog, Customizable visibility of multiple
+ * objects; Help Center, I want to customize the visibility for several objects): their Visibility
+ * tab, set for every one of them, starting from the first's. Changes show at once; Ok keeps them
+ * as one undo step, Cancel, Escape and ✕ put them back. Its title and look are provisional (§11).
+ */
+export function SeveralDrawingsDialog({
+  ids,
+  onClose,
+}: {
+  ids: readonly string[];
+  onClose(): void;
+}) {
+  const titleId = useId();
+  const { drawings } = useDrawings();
+  const chosen = drawings.filter((item) => ids.includes(item.id));
+  const [before] = useState(() => drawingStore.get().drawings);
+  const dialog = useRef<HTMLDivElement>(null);
+
+  const cancel = () => {
+    drawingStore.finishPreview(before, false);
+    onClose();
+  };
+  const ok = () => {
+    drawingStore.finishPreview(before, true);
+    onClose();
+  };
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
+
+  useEffect(() => {
+    dialog.current?.querySelector<HTMLElement>('[role="tab"]')?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      cancelRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Every one removed meanwhile (undo, another tab): nothing left to set.
+  useEffect(() => {
+    if (chosen.length === 0) onClose();
+  }, [chosen.length, onClose]);
+
+  const first = chosen[0];
+  if (!first) return null;
+  return createPortal(
+    <div className={frame.backdrop}>
+      <div
+        ref={dialog}
+        className={frame.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <header className={frame.header}>
+          <h2 id={titleId} className={frame.title}>
+            {chosen.length === 1 ? TOOL_NAMES[first.tool] : `${chosen.length} drawings`}
+          </h2>
+          <button type="button" className={frame.close} aria-label="Close" onClick={cancel}>
+            <CloseIcon />
+          </button>
+        </header>
+        <div className={frame.tabs} role="tablist" aria-label="Settings">
+          <button type="button" role="tab" className={frame.tab} aria-selected={true}>
+            Visibility
+          </button>
+        </div>
+        <div className={frame.content} role="tabpanel">
+          <VisibilityTab
+            drawing={first}
+            onSet={(visibility) =>
+              drawingStore.previewMany(chosen.map((item) => ({ ...item, visibility })))
+            }
+          />
+        </div>
+        <footer className={frame.footer}>
+          <span style={{ marginRight: 'auto' }} />
+          <button type="button" className={frame.secondary} onClick={cancel}>
+            Cancel
+          </button>
+          <button type="button" className={frame.primary} onClick={ok}>
+            Ok
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function Check({
   label,
   checked,

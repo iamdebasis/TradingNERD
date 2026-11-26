@@ -654,6 +654,76 @@ export function visibleOn(visibility: DrawingVisibility, resolution: Resolution)
   return within >= row.from && within <= row.to;
 }
 
+/**
+ * The quick choices of a drawing's "Intervals visibility" menu (Help Center, How to quickly adjust
+ * visibility of a drawing or indicator; blog, Faster setup of visibility on intervals), each
+ * setting its Visibility tab from the chart's interval. TradingView's Charting Library names the
+ * four (Chart.Source.IntervalsVisibility: CurrentAndAbove, CurrentAndBelow, Current, All); their
+ * words and order are provisional until measured from a screenshot (docs/SPEC.md §11).
+ */
+export const INTERVAL_PRESETS = [
+  'current-and-above',
+  'current-and-below',
+  'current-only',
+  'all',
+] as const;
+export type IntervalPreset = (typeof INTERVAL_PRESETS)[number];
+
+export const INTERVAL_PRESET_NAMES: Record<IntervalPreset, string> = {
+  'current-and-above': 'Current interval and above',
+  'current-and-below': 'Current interval and below',
+  'current-only': 'Current interval only',
+  all: 'All intervals',
+};
+
+/** The Visibility tab's time rows, shortest first (Ranges isn't a time: the presets leave it). */
+const TIME_UNITS: readonly VisibilityUnit[] = [
+  'ticks',
+  'seconds',
+  'minutes',
+  'hours',
+  'days',
+  'weeks',
+  'months',
+];
+
+/**
+ * A drawing's Visibility tab after one of the quick choices, on the chart's interval: the rows of
+ * shorter units off for "and above" (longer ones on, whole), the interval's own row from it to the
+ * row's end; "and below" the other way; "only" its own row at the interval alone. An interval
+ * that isn't a whole count of its row (90 minutes, 1.5 hours) keeps the counts around it. "All
+ * intervals" shows it everywhere. Ranges stays as it was, but for "All intervals".
+ */
+export function intervalVisibility(
+  preset: IntervalPreset,
+  resolution: Resolution,
+  current: DrawingVisibility,
+): DrawingVisibility {
+  const rows = defaultVisibility();
+  if (preset === 'all') return rows;
+  rows.ranges = { ...current.ranges };
+  const [unit, count] = visibilityRowOf(resolution);
+  const at = TIME_UNITS.indexOf(unit);
+  const limits = VISIBILITY_LIMITS[unit];
+  for (const [i, other] of TIME_UNITS.entries()) {
+    if (i === at) continue;
+    const shown =
+      preset === 'current-and-above' ? i > at : preset === 'current-and-below' ? i < at : false;
+    rows[other] = { ...rows[other], on: shown };
+  }
+  if (limits) {
+    const [min, max] = limits;
+    const low = Math.min(max, Math.max(min, Math.floor(count)));
+    const high = Math.min(max, Math.max(min, Math.ceil(count)));
+    rows[unit] = {
+      on: true,
+      from: preset === 'current-and-below' ? min : low,
+      to: preset === 'current-and-above' ? max : high,
+    };
+  }
+  return rows;
+}
+
 // ---- drawings ----
 
 export interface Drawing {
@@ -668,6 +738,13 @@ export interface Drawing {
   /** Can't be moved, edited or deleted with the Delete key until unlocked. */
   locked: boolean;
   hidden: boolean;
+  /**
+   * Drawn under the chart's bars (and an indicator pane's plots), where Visual order's "Send to
+   * back" leaves it: TradingView's visual order takes in its candles (Help Center, How can I
+   * change the visual order/layer of indicators, drawings & candles?); how exactly is
+   * provisional (docs/SPEC.md §11). Protocol 15; false for a new drawing and an older file's.
+   */
+  below: boolean;
 }
 
 /** A new drawing with its tool's defaults. */
@@ -686,7 +763,21 @@ export function newDrawing(
     visibility: defaultVisibility(),
     locked: false,
     hidden: false,
+    below: false,
   };
+}
+
+let idCount = 0;
+
+/**
+ * A new drawing's id: the time and a count keep it apart from every other made in this page, a
+ * random part from those made in another tab at the same moment. Letters and digits only.
+ */
+export function newDrawingId(): string {
+  const random = Math.floor(Math.random() * 36 ** 4)
+    .toString(36)
+    .padStart(4, '0');
+  return `d${Date.now().toString(36)}${(idCount++).toString(36)}${random}`;
 }
 
 /** No limit to speak of: TradingView's Basic plan caps at 30 (third-party reports, 2026); this only guards the file. */
@@ -866,6 +957,7 @@ export function parseDrawing(value: unknown): Drawing | null {
     visibility: parseVisibility(value.visibility),
     locked: bool(value.locked, false),
     hidden: bool(value.hidden, false),
+    below: bool(value.below, false),
   };
 }
 

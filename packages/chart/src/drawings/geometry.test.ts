@@ -6,6 +6,8 @@ import {
   formatAngle,
   formatDuration,
   lineSegment,
+  rectOf,
+  segmentTouchesRect,
   snap45,
 } from './geometry';
 
@@ -106,5 +108,23 @@ describe('formatAngle', () => {
     expect(formatAngle(45.5)).toBe('45.5º');
     expect(formatAngle(-12.345_6)).toBe('-12.35º');
     expect(formatAngle(-0.001)).toBe('0º');
+  });
+});
+
+describe('a selecting box (D3a)', () => {
+  const box = rectOf({ x: 300, y: 200 }, { x: 100, y: 100 });
+
+  it('is the same box whichever corner it’s drawn from', () => {
+    expect(box).toEqual({ left: 100, top: 100, right: 300, bottom: 200 });
+  });
+
+  it('touches a segment inside it, through it or with one end in it, not one beside it', () => {
+    expect(segmentTouchesRect({ x: 150, y: 150 }, { x: 160, y: 160 }, box)).toBe(true);
+    expect(segmentTouchesRect({ x: 0, y: 150 }, { x: 400, y: 150 }, box)).toBe(true);
+    expect(segmentTouchesRect({ x: 50, y: 50 }, { x: 150, y: 150 }, box)).toBe(true);
+    expect(segmentTouchesRect({ x: 0, y: 0 }, { x: 400, y: 50 }, box)).toBe(false);
+    // Cutting across the box's corner, and passing it by just outside.
+    expect(segmentTouchesRect({ x: 0, y: 220 }, { x: 220, y: 0 }, box)).toBe(true);
+    expect(segmentTouchesRect({ x: 0, y: 150 }, { x: 150, y: 0 }, box)).toBe(false);
   });
 });
