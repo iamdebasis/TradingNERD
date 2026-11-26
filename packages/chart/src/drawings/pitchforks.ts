@@ -19,6 +19,12 @@ import type { FillArea, LookLine, PartHandle, ShapeParts } from './parts';
  *   (Help Center, Modified Schiff pitchfork; the capture; the guide).
  * - Inside: from the middle of points 2 and 3, parallel to the line from halfway between points
  *   1 and 2 to point 3 (the capture; the guide's "inside" handle, joining the base at point 3).
+ * Each agrees with TradingView's own, measured on the user's screenshot of its four pitchforks
+ * (26 November 2026; the numbers in docs/SPEC.md §4.26).
+ *
+ * TradingView also draws the lines these come from (the same screenshot; §11, item 161): a
+ * Schiff's and a Modified Schiff's from point 1 to point 2, and an Inside's from point 1 to point
+ * 2 and from that line's middle to point 3. A Pitchfork's median starts at point 1: none.
  */
 
 /** Where a pitchfork's median starts, which way it runs, and its points 2 and 3's middle. */
@@ -32,6 +38,21 @@ export interface PitchforkFrame {
 }
 
 const middle = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+/**
+ * The lines from point 1 TradingView draws (the user's screenshot of 26 November): a Schiff's
+ * and a Modified Schiff's from point 1 to point 2 (the Modified's median starts at its middle,
+ * the Schiff's at point 1's bar, halfway to point 2 in price); an Inside's from point 1 to point
+ * 2, and from that line's middle to point 3, which its median runs parallel to. None for a
+ * Pitchfork, whose median starts at point 1; none of no length.
+ */
+export function pitchforkGuides(tool: PitchforkTool, points: readonly Pt[]): [Pt, Pt][] {
+  const [p1, p2, p3] = points;
+  if (!p1 || !p2 || !p3 || tool === 'pitchfork') return [];
+  const guides: [Pt, Pt][] = [[p1, p2]];
+  if (tool === 'inside-pitchfork') guides.push([middle(p1, p2), p3]);
+  return guides.filter(([a, b]) => a.x !== b.x || a.y !== b.y);
+}
 
 export function pitchforkFrame(tool: PitchforkTool, points: readonly Pt[]): PitchforkFrame | null {
   const [p1, p2, p3] = points;
@@ -64,11 +85,13 @@ export function pitchforkFrame(tool: PitchforkTool, points: readonly Pt[]): Pitc
 }
 
 /**
- * A pitchfork as drawn: its median (the main look, unless turned off) and the line from point 2
- * to point 3; each visible level's two lines in their own looks; the bands between the median
- * and the first level, and each level and the next, on each side, in the outer level's color at
- * the background's opacity. Every line runs from its start to the pane's edge it points to, and
- * back past its start with Extend lines (Help Center, Modified Schiff: "extend backwards").
+ * A pitchfork as drawn: its median (the main look, unless turned off); the line from point 2 to
+ * point 3 and the lines from point 1 (pitchforkGuides), both kept with the median off
+ * (provisional, §11); each visible level's two lines in their own looks; the bands between the
+ * median and the first level, and each level and the next, on each side, in the outer level's
+ * color at the background's opacity. The median and the levels run from their start to the
+ * pane's edge they point to, and back past their start with Extend lines (Help Center, Modified
+ * Schiff: "extend backwards").
  */
 export function pitchfork(
   tool: PitchforkTool,
@@ -84,11 +107,16 @@ export function pitchfork(
     { ...p3, point: 2, square: false },
   ];
   const connector = lineSegment(p2, p3, false, false, size);
+  const guides = pitchforkGuides(tool, points).flatMap(([a, b]) => {
+    const shown = lineSegment(a, b, false, false, size);
+    return shown ? [shown] : [];
+  });
   const frame = pitchforkFrame(tool, points);
   if (!frame) {
-    // Points 1 and the middle of 2 and 3 in one place: no direction, only the line from 2 to 3.
+    // Its median would start on the middle of points 2 and 3: no direction, only the line from
+    // point 2 to 3 and those from point 1.
     return {
-      lines: connector ? [connector] : [],
+      lines: [...(connector ? [connector] : []), ...guides],
       looks: [],
       fills: [],
       fillsTakeClicks: false,
@@ -116,6 +144,7 @@ export function pitchfork(
     if (median) lines.push(median);
   }
   if (connector) lines.push(connector);
+  lines.push(...guides);
   const levels = style.levels.filter((level) => level.visible).sort((x, y) => x.coeff - y.coeff);
   const looks: LookLine[] = [];
   const fills: FillArea[] = [];

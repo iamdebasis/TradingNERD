@@ -376,6 +376,60 @@ test.describe('channels and pitchforks (D2)', () => {
     expect(Math.abs(start.y - (p1.y + p2.y) / 2)).toBeLessThan(1);
   });
 
+  test('draws TradingView’s lines from point 1 for a Schiff, a Modified Schiff and an Inside', async ({
+    page,
+    market,
+  }) => {
+    // As the user's screenshot of TradingView's four pitchforks shows them (26 November).
+    await openChart(page);
+    const { left, right, low, high } = await spots(page);
+    const corners: [number, number][] = [
+      [left, low],
+      [Math.round((left + right) / 2), high],
+      [right, (low + high) / 2],
+    ];
+    market.drawings.set(SYMBOL, [
+      await stored(page, 'o', 'pitchfork', corners),
+      await stored(page, 's', 'schiff-pitchfork', corners),
+      await stored(page, 'm', 'modified-schiff-pitchfork', corners),
+      await stored(page, 'i', 'inside-pitchfork', corners),
+    ]);
+    await page.reload();
+    await openChart(page);
+    await expect.poll(async () => (await drawingsOf(page)).length).toBe(4);
+    const [p1, p2, p3] = await Promise.all(
+      corners.map(([bar, price]) => pointOf(page, bar, price)),
+    );
+    if (!p1 || !p2 || !p3) throw new Error('no corners');
+    const near = (a: Pt | undefined, b: Pt) =>
+      a !== undefined && Math.hypot(a.x - b.x, a.y - b.y) < 1;
+    const has = (lines: Pt[][], a: Pt, b: Pt) =>
+      lines.some(([from, to]) => near(from, a) && near(to, b));
+    // A Pitchfork's median starts at point 1: its median and its line from point 2 to 3 alone.
+    const original = (await shapeOf(page, 'o')).lines;
+    expect(original).toHaveLength(2);
+    expect(has(original, p1, p2)).toBe(false);
+    for (const id of ['s', 'm']) {
+      const { lines } = await shapeOf(page, id);
+      expect(lines, id).toHaveLength(3);
+      expect(has(lines, p1, p2), id).toBe(true);
+    }
+    const inside = (await shapeOf(page, 'i')).lines;
+    expect(inside).toHaveLength(4);
+    expect(has(inside, p1, p2)).toBe(true);
+    expect(has(inside, middle(p1, p2), p3)).toBe(true);
+
+    // The new line takes a click as the rest of the drawing does: the Inside alone, by the line
+    // from point 1 to point 2's middle.
+    market.drawings.set(SYMBOL, [await stored(page, 'i', 'inside-pitchfork', corners)]);
+    await page.reload();
+    await openChart(page);
+    await expect.poll(async () => (await drawingsOf(page)).length).toBe(1);
+    const onGuide = middle(p1, middle(p1, p2));
+    await page.mouse.click(onGuide.x, onGuide.y);
+    await expect.poll(async () => (await drawingsState(page)).selection).toEqual(['i']);
+  });
+
   test('fits a regression trend to the closes between its bars, with Pearson’s R', async ({
     page,
   }) => {
