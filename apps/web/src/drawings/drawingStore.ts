@@ -5,6 +5,7 @@ import {
   type Drawing,
   type DrawingStyle,
   type DrawingTool,
+  drawingName,
   drawingsKey,
   type IntervalPreset,
   intervalVisibility,
@@ -12,9 +13,11 @@ import {
   MAX_DRAWINGS_PER_SYMBOL,
   newDrawingId,
   parseDrawing,
+  placeDrawings,
   type Resolution,
   reorderDrawings,
   TREND_LINE_TOOLS,
+  type TreePlace,
   type VisualOrderMove,
 } from '@tradingnerd/core';
 import { useSyncExternalStore } from 'react';
@@ -73,6 +76,11 @@ export interface ToolbarPrefs {
    * toolbar's buttons (D3b; TradingView's Charting Library keeps them in the browser too).
    */
   favorites: readonly DrawingTool[];
+  /**
+   * Remove objects removes locked drawings too (TradingView's "Always remove locked
+   * drawings" switch, off at first: its Help Center; D3c).
+   */
+  removeLocked: boolean;
 }
 
 export const DEFAULT_TOOLBAR: Readonly<ToolbarPrefs> = Object.freeze({
@@ -85,6 +93,7 @@ export const DEFAULT_TOOLBAR: Readonly<ToolbarPrefs> = Object.freeze({
   lineTool: 'trend-line',
   toolbarShown: true,
   favorites: Object.freeze([]),
+  removeLocked: false,
 });
 
 export function sanitizeToolbar(value: unknown): ToolbarPrefs {
@@ -107,6 +116,7 @@ export function sanitizeToolbar(value: unknown): ToolbarPrefs {
         : DEFAULT_TOOLBAR.lineTool,
     toolbarShown: bool('toolbarShown'),
     favorites: favoritesOf(raw.favorites),
+    removeLocked: bool('removeLocked'),
   };
 }
 
@@ -141,10 +151,19 @@ export interface DrawingsState {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** What the store asks of the gateway; tests give fakes (dropping panes is optional there). */
+type StoreApi = Pick<DrawingsApi, 'load' | 'save'> & Partial<Pick<DrawingsApi, 'dropPanes'>>;
+
 export class DrawingStore {
   private value: DrawingsState;
   private readonly listeners = new Set<() => void>();
-  private readonly api: Pick<DrawingsApi, 'load' | 'save'>;
+  private readonly api: StoreApi;
+  /** Panes of indicators that left the chart, to drop from every symbol at the gateway. */
+  private readonly droppedPanes = new Set<string>();
+  private dropping = false;
+  /** Panes dropped again while a drop was on its way: kept for the next one. */
+  private readonly droppedAgain = new Set<string>();
+  private cancelDropRetry: (() => void) | null = null;
   /** The indicators on the chart: drawings on a pane of one that's gone aren't kept. */
   private readonly panes: () => ReadonlySet<string>;
   private past: (readonly Drawing[])[] = [];
@@ -170,7 +189,7 @@ export class DrawingStore {
   private readonly styles: Pick<ToolStyles, 'remember' | 'set'> | null;
 
   constructor(
-    api: Pick<DrawingsApi, 'load' | 'save'> = drawingsApi,
+    api: StoreApi = drawingsApi,
     panes: () => ReadonlySet<string> = () => new Set(),
     schedule: Later = later,
     styles: Pick<ToolStyles, 'remember' | 'set'> | null = null,
@@ -331,7 +350,7 @@ export class DrawingStore {
     if (drawings !== this.value.drawings) this.apply(drawings, true);
   }
 
-  /** Intervals visibility's quick choices, from the chart's interval: one undo step. */
+  /** Visibility on intervals' quick choices, from the chart's interval: one undo step. */
   setIntervals(ids: readonly string[], preset: IntervalPreset, resolution: Resolution): void {
     this.updateMany(ids, (drawing) => {
       const visibility = intervalVisibility(preset, resolution, drawing.visibility);
@@ -405,7 +424,43 @@ export class DrawingStore {
 
   /** Remove objects → Remove drawings: every drawing of the chart's symbol, one undo step. */
   removeAll(): void {
-    if (this.value.drawings.length > 0) this.apply([], true);
+    const going = new Set(this.removable().map((drawing) => drawing.id));
+    if (going.size === 0) return;
+    this.apply(
+      this.value.drawings.filter((drawing) => !going.has(drawing.id)),
+      true,
+    );
+  }
+
+  /**
+   * The drawings Remove objects would remove: every one with "Always remove locked drawings"
+   * on, else those not locked, none while Lock all is on (TradingView's Help Center: locked
+   * drawings are skipped unless the switch is on; D3c).
+   */
+  removable(): readonly Drawing[] {
+    const { removeLocked, lockAll } = this.value.prefs;
+    if (removeLocked) return this.value.drawings;
+    if (lockAll) return [];
+    return this.value.drawings.filter((drawing) => !drawing.locked);
+  }
+
+  /** Hide or Show (the Object tree's eye, the menus): one undo step; hiding deselects them. */
+  setHidden(ids: readonly string[], hidden: boolean): void {
+    this.updateMany(ids, (drawing) =>
+      drawing.hidden === hidden ? drawing : { ...drawing, hidden },
+    );
+  }
+
+  /** A drawing's name, from the Object tree or its settings' title: one undo step. */
+  rename(id: string, name: string): void {
+    const kept = drawingName(name);
+    this.update(id, (drawing) => (drawing.name === kept ? drawing : { ...drawing, name: kept }));
+  }
+
+  /** A drag in the Object tree (docs/SPEC.md §5.27): one undo step when anything moves. */
+  place(ids: readonly string[], place: TreePlace): void {
+    const drawings = placeDrawings(this.value.drawings, ids, place);
+    if (drawings !== this.value.drawings) this.apply(drawings, true);
   }
 
   /**
@@ -506,10 +561,44 @@ export class DrawingStore {
       list.filter((drawing) => drawing.pane === null || !gone.has(drawing.pane));
     this.past = this.past.map(keep);
     this.future = this.future.map(keep);
+    // Every other symbol's too, at the gateway, so none comes back on a new indicator given
+    // the same id (docs/SPEC.md §11, item 159; D3c); lists not yet saved lose them here.
+    for (const lists of [this.pending, this.unsaved]) {
+      for (const [symbol, list] of lists) lists.set(symbol, keep(list));
+    }
+    if (this.early) this.early = keep(this.early);
+    for (const id of ids) {
+      this.droppedPanes.add(id);
+      if (this.dropping) this.droppedAgain.add(id);
+    }
+    void this.sendDrops();
     const drawings = keep(this.value.drawings);
     if (drawings.length === this.value.drawings.length) return;
     this.commit({ ...this.value, drawings });
     this.queueSave();
+  }
+
+  /** Sends the panes to drop; a failure is tried again after DRAWINGS_RETRY_MS. */
+  private async sendDrops(): Promise<void> {
+    if (!this.api.dropPanes || this.dropping || this.droppedPanes.size === 0) return;
+    const panes = [...this.droppedPanes];
+    this.dropping = true;
+    try {
+      await this.api.dropPanes(panes);
+      for (const pane of panes) {
+        if (!this.droppedAgain.has(pane)) this.droppedPanes.delete(pane);
+      }
+    } catch {
+      this.cancelDropRetry ??= this.later(() => {
+        this.cancelDropRetry = null;
+        void this.sendDrops();
+      }, DRAWINGS_RETRY_MS);
+    } finally {
+      this.dropping = false;
+      this.droppedAgain.clear();
+    }
+    // Panes that came while this was on its way go now.
+    if (this.droppedPanes.size > 0 && !this.cancelDropRetry) void this.sendDrops();
   }
 
   /** Every save asked for so far has been made (or has failed, to be tried again later). */

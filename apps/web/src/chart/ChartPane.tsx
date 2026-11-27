@@ -10,6 +10,7 @@ import { drawingKeyAction } from '../drawings/drawingKeys';
 import { DRAWINGS_RETRY_MS, drawingStore, useDrawings } from '../drawings/drawingStore';
 import { FavoritesToolbar } from '../drawings/FavoritesToolbar';
 import { FloatingToolbar } from '../drawings/FloatingToolbar';
+import { useObjectTree } from '../drawings/objectTreeStore';
 import { TemplateDialogsHost } from '../drawings/TemplateMenu';
 import { templateStore } from '../drawings/templateStore';
 import { toolStyles } from '../drawings/toolStyles';
@@ -119,6 +120,9 @@ export function ChartPane({
   /** The drawings' menu, where it opened (a right-click, or the floating toolbar's ⋯; D3a). */
   const [drawingMenu, setDrawingMenu] = useState<{ x: number; y: number } | null>(null);
   const interval = useMemo(() => parseResolution(resolution), [resolution]);
+  /** The Object tree's requests (D3c): the chart owns the selection and the settings dialogs. */
+  const { requests: treeRequests } = useObjectTree();
+  const treeAnswered = useRef(0);
 
   // The drawing templates (D3b), loaded once for the Template menus; tried again until they come.
   useEffect(() => {
@@ -362,6 +366,21 @@ export function ChartPane({
   useEffect(() => {
     chart?.setDrawings(drawings.drawings);
   }, [chart, drawings.drawings]);
+
+  // The Object tree asks: select these drawings, open these settings; each answered once, in
+  // order, once the chart is there.
+  useEffect(() => {
+    if (!chart) return;
+    for (const request of treeRequests) {
+      if (request.seq <= treeAnswered.current) continue;
+      treeAnswered.current = request.seq;
+      if (request.kind === 'select') {
+        chart.setDrawings(drawingStore.get().drawings);
+        chart.selectDrawings(request.ids);
+      } else if (request.kind === 'drawing-settings') setDrawingSettings(request.ids);
+      else setEditing(request.id);
+    }
+  }, [chart, treeRequests]);
 
   const { tool, prefs } = drawings;
   useEffect(() => {

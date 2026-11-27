@@ -9,19 +9,21 @@ import {
   type DrawingStats,
   type DrawingStyle,
   type DrawingText,
+  displayName,
+  drawingName,
   H_ALIGNS,
   type HAlign,
   isPitchforkTool,
   LINE_ENDS,
   type LineEnd,
   MAX_DEVIATION,
+  MAX_DRAWING_NAME,
   MAX_DRAWING_TEXT,
   MAX_LEVEL_COEFF,
   PITCHFORK_TOOLS,
   PRICE_SOURCES,
   type PriceSource,
   type RegressionSettings,
-  TOOL_NAMES,
   TOOL_OPTIONS,
   V_ALIGNS,
   type VAlign,
@@ -39,6 +41,7 @@ import { ColorField } from './ColorEditor';
 import { joinColor, splitColor } from './color';
 import styles from './Drawings.module.css';
 import { drawingStore, useDrawings } from './drawingStore';
+import { RenameIcon } from './icons';
 import { templateDialogs, templateEntries } from './TemplateMenu';
 import { useTemplates } from './templateStore';
 
@@ -175,9 +178,11 @@ export function DrawingSettingsDialog({
         aria-labelledby={titleId}
       >
         <header className={frame.header}>
-          <h2 id={titleId} className={frame.title}>
-            {TOOL_NAMES[drawing.tool]}
-          </h2>
+          <DrawingTitle
+            id={titleId}
+            name={displayName(drawing)}
+            onRename={(name) => set({ ...drawing, name: drawingName(name) })}
+          />
           <button type="button" className={frame.close} aria-label="Close" onClick={cancel}>
             <CloseIcon />
           </button>
@@ -273,6 +278,76 @@ export function DrawingSettingsDialog({
 const TEMPLATE_MENU_LAYER = 210;
 
 /**
+ * The dialog's title: the drawing's name, its tool's until it's given one, and a pencil that
+ * edits it in place (TradingView's blog, 5 February 2020: "the new name will be displayed in the
+ * drawing settings dialog"; its Help Center's image of a group's settings shows the pencil). Enter
+ * or leaving the field keeps the name for Ok, as the dialog's other changes are; Escape doesn't.
+ */
+function DrawingTitle({
+  id,
+  name,
+  onRename,
+}: {
+  id: string;
+  name: string;
+  onRename(name: string): void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const field = useRef<HTMLInputElement>(null);
+  const editing = draft !== null;
+  useEffect(() => {
+    if (!editing) return;
+    field.current?.focus();
+    field.current?.select();
+  }, [editing]);
+  const keep = () => {
+    if (draft === null) return;
+    setDraft(null);
+    onRename(draft);
+  };
+  return (
+    <div className={styles.titleRow}>
+      <h2 id={id} className={frame.title}>
+        {draft === null ? (
+          name
+        ) : (
+          <input
+            ref={field}
+            className={styles.titleField}
+            aria-label="Name"
+            value={draft}
+            maxLength={MAX_DRAWING_NAME}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                keep();
+              } else if (event.key === 'Escape') {
+                // The field's, not the dialog's Cancel.
+                event.preventDefault();
+                setDraft(null);
+              }
+            }}
+            onBlur={keep}
+          />
+        )}
+      </h2>
+      {draft === null && (
+        <button
+          type="button"
+          className={styles.titleRename}
+          aria-label="Rename"
+          title="Rename"
+          onClick={() => setDraft(name)}
+        >
+          <RenameIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * Settings with several drawings selected (TradingView's blog, Customizable visibility of multiple
  * objects; Help Center, I want to customize the visibility for several objects): their Visibility
  * tab, set for every one of them, starting from the first's. Changes show at once; Ok keeps them
@@ -331,7 +406,7 @@ export function SeveralDrawingsDialog({
       >
         <header className={frame.header}>
           <h2 id={titleId} className={frame.title}>
-            {chosen.length === 1 ? TOOL_NAMES[first.tool] : `${chosen.length} drawings`}
+            {chosen.length === 1 ? displayName(first) : `${chosen.length} drawings`}
           </h2>
           <button type="button" className={frame.close} aria-label="Close" onClick={cancel}>
             <CloseIcon />

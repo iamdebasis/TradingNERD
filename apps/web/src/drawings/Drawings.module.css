@@ -248,3 +248,62 @@
   gap: 8px;
   width: 160px;
 }
+
+/*
+ * A drawing's settings title (D3c): its name, then a pencil that edits it in place, as
+ * TradingView's group settings show (its Help Center's image, 43000660419); sizes ours,
+ * provisional (docs/SPEC.md §11).
+ */
+.titleRow {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-right: 12px;
+}
+
+.titleRow h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleRename {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.titleRename:hover {
+  background: var(--color-gutter);
+  color: var(--color-text);
+}
+
+.titleRename:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.titleField {
+  width: 100%;
+  height: 32px;
+  margin-left: -7px;
+  padding: 0 6px;
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  outline: none;
+}

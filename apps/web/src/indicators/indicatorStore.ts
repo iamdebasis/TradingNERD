@@ -216,6 +216,11 @@ export class IndicatorStore {
     this.commit({ ...this.value, list: this.value.list.filter((item) => item.id !== id) });
   }
 
+  /** Remove objects → Remove indicators (the left toolbar, D3c): every indicator at once. */
+  removeAll(): void {
+    if (this.value.list.length > 0) this.commit({ ...this.value, list: [] });
+  }
+
   setHidden(id: string, hidden: boolean): void {
     this.update(id, (indicator) => ({ ...indicator, hidden }));
   }

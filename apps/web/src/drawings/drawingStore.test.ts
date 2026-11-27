@@ -74,6 +74,17 @@ class FakeGateway {
     return value;
   };
 
+  /** Panes dropped from every symbol (D3c), each call's; fails when told. */
+  dropped: string[][] = [];
+  failDrops = false;
+  /** While set, a drop waits for it before it's answered. */
+  dropGate: Promise<void> | null = null;
+  dropPanes = async (panes: readonly string[]): Promise<void> => {
+    if (this.dropGate) await this.dropGate;
+    if (this.failDrops) throw new Error('The local gateway is not reachable');
+    this.dropped.push([...panes]);
+  };
+
   answer(): void {
     for (const resolve of this.waiting.splice(0)) resolve();
   }
@@ -661,6 +672,109 @@ describe('templates, last styles and favorites (D3b)', () => {
       sanitizeToolbar({ favorites: ['ray', 'brush', 'ray', 7, 'pitchfork'] }).favorites,
     ).toEqual(['ray', 'pitchfork']);
     expect(sanitizeToolbar({ favorites: 'ray' }).favorites).toEqual([]);
+  });
+});
+
+describe('the Object tree (D3c)', () => {
+  async function three() {
+    const gateway = new FakeGateway();
+    const later = new FakeLater();
+    const store = storeOf(gateway, () => new Set(['rsi-1']), later);
+    await ready(store);
+    store.edit([line('a'), line('b'), line('r', 'rsi-1')]);
+    return { store, gateway, later };
+  }
+  const order = (store: DrawingStore) =>
+    store.get().drawings.map((d) => `${d.id}${d.below ? '↓' : ''}${d.hidden ? '·' : ''}`);
+
+  it('hides and shows drawings, each as one undo step', async () => {
+    const { store } = await three();
+    store.setHidden(['a', 'b'], true);
+    expect(order(store)).toEqual(['a·', 'b·', 'r']);
+    store.setHidden(['a'], false);
+    expect(order(store)).toEqual(['a', 'b·', 'r']);
+    store.undo();
+    expect(order(store)).toEqual(['a·', 'b·', 'r']);
+  });
+
+  it('renames a drawing, trimmed, as one undo step, and makes none for the same name', async () => {
+    const { store } = await three();
+    store.rename('a', '  Weekly   low ');
+    expect(store.get().drawings[0]?.name).toBe('Weekly low');
+    const before = store.get().drawings;
+    store.rename('a', 'Weekly low');
+    expect(store.get().drawings).toBe(before);
+    store.undo();
+    expect(store.get().drawings[0]?.name).toBe('');
+  });
+
+  it('moves drawings dragged in the tree, under the bars too, as one undo step', async () => {
+    const { store } = await three();
+    store.place(['b'], { pane: null, below: false, before: 'a' });
+    expect(order(store)).toEqual(['b', 'a', 'r']);
+    store.place(['a'], { pane: null, below: true, before: null });
+    expect(order(store)).toEqual(['b', 'r', 'a↓']);
+    store.undo();
+    expect(order(store)).toEqual(['b', 'a', 'r']);
+  });
+
+  it('removes all but locked drawings, every one with the switch, none with Lock all', async () => {
+    const { store } = await three();
+    store.updateMany(['a'], (d) => ({ ...d, locked: true }));
+    expect(store.removable().map((d) => d.id)).toEqual(['b', 'r']);
+    store.setPrefs({ lockAll: true });
+    expect(store.removable()).toEqual([]);
+    store.setPrefs({ removeLocked: true });
+    expect(store.removable().map((d) => d.id)).toEqual(['a', 'b', 'r']);
+    store.setPrefs({ removeLocked: false, lockAll: false });
+    store.removeAll();
+    expect(order(store)).toEqual(['a']);
+  });
+
+  it('drops a removed indicator’s drawings from every symbol at the gateway, again after a failure', async () => {
+    const { store, gateway, later } = await three();
+    gateway.failDrops = true;
+    store.dropPanes(['rsi-1']);
+    expect(order(store)).toEqual(['a', 'b']);
+    await settle();
+    expect(gateway.dropped).toEqual([]);
+    expect(later.waiting).toContain(DRAWINGS_RETRY_MS);
+    gateway.failDrops = false;
+    later.run();
+    await settle();
+    expect(gateway.dropped).toEqual([['rsi-1']]);
+  });
+
+  it('sends a pane dropped again while its drop is on its way once more', async () => {
+    const { store, gateway } = await three();
+    let open: () => void = () => {};
+    gateway.dropGate = new Promise((resolve) => {
+      open = resolve;
+    });
+    store.dropPanes(['rsi-1']);
+    await settle();
+    // The indicator came back and went again meanwhile: what was saved on it since goes too.
+    store.dropPanes(['rsi-1']);
+    gateway.dropGate = null;
+    open();
+    await settle();
+    expect(gateway.dropped).toEqual([['rsi-1'], ['rsi-1']]);
+  });
+
+  it('takes a removed indicator’s drawings out of another symbol’s list not yet saved', async () => {
+    const gateway = new FakeGateway();
+    const later = new FakeLater();
+    const store = storeOf(gateway, () => new Set(['rsi-1']), later);
+    await ready(store, 'A:B');
+    gateway.failSaves = true;
+    store.edit([line('a'), line('r', 'rsi-1')]);
+    await store.whenSaved();
+    await ready(store, 'C:D');
+    store.dropPanes(['rsi-1']);
+    gateway.failSaves = false;
+    later.run();
+    await store.whenSaved();
+    expect(gateway.held.get('A:B')?.map((d) => d.id)).toEqual(['a']);
   });
 });
 

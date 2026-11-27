@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reorderDrawings } from './drawingOrder.ts';
+import { placeDrawings, reorderDrawings } from './drawingOrder.ts';
 import { type Drawing, type DrawingTool, newDrawing } from './drawings.ts';
 
 /** A drawing on a pane (null: the price pane), under the bars or not. */
@@ -129,5 +129,45 @@ describe('visual order (D3a)', () => {
     for (const drawing of moved.filter((d) => d.id !== 'a')) {
       expect(list).toContain(drawing);
     }
+  });
+});
+
+describe('the Object tree’s drag (D3c)', () => {
+  const ids = (list: readonly Drawing[]) => list.map((d) => `${d.id}${d.below ? '↓' : ''}`);
+  const list = [make('u', null, true), make('a'), make('b'), make('c'), make('r', 'rsi-1')];
+
+  it('puts drawings just behind another of their layer, keeping their own order', () => {
+    expect(ids(placeDrawings(list, ['c', 'a'], { pane: null, below: false, before: 'b' }))).toEqual(
+      ['u↓', 'a', 'c', 'b', 'r'],
+    );
+  });
+
+  it('puts them at the front of a layer when there’s no drawing to go behind', () => {
+    expect(ids(placeDrawings(list, ['a'], { pane: null, below: false, before: null }))).toEqual([
+      'u↓',
+      'b',
+      'c',
+      'r',
+      'a',
+    ]);
+  });
+
+  it('moves them under the bars, or over them, as the layer says', () => {
+    const under = placeDrawings(list, ['b'], { pane: null, below: true, before: 'u' });
+    expect(ids(under)).toEqual(['b↓', 'u↓', 'a', 'c', 'r']);
+    expect(ids(placeDrawings(under, ['u'], { pane: null, below: false, before: null }))).toEqual([
+      'b↓',
+      'a',
+      'c',
+      'r',
+      'u',
+    ]);
+  });
+
+  it('leaves another pane’s drawings, and gives the same list back when nothing moves', () => {
+    expect(placeDrawings(list, ['r'], { pane: null, below: false, before: null })).toBe(list);
+    expect(placeDrawings(list, ['a'], { pane: null, below: false, before: 'a' })).toBe(list);
+    expect(placeDrawings(list, ['a'], { pane: null, below: false, before: 'b' })).toBe(list);
+    expect(placeDrawings(list, ['zz'], { pane: null, below: false, before: null })).toBe(list);
   });
 });

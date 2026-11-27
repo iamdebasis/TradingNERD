@@ -1,5 +1,6 @@
 import type { ChartController } from '@tradingnerd/chart';
 import {
+  type Drawing,
   INTERVAL_PRESET_NAMES,
   INTERVAL_PRESETS,
   type Resolution,
@@ -8,49 +9,57 @@ import {
 } from '@tradingnerd/core';
 import { commandShortcut, isMac } from '../lib/platform';
 import { PopupMenu, type PopupMenuEntry } from '../watchlist/PopupMenu';
-import { drawingStore, useDrawings } from './drawingStore';
-import { GearIcon, PadlockIcon, TrashIcon } from './icons';
+import { drawingStore, type ToolbarPrefs, useDrawings } from './drawingStore';
+import { GearIcon, HideIcon, PadlockIcon, RenameIcon, ShowIcon, TrashIcon } from './icons';
+import { objectTreeStore } from './objectTreeStore';
 import { templateEntries } from './TemplateMenu';
-import { useTemplates } from './templateStore';
+import { type TemplatesState, useTemplates } from './templateStore';
+
+/** A Mac's delete key, else Delete, as TradingView's menus write Remove's shortcut. */
+export const removeShortcut = () => (isMac() ? '⌫' : 'Del');
 
 /**
- * The menu of the drawings selected (docs/SPEC.md §5.27, D3a): a drawing's right-click menu, and
- * the floating toolbar's More (⋯). TradingView's Help Center names its Visual order and its
- * Intervals visibility quick choices, both offered from the right-click and from the ⋯, and its
- * Charting Library the actions Clone, Copy, Lock, Remove and Settings; the items' order, icons
- * and words are provisional until measured from a screenshot (§11). Each acts on every drawing
- * selected; Remove leaves the locked ones, as the Delete key does. Template › (D3b) comes first
- * while they're all of one tool, as TradingView offers templates only for tools of one type
- * (Help Center, How to apply a template to several tools of the same type at once?).
+ * The items of the menu of some drawings (docs/SPEC.md §5.27, D3a, D3c), as TradingView's
+ * Help Center images show them (43000660419's GIFs, 43000795451 image 2): Template › while
+ * they're all of one tool (D3b), Visual order ›, Visibility on intervals › | Clone, Copy (and
+ * Rename, the Object tree's, for one) | Lock, Hide, Remove | Settings…. The chart's menu starts
+ * with "Object Tree…", as TradingView's for several drawings does (for one, provisional §11).
+ * Each acts on every drawing given; Remove leaves the locked ones, as the Delete key does.
  */
-export function DrawingMenu({
-  x,
-  y,
-  chart,
+export function drawingEntries({
+  chosen,
+  prefs,
+  templates,
   resolution,
+  onSelect,
   onSettings,
-  onClose,
+  onObjectTree,
+  onRename,
 }: {
-  x: number;
-  y: number;
-  chart: ChartController | null;
-  /** The chart's interval, which Intervals visibility's quick choices start from. */
+  /** The drawings it acts on, in drawing order. */
+  chosen: readonly Drawing[];
+  prefs: Pick<ToolbarPrefs, 'lockAll'>;
+  templates: TemplatesState;
+  /** The chart's interval, which Visibility on intervals' quick choices start from. */
   resolution: Resolution | null;
+  /** Selects drawings just added (Clone). */
+  onSelect(ids: readonly string[]): void;
   onSettings(): void;
-  onClose(): void;
-}) {
-  const { drawings, selection, prefs } = useDrawings();
-  const templates = useTemplates();
-  const chosen = drawings.filter((drawing) => selection.includes(drawing.id));
+  /** The chart's menu: "Object Tree…" opens the panel. */
+  onObjectTree?: (() => void) | undefined;
+  /** The Object tree's menu, for one drawing: "Rename". */
+  onRename?: (() => void) | undefined;
+}): PopupMenuEntry[] {
   const first = chosen[0];
-  if (!first) return null;
+  if (!first) return [];
   const { tool } = first;
   const oneTool = chosen.every((drawing) => drawing.tool === tool);
   const ids = chosen.map((drawing) => drawing.id);
   const allLocked = chosen.every((drawing) => drawing.locked);
+  const allHidden = chosen.every((drawing) => drawing.hidden);
   const removable = !prefs.lockAll && chosen.some((drawing) => !drawing.locked);
-  const select = (copies: readonly string[]) => selectAdded(chart, copies);
-  const items: PopupMenuEntry[] = [
+  return [
+    ...(onObjectTree ? [{ label: 'Object Tree…', onSelect: onObjectTree }] : []),
     ...(oneTool
       ? [
           {
@@ -72,7 +81,8 @@ export function DrawingMenu({
       })),
     },
     {
-      label: 'Intervals visibility',
+      // TradingView's words since 2024 (its Help Center's images; "Intervals visibility" before).
+      label: 'Visibility on intervals',
       disabled: resolution === null,
       items: INTERVAL_PRESETS.map((preset) => ({
         label: INTERVAL_PRESET_NAMES[preset],
@@ -82,8 +92,11 @@ export function DrawingMenu({
       })),
     },
     'separator',
-    { label: 'Clone', onSelect: () => select(drawingStore.clone(ids)) },
+    { label: 'Clone', onSelect: () => onSelect(drawingStore.clone(ids)) },
     { label: 'Copy', shortcut: commandShortcut('C'), onSelect: () => drawingStore.copy(ids) },
+    ...(onRename && chosen.length === 1
+      ? [{ label: 'Rename', icon: <RenameIcon />, onSelect: onRename }]
+      : []),
     'separator',
     {
       label: allLocked ? 'Unlock' : 'Lock',
@@ -94,16 +107,55 @@ export function DrawingMenu({
         ),
     },
     {
+      // Hidden ones (the Object tree's) show again; TradingView's Hide shows no shortcut.
+      label: allHidden ? 'Show' : 'Hide',
+      icon: allHidden ? <ShowIcon /> : <HideIcon />,
+      onSelect: () => drawingStore.setHidden(ids, !allHidden),
+    },
+    {
       label: 'Remove',
       icon: <TrashIcon />,
-      // A Mac's delete key, else Delete (ours, provisional §11).
-      shortcut: isMac() ? '⌫' : 'Del',
+      shortcut: removeShortcut(),
       disabled: !removable,
       onSelect: () => drawingStore.removeUnlocked(ids),
     },
     'separator',
     { label: 'Settings…', icon: <GearIcon />, onSelect: onSettings },
   ];
+}
+
+/**
+ * The menu of the drawings selected on the chart: a drawing's right-click menu, and the floating
+ * toolbar's More (⋯).
+ */
+export function DrawingMenu({
+  x,
+  y,
+  chart,
+  resolution,
+  onSettings,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  chart: ChartController | null;
+  resolution: Resolution | null;
+  onSettings(): void;
+  onClose(): void;
+}) {
+  const { drawings, selection, prefs } = useDrawings();
+  const templates = useTemplates();
+  const chosen = drawings.filter((drawing) => selection.includes(drawing.id));
+  if (chosen.length === 0) return null;
+  const items = drawingEntries({
+    chosen,
+    prefs,
+    templates,
+    resolution,
+    onSelect: (copies) => selectAdded(chart, copies),
+    onSettings,
+    onObjectTree: () => objectTreeStore.show(),
+  });
   return <PopupMenu x={x} y={y} label="Drawing" items={items} onClose={onClose} />;
 }
 

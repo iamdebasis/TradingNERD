@@ -612,6 +612,8 @@ export interface MockMarket {
   drawings: Map<string, Drawing[]>;
   /** Every drawings save the page made, in order. */
   readonly drawingSaves: SymbolDrawings[];
+  /** The panes of every drop the page sent (an indicator removed, D3c), in order. */
+  readonly droppedPanes: string[][];
   /** While true, drawings loads and saves fail as if the gateway were unreachable. */
   failDrawings(failing: boolean): void;
   /** The drawing templates GET /api/drawing-templates serves; PUTs replace a tool's (D3b). */
@@ -797,6 +799,7 @@ class MockGateway implements MockMarket {
   readonly flagSaves: FlagState[] = [];
   drawings = new Map<string, Drawing[]>();
   readonly drawingSaves: SymbolDrawings[] = [];
+  readonly droppedPanes: string[][] = [];
   templates: DrawingTemplates = { tools: {} };
   readonly templateSaves: ToolTemplates[] = [];
   readonly barRequests: URLSearchParams[] = [];
@@ -911,6 +914,27 @@ class MockGateway implements MockMarket {
       }
       const symbol = drawingsKey(new URL(request.url()).searchParams.get('symbol') ?? '');
       return route.fulfill({ json: { symbol, drawings: this.drawings.get(symbol) ?? [] } });
+    });
+    // A removed indicator's drawings dropped for every symbol (D3c; the gateway's
+    // POST /api/drawings/drop-panes): never the real file.
+    await this.page.route(/\/api\/drawings\/drop-panes$/, (route) => {
+      if (this.failingDrawings) return route.abort('connectionrefused');
+      const body = route.request().postDataJSON() as { panes?: unknown };
+      const panes = Array.isArray(body?.panes)
+        ? body.panes.filter((p) => typeof p === 'string')
+        : [];
+      if (panes.length === 0)
+        return route.fulfill({ status: 400, json: { error: 'bad_request', message: 'x' } });
+      this.droppedPanes.push(panes);
+      let removed = 0;
+      for (const [symbol, list] of this.drawings) {
+        const kept = list.filter(
+          (drawing) => drawing.pane === null || !panes.includes(drawing.pane),
+        );
+        removed += list.length - kept.length;
+        if (kept.length !== list.length) this.drawings.set(symbol, kept);
+      }
+      return route.fulfill({ json: { removed } });
     });
     // The user's drawing templates (apps/gateway/src/routes/drawingTemplates.ts): never the
     // real file.

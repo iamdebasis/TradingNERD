@@ -23,8 +23,10 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  *     regression trend's inputs.
  * 15: a drawing's place under the chart's bars (`below`), as Visual order's Send to back leaves it.
  * 16: drawing templates, a style saved under a name for one tool (/api/drawing-templates).
+ * 17: a drawing's name (the Object tree's Rename), and dropping a removed indicator's drawings
+ *     for every symbol (/api/drawings/drop-panes).
  */
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {

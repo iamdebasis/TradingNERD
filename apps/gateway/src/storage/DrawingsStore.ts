@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import {
+  type Drawing,
   type DrawingsFile,
   drawingsKey,
   MAX_DRAWING_SYMBOLS,
@@ -50,6 +51,36 @@ export class DrawingsStore {
     return run;
   }
 
+  /**
+   * Indicators that left the chart take their drawings with them from every symbol, not only
+   * the chart's (docs/SPEC.md §11, item 159; D3c): an indicator given a removed one's id again
+   * (`rsi-1`) must never show another symbol's old drawings. It waits for the saves before it,
+   * as they wait for each other, and writes nothing when there's nothing to drop.
+   */
+  dropPanes(value: unknown): Promise<{ removed: number }> {
+    const panes = panesOf(value);
+    if (!panes) return Promise.reject(new MarketError('bad_request', 'Those are not panes'));
+    const run = this.saves.then(() => this.drop(panes));
+    this.saves = run.catch(() => {});
+    return run;
+  }
+
+  private async drop(panes: ReadonlySet<string>): Promise<{ removed: number }> {
+    const state = await this.load();
+    let removed = 0;
+    const symbols: Record<string, Drawing[]> = {};
+    for (const [symbol, drawings] of Object.entries(state.symbols)) {
+      const kept = drawings.filter((drawing) => drawing.pane === null || !panes.has(drawing.pane));
+      removed += drawings.length - kept.length;
+      if (kept.length > 0) symbols[symbol] = kept;
+    }
+    if (removed === 0) return { removed };
+    const next: DrawingsFile = { version: 1, symbols };
+    await this.file.write(next);
+    this.state = Promise.resolve(next);
+    return { removed };
+  }
+
   private async save(parsed: SymbolDrawings): Promise<SymbolDrawings> {
     const state = await this.load();
     const symbols = { ...state.symbols };
@@ -79,6 +110,19 @@ export class DrawingsStore {
     this.state = loading;
     return loading;
   }
+}
+
+/** At most this many panes in one drop: far more indicators than a chart holds. */
+const MAX_DROPPED_PANES = 100;
+
+/** `{ panes: ["rsi-1", …] }`, each an indicator's id; null when it isn't that. */
+function panesOf(value: unknown): Set<string> | null {
+  const panes = (value as { panes?: unknown } | null)?.panes;
+  if (!Array.isArray(panes) || panes.length === 0 || panes.length > MAX_DROPPED_PANES) return null;
+  const ok = panes.every(
+    (pane) => typeof pane === 'string' && pane.length > 0 && pane.length <= 64,
+  );
+  return ok ? new Set(panes as string[]) : null;
 }
 
 function symbolKey(value: unknown): string {

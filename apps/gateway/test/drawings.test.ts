@@ -168,3 +168,84 @@ describe('the drawings routes', () => {
     expect(fileOf(dataDir).symbols['A:B']).toHaveLength(2_500);
   });
 });
+
+describe('dropping a removed indicator’s drawings from every symbol (item 159, D3c)', () => {
+  const onPane = (id: string, pane: string): Drawing => ({ ...line(id), pane });
+
+  it('drops them from every symbol, keeps the rest, and counts what went', async () => {
+    const dataDir = freshDir();
+    const store = new DrawingsStore(dataDir);
+    await store.put({ symbol: 'A:B', drawings: [line('a'), onPane('r1', 'rsi-1')] });
+    await store.put({ symbol: 'C:D', drawings: [onPane('r2', 'rsi-1'), onPane('m', 'macd-1')] });
+    await store.put({ symbol: 'E:F', drawings: [onPane('r3', 'rsi-1')] });
+    expect(await store.dropPanes({ panes: ['rsi-1'] })).toEqual({ removed: 3 });
+    expect(fileOf(dataDir).symbols).toEqual({
+      'A:B': [line('a')],
+      'C:D': [onPane('m', 'macd-1')],
+    });
+  });
+
+  it('writes nothing when there’s nothing to drop', async () => {
+    const dataDir = freshDir();
+    const store = new DrawingsStore(dataDir);
+    await store.put({ symbol: 'A:B', drawings: [line('a')] });
+    const write = vi.spyOn(JsonFile.prototype, 'write');
+    try {
+      expect(await store.dropPanes({ panes: ['rsi-1'] })).toEqual({ removed: 0 });
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it('runs after the save before it, so a drawing saved just before is dropped too', async () => {
+    const dataDir = freshDir();
+    const store = new DrawingsStore(dataDir);
+    const saving = store.put({ symbol: 'A:B', drawings: [onPane('r1', 'rsi-1')] });
+    const dropping = store.dropPanes({ panes: ['rsi-1'] });
+    await Promise.all([saving, dropping]);
+    expect(fileOf(dataDir).symbols).toEqual({});
+  });
+
+  it('refuses what isn’t a list of panes', async () => {
+    const store = new DrawingsStore(freshDir());
+    for (const bad of [
+      null,
+      {},
+      { panes: [] },
+      { panes: [''] },
+      { panes: 'rsi-1' },
+      { panes: [7] },
+    ]) {
+      await expect(store.dropPanes(bad)).rejects.toBeInstanceOf(MarketError);
+    }
+  });
+
+  it('is offered as POST /api/drawings/drop-panes', async () => {
+    const dataDir = freshDir();
+    const app = Fastify();
+    app.setErrorHandler((error, _request, reply) => {
+      reply.code(error instanceof MarketError ? 400 : 500).send({ error: 'x' });
+    });
+    const store = new DrawingsStore(dataDir);
+    registerDrawingRoutes(app, store);
+    await app.ready();
+    try {
+      await store.put({ symbol: 'A:B', drawings: [onPane('r1', 'rsi-1'), line('a')] });
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/api/drawings/drop-panes',
+        payload: { panes: ['rsi-1'] },
+      });
+      expect([ok.statusCode, ok.json()]).toEqual([200, { removed: 1 }]);
+      const bad = await app.inject({
+        method: 'POST',
+        url: '/api/drawings/drop-panes',
+        payload: {},
+      });
+      expect(bad.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+});

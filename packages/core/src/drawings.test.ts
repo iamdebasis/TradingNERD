@@ -7,8 +7,11 @@ import {
   type DrawingVisibility,
   defaultDrawingStyle,
   defaultVisibility,
+  displayName,
+  drawingName,
   drawingsKey,
   intervalVisibility,
+  MAX_DRAWING_NAME,
   MAX_DRAWING_TEXT,
   MAX_DRAWINGS_PER_SYMBOL,
   newDrawing,
@@ -135,6 +138,32 @@ describe('a stored drawing', () => {
   });
 });
 
+describe('a drawing’s name (D3c)', () => {
+  const line = () =>
+    newDrawing('a', 'trend-line', [
+      { time: 1, price: 1 },
+      { time: 2, price: 2 },
+    ]);
+
+  it('is its tool’s until it’s given one', () => {
+    expect(line().name).toBe('');
+    expect(displayName(line())).toBe('Trendline');
+    expect(displayName({ ...line(), name: 'Neckline' })).toBe('Neckline');
+  });
+
+  it('is kept trimmed, each run of spaces one, and at most its length', () => {
+    expect(drawingName('  Weekly \t  low ')).toBe('Weekly low');
+    expect(drawingName('x'.repeat(MAX_DRAWING_NAME + 10))).toHaveLength(MAX_DRAWING_NAME);
+    expect(parseDrawing({ ...line(), name: '  Neck   line ' })?.name).toBe('Neck line');
+  });
+
+  it('reads an older file’s drawing, or one with a name that isn’t text, as having none', () => {
+    const { name: _name, ...older } = line();
+    expect(parseDrawing(older)?.name).toBe('');
+    expect(parseDrawing({ ...line(), name: 7 })?.name).toBe('');
+  });
+});
+
 describe('a new drawing’s id', () => {
   it('is never the same twice, and is letters and digits as a stored id must be', () => {
     const ids = new Set(Array.from({ length: 10_000 }, () => newDrawingId()));
@@ -201,7 +230,7 @@ describe('visibility on intervals (the Visibility tab)', () => {
   });
 });
 
-describe('the Intervals visibility menu’s quick choices (D3a)', () => {
+describe('the Visibility on intervals menu’s quick choices (D3a)', () => {
   const EVERY = ['1T', '10S', '1', '30', '60', '240', '720', '1D', '1W', '1M', '12M'];
   const shownOn = (rows: DrawingVisibility, list: readonly string[] = EVERY) =>
     list.filter((text) => visibleOn(rows, res(text)));
