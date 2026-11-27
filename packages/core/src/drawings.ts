@@ -655,11 +655,12 @@ export function visibleOn(visibility: DrawingVisibility, resolution: Resolution)
 }
 
 /**
- * The quick choices of a drawing's "Intervals visibility" menu (Help Center, How to quickly adjust
- * visibility of a drawing or indicator; blog, Faster setup of visibility on intervals), each
- * setting its Visibility tab from the chart's interval. TradingView's Charting Library names the
- * four (Chart.Source.IntervalsVisibility: CurrentAndAbove, CurrentAndBelow, Current, All); their
- * words and order are provisional until measured from a screenshot (docs/SPEC.md §11).
+ * The quick choices of a drawing's "Visibility on intervals" menu ("Intervals visibility" before
+ * 2024; Help Center, How to quickly adjust visibility of a drawing or indicator; blog, Faster
+ * setup of visibility on intervals), each setting its Visibility tab from the chart's interval.
+ * TradingView's Charting Library names the four (Chart.Source.IntervalsVisibility:
+ * CurrentAndAbove, CurrentAndBelow, Current, All); their words and order are provisional until
+ * measured from a screenshot (docs/SPEC.md §11).
  */
 export const INTERVAL_PRESETS = [
   'current-and-above',
@@ -745,6 +746,11 @@ export interface Drawing {
    * provisional (docs/SPEC.md §11). Protocol 15; false for a new drawing and an older file's.
    */
   below: boolean;
+  /**
+   * Its own name, given in the Object tree ("Rename") or its settings' title; empty for its
+   * tool's name (TradingView's blog, Name your drawings; docs/SPEC.md §5.27, D3c). Protocol 17.
+   */
+  name: string;
 }
 
 /** A new drawing with its tool's defaults. */
@@ -764,6 +770,7 @@ export function newDrawing(
     locked: false,
     hidden: false,
     below: false,
+    name: '',
   };
 }
 
@@ -783,6 +790,18 @@ export function newDrawingId(): string {
 /** No limit to speak of: TradingView's Basic plan caps at 30 (third-party reports, 2026); this only guards the file. */
 export const MAX_DRAWINGS_PER_SYMBOL = 5_000;
 export const MAX_DRAWING_TEXT = 5_000;
+/** A drawing's name, at most this long (ours: TradingView doesn't say; provisional, §11). */
+export const MAX_DRAWING_NAME = 64;
+
+/** A name as kept: each run of spaces one space, trimmed, at most MAX_DRAWING_NAME long. */
+export function drawingName(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, MAX_DRAWING_NAME).trim();
+}
+
+/** What the Object tree and the settings' title call a drawing: its name, else its tool's. */
+export function displayName(drawing: Pick<Drawing, 'name' | 'tool'>): string {
+  return drawing.name || TOOL_NAMES[drawing.tool];
+}
 export const MAX_DRAWING_SYMBOLS = 10_000;
 
 /** Drawings belong to a symbol as the chart names it, case aside ("BINANCE:XRPUSDT"). */
@@ -958,6 +977,7 @@ export function parseDrawing(value: unknown): Drawing | null {
     locked: bool(value.locked, false),
     hidden: bool(value.hidden, false),
     below: bool(value.below, false),
+    name: typeof value.name === 'string' ? drawingName(value.name) : '',
   };
 }
 

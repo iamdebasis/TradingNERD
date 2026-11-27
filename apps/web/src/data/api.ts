@@ -280,6 +280,10 @@ export const drawingsApi = {
     ),
   save: async (drawings: SymbolDrawings): Promise<SymbolDrawings> =>
     symbolDrawings(await getJson(`${API_PREFIX}/drawings`, undefined, sendJson('PUT', drawings))),
+  /** A removed indicator's drawings, dropped from every symbol (D3c; SPEC §11, item 159). */
+  dropPanes: async (panes: readonly string[]): Promise<void> => {
+    await getJson(`${API_PREFIX}/drawings/drop-panes`, undefined, sendJson('POST', { panes }));
+  },
 };
 
 export type DrawingsApi = typeof drawingsApi;

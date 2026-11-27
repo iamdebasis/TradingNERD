@@ -15,8 +15,9 @@ import {
 /**
  * Managing drawings, milestone D3a (docs/SPEC.md §5.27): several selected at once (Ctrl/⌘ +
  * click, a Ctrl/⌘ box), moved, cloned, recolored, locked and removed together; a drawing's menu
- * (right-click, or the floating toolbar's ⋯) with Visual order, under the bars too, and Intervals
- * visibility; Clone, Copy and Paste; the arrow keys; Shift's straight moves; Settings for several.
+ * (right-click, or the floating toolbar's ⋯) with Visual order, under the bars too, and
+ * Visibility on intervals (D3c's words); Clone, Copy and Paste; the arrow keys; Shift's straight
+ * moves; Settings for several.
  * Ctrl/⌘ is ControlOrMeta: ⌘ on the user's Mac, Ctrl elsewhere (AGENTS.md).
  */
 
@@ -323,7 +324,7 @@ test.describe('several drawings at once (D3a)', () => {
 });
 
 test.describe('a drawing’s menu (D3a)', () => {
-  test('opens on a right-click with Template, Visual order, Intervals visibility, Clone, Copy, Lock, Remove and Settings', async ({
+  test('opens on a right-click with Object Tree…, Template, Visual order, Visibility on intervals, Clone, Copy, Lock, Hide, Remove and Settings', async ({
     page,
     market,
   }) => {
@@ -334,13 +335,17 @@ test.describe('a drawing’s menu (D3a)', () => {
     // The right-click selects the drawing it's on.
     expect(await selectionOf(page)).toEqual(['a']);
     await expect(menu.locator(':scope > [role="menuitem"]')).toHaveText([
+      // D3c's, as TradingView's menu for drawings starts.
+      'Object Tree…',
       // D3b's, while the drawings selected are all of one tool.
       'Template',
       'Visual order',
-      'Intervals visibility',
+      'Visibility on intervals',
       'Clone',
       /^Copy(⌘C|Ctrl\+C)$/,
       'Lock',
+      // D3c's.
+      'Hide',
       /^Remove(⌫|Del)$/,
       'Settings…',
     ]);
@@ -348,10 +353,10 @@ test.describe('a drawing’s menu (D3a)', () => {
     await expect(menu.getByRole('menu', { name: 'Visual order' }).getByRole('menuitem')).toHaveText(
       ['Bring to front', 'Bring forward', 'Send backward', 'Send to back'],
     );
-    await menu.getByRole('menuitem', { name: 'Intervals visibility' }).hover();
+    await menu.getByRole('menuitem', { name: 'Visibility on intervals' }).hover();
     await expect(menu.getByRole('menu', { name: 'Visual order' })).toBeHidden();
     await expect(
-      menu.getByRole('menu', { name: 'Intervals visibility' }).getByRole('menuitem'),
+      menu.getByRole('menu', { name: 'Visibility on intervals' }).getByRole('menuitem'),
     ).toHaveText([
       'Current interval and above',
       'Current interval and below',
@@ -360,7 +365,7 @@ test.describe('a drawing’s menu (D3a)', () => {
     ]);
     // Escape closes the submenu, then the menu, the drawing still selected.
     await page.keyboard.press('Escape');
-    await expect(menu.getByRole('menu', { name: 'Intervals visibility' })).toBeHidden();
+    await expect(menu.getByRole('menu', { name: 'Visibility on intervals' })).toBeHidden();
     await expect(menu).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
@@ -378,17 +383,19 @@ test.describe('a drawing’s menu (D3a)', () => {
     await toolbarOf(page).getByRole('button', { name: 'More' }).click();
     const menu = page.getByRole('menu', { name: 'Drawing', exact: true });
     await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Object Tree…' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Template' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Visual order' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
-    await expect(menu.getByRole('menuitem', { name: 'Intervals visibility' })).toBeFocused();
+    await expect(menu.getByRole('menuitem', { name: 'Visibility on intervals' })).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(
-      menu.getByRole('menu', { name: 'Intervals visibility' }).getByRole('menuitem').first(),
+      menu.getByRole('menu', { name: 'Visibility on intervals' }).getByRole('menuitem').first(),
     ).toBeFocused();
     await page.keyboard.press('ArrowLeft');
-    await expect(menu.getByRole('menuitem', { name: 'Intervals visibility' })).toBeFocused();
+    await expect(menu.getByRole('menuitem', { name: 'Visibility on intervals' })).toBeFocused();
     // The arrows moved through the menu, not the drawing.
     expect(await find(page, 'a')).toEqual(a);
   });
@@ -450,7 +457,7 @@ test.describe('a drawing’s menu (D3a)', () => {
     expect(market.drawingSaves.at(-1)?.drawings[0]?.below).toBe(false);
   });
 
-  test('shows a drawing on the current interval only, from Intervals visibility', async ({
+  test('shows a drawing on the current interval only, from Visibility on intervals', async ({
     page,
     market,
   }) => {
@@ -459,7 +466,7 @@ test.describe('a drawing’s menu (D3a)', () => {
     if (!a) throw new Error('no drawings');
     await choose(
       await menuOf(page, await middleOf(page, a)),
-      'Intervals visibility',
+      'Visibility on intervals',
       'Current interval only',
     );
     await expect

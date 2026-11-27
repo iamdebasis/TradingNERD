@@ -64,3 +64,21 @@ describe('Scripts on the chart, in the indicator store', () => {
     expect(read.list.map((item) => item.id)).toEqual(['rsi-1']);
   });
 });
+
+describe('Remove objects → Remove indicators (D3c)', () => {
+  it('removes every indicator at once, telling its listeners once', () => {
+    const store = new IndicatorStore();
+    store.add('rsi');
+    store.add('volume');
+    let told = 0;
+    store.subscribe(() => {
+      told += 1;
+    });
+    store.removeAll();
+    expect(store.get().list).toEqual([]);
+    expect(told).toBe(1);
+    // Nothing left: nothing to tell.
+    store.removeAll();
+    expect(told).toBe(1);
+  });
+});

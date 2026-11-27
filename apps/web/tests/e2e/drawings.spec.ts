@@ -432,7 +432,7 @@ test.describe('editing drawings', () => {
     await toolbarOf(page).getByRole('button', { name: 'Remove objects' }).click();
     await page
       .getByRole('menu', { name: 'Remove objects' })
-      .getByRole('menuitem', { name: 'Remove 2 drawings' })
+      .getByRole('menuitem', { name: 'Remove 2 drawings', exact: true })
       .click();
     expect(await drawingsOf(page)).toEqual([]);
     const banner = page.getByRole('banner');

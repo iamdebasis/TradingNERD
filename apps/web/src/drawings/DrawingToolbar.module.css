@@ -284,3 +284,63 @@
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
 }
+
+/*
+ * Remove objects' menu (D3c), measured from TradingView's Help Center image (43000473337, image
+ * 1, at 2×): wider for its switch's row (305 px), its items without icons, their words 14.5 px
+ * in, rows about 35 px; the switch 42 × 22 px, 11 px from the right. Its colours follow our
+ * menus' and the settings dialogs' (provisional, docs/SPEC.md §11).
+ */
+.menu[data-wide] {
+  width: 305px;
+}
+
+.menu .plain {
+  height: 35px;
+  padding: 0 11px 0 14.5px;
+}
+
+.menu .plain .itemName {
+  margin-left: 0;
+}
+
+.item:disabled {
+  color: var(--color-avatar-text);
+  cursor: default;
+}
+
+.item:disabled:hover {
+  background: transparent;
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 22px;
+  margin-left: 16px;
+  border-radius: 11px;
+  background: var(--color-separator);
+  transition: background-color 0.15s;
+}
+
+.switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-text);
+  content: "";
+  transition: transform 0.15s;
+}
+
+.switch[data-on] {
+  background: var(--color-accent);
+}
+
+.switch[data-on]::after {
+  background: #ffffff;
+  transform: translateX(20px);
+}

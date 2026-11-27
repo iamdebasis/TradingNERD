@@ -1,4 +1,5 @@
-import type { OlderCapsStatus, SymbolInfo } from '@tradingnerd/core';
+import { type OlderCapsStatus, parseResolution, type SymbolInfo } from '@tradingnerd/core';
+import type { SymbolContext } from '@tradingnerd/indicators';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertsHost } from '../alerts/AlertsHost';
 import { AlertsPanel } from '../alerts/AlertsPanel';
@@ -12,8 +13,12 @@ import { type ChartRoute, withInterval, withSymbol } from '../chart/route';
 import { olderCapsApi } from '../data/api';
 import { useGateway, useGatewayStatus } from '../data/GatewayContext';
 import { DrawingToolbar } from '../drawings/DrawingToolbar';
+import { ObjectTree } from '../drawings/ObjectTree';
+import { treeSymbolLabel } from '../drawings/objectTreeModel';
+import { objectTreeStore, useObjectTree } from '../drawings/objectTreeStore';
 import { IndicatorsDialog } from '../indicators/IndicatorsDialog';
 import { indicatorStore } from '../indicators/indicatorStore';
+import { hasRealVolume, volumeUnit } from '../indicators/symbolVolume';
 import { isEditable } from '../lib/dom';
 import { readJson, writeJson } from '../lib/storage';
 import { useLogos } from '../logos/LogoContext';
@@ -74,25 +79,29 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const [watchlistOpen, setWatchlistOpen] = useState(() => readJson(WATCHLIST_OPEN_KEY) !== false);
   const [alertsOpen, setAlertsOpen] = useState(() => readJson(ALERTS_OPEN_KEY) === true);
   const alerts = useAlerts();
+  const objectTree = useObjectTree();
   const pineRight = pine.open && pine.dock === 'right';
   const pineBottom = pine.open && pine.dock === 'bottom';
   // One panel at a time on the right: Pine Logs, else the Pine Editor docked there, else the
-  // alert manager, else the watchlist.
+  // alert manager, else the Object tree (D3c), else the watchlist.
   const rightPanel: RightPanel | 'logs' | null = logs.open
     ? 'logs'
     : pineRight
       ? 'pine'
       : alertsOpen
         ? 'alerts'
-        : watchlistOpen
-          ? 'watchlist'
-          : null;
+        : objectTree.open
+          ? 'objects'
+          : watchlistOpen
+            ? 'watchlist'
+            : null;
   const panelWidth =
     rightPanel === 'pine' ? pineWidth : rightPanel === 'logs' ? logsWidth : watchlist;
   // The toolbar lights the watchlist when it shows, and Pine wherever the editor is.
   const lit: RightPanel[] = [
     ...(rightPanel === 'watchlist' ? (['watchlist'] as const) : []),
     ...(rightPanel === 'alerts' ? (['alerts'] as const) : []),
+    ...(rightPanel === 'objects' ? (['objects'] as const) : []),
     ...(pine.open ? (['pine'] as const) : []),
     ...(tester.open ? (['tester'] as const) : []),
   ];
@@ -110,6 +119,12 @@ export function AppShell({ route }: { route: ChartRoute }) {
   const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   /** The chart's symbol as resolved, for Chart settings' fields. */
   const [chartInfo, setChartInfo] = useState<SymbolInfo | null>(null);
+  /** The Object tree's indicator names follow the chart's symbol ("Vol · XRP"). */
+  const treeSymbol = useMemo(
+    () =>
+      chartInfo?.id.toUpperCase() === symbol.toUpperCase() ? symbolContextOf(chartInfo) : NO_SYMBOL,
+    [chartInfo, symbol],
+  );
   const firstLaunchShown = useRef(false);
 
   // Coin logos need a CoinGecko key: ask once, at first launch, unless it was skipped before.
@@ -207,15 +222,34 @@ export function AppShell({ route }: { route: ChartRoute }) {
     setAlertsOpen(open);
     writeJson(ALERTS_OPEN_KEY, open);
   };
+
+  // The Object tree shown (its button, or a menu's "Object Tree…"): it takes the right from Pine
+  // Logs, the editor docked there and the alert manager, even when it was open under them.
+  const treeShown = useRef(objectTree.shown);
+  useEffect(() => {
+    if (objectTree.shown === treeShown.current) return;
+    treeShown.current = objectTree.shown;
+    logsStore.close();
+    const editor = pineStore.get();
+    if (editor.open && editor.dock === 'right') pineStore.setOpen(false);
+    setAlertsOpen(false);
+    writeJson(ALERTS_OPEN_KEY, false);
+  }, [objectTree.shown]);
+
   const togglePanel = (panel: RightPanel) => {
     if (panel === 'alerts') {
       if (rightPanel === 'alerts') showAlerts(false);
       else {
-        // The alert manager takes the right from Pine Logs and from the editor docked there.
+        // The alert manager takes the right from Pine Logs, the editor docked there and the
+        // Object tree.
         logsStore.close();
         if (pineRight) pineStore.setOpen(false);
+        objectTreeStore.close();
         showAlerts(true);
       }
+    } else if (panel === 'objects') {
+      if (rightPanel === 'objects') objectTreeStore.close();
+      else objectTreeStore.show();
     } else if (panel === 'tester') {
       strategyStore.setOpen(!tester.open);
     } else if (panel === 'pine') {
@@ -225,10 +259,12 @@ export function AppShell({ route }: { route: ChartRoute }) {
     } else if (rightPanel === 'watchlist') {
       showWatchlist(false);
     } else {
-      // The watchlist takes the right from Pine Logs, the editor docked there and the alerts.
+      // The watchlist takes the right from Pine Logs, the editor docked there, the alerts and
+      // the Object tree.
       logsStore.close();
       if (pineRight) pineStore.setOpen(false);
       showAlerts(false);
+      objectTreeStore.close();
       showWatchlist(true);
     }
   };
@@ -387,6 +423,15 @@ export function AppShell({ route }: { route: ChartRoute }) {
               />
             </aside>
           )}
+          {rightPanel === 'objects' && (
+            <aside className={`${styles.panel} ${styles.side}`} aria-label="Object tree panel">
+              <ObjectTree
+                symbolLabel={treeSymbolLabel(symbol, resolution)}
+                symbol={treeSymbol}
+                resolution={parseResolution(resolution)}
+              />
+            </aside>
+          )}
           {rightPanel === 'logs' && (
             <aside className={`${styles.panel} ${styles.side}`} aria-label="Pine Logs panel">
               <PineLogs onClose={() => logsStore.close()} onSource={showSource} />
@@ -415,3 +460,11 @@ export function AppShell({ route }: { route: ChartRoute }) {
     </div>
   );
 }
+
+/** Until the chart's symbol resolves, Volume's name names no coin (as the legend's). */
+const NO_SYMBOL: SymbolContext = { base: '', hasVolume: true };
+
+const symbolContextOf = (info: SymbolInfo): SymbolContext => ({
+  base: volumeUnit(info),
+  hasVolume: hasRealVolume(info),
+});

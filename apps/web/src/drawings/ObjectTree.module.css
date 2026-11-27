@@ -1,0 +1,254 @@
+/*
+ * The Object tree panel (D3c), measured from TradingView's own Help Center images at 2× (CSS px
+ * here): 43000473337 image 2 (November 2026) and 43000795451 image 1 (October 2026). Their light
+ * colours are mapped to our dark tokens: the panel's white to --color-bg, #F2F2F2 (the switch,
+ * the row under the pointer, the line under the toolbar) to --color-gutter, the selected rows'
+ * #BBD9FB to --color-selection, the dimmed rows' #B8B8B8 to --color-avatar-text, the grey of the
+ * row buttons to --color-text-secondary (provisional until a dark screenshot, docs/SPEC.md §11).
+ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+/* The "Object tree" / "Data window" switch: 34 px, 12 px from the top, 16 px in each side; the
+   chosen half a 28 px pill 3 px inside it, in the panel's own colour, its words bold. */
+.tabs {
+  display: flex;
+  flex: none;
+  height: 34px;
+  margin: 12px 16px 0;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--color-gutter);
+}
+
+.tab {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--color-bg);
+  font-weight: 600;
+  cursor: default;
+}
+
+/* The Data window comes in a later step. */
+.tab:disabled {
+  color: var(--color-avatar-text);
+  cursor: default;
+}
+
+/* The toolbar: 34 px buttons 4 px apart from 10 px in, centred 21 px under the switch, a 1 px
+   line under it. */
+.toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--color-gutter);
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.tool:hover:not(:disabled) {
+  background: var(--color-gutter);
+}
+
+.tool:disabled {
+  color: var(--color-avatar-text);
+  cursor: default;
+}
+
+/* The rows: 38 px, 6 px under the line; a 28 px icon 22 px in, the name 58 px in. */
+.list {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 22px;
+  cursor: default;
+  user-select: none;
+}
+
+.icon {
+  display: flex;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  color: var(--color-text);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: var(--color-gutter);
+  outline: none;
+}
+
+.row[aria-selected="true"] {
+  background: var(--color-selection);
+}
+
+.row[data-kind="symbol"] .label {
+  font-weight: 600;
+}
+
+/* Hidden, or unable to join the drawings selected while Ctrl or ⌘ is held: dimmed. */
+.row[data-hidden] .label,
+.row[data-hidden] .icon,
+.row[data-dim] .label,
+.row[data-dim] .icon {
+  color: var(--color-avatar-text);
+}
+
+/* Where dragged drawings would go: a 2 px line in the accent colour (ours, provisional). */
+.row[data-drop]::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: var(--color-accent);
+  content: "";
+  pointer-events: none;
+}
+
+.row[data-drop="before"]::after {
+  top: -1px;
+}
+
+.row[data-drop="after"]::after {
+  bottom: -1px;
+}
+
+.list[data-dragging] .row {
+  cursor: grabbing;
+}
+
+/* The row's buttons: 22 px squares 8 px apart, 8 px from the right; grey, the one under the
+   pointer on a lighter square. */
+.buttons {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.slot,
+.button {
+  width: 22px;
+  height: 22px;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.row:hover .button,
+.row:focus-within .button,
+.button[data-on] {
+  visibility: visible;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--color-chip);
+  color: var(--color-text);
+}
+
+.button:disabled {
+  color: var(--color-avatar-text);
+  cursor: default;
+}
+
+.button:focus-visible,
+.tool:focus-visible,
+.tab:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* The name being edited, in place of the label. */
+.rename {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  margin-left: -7px;
+  padding: 0 6px;
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  outline: none;
+}
+
+/* The dragged row's copy, following the pointer: translucent, in the selected rows' blue
+   (TradingView's GIF of a drag, 43000474299). */
+.ghost {
+  position: fixed;
+  z-index: 160;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 22px;
+  background: var(--color-selection);
+  color: var(--color-text);
+  font-size: 14px;
+  opacity: 0.7;
+  pointer-events: none;
+}

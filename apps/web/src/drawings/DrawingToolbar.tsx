@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { indicatorStore, useIndicators } from '../indicators/indicatorStore';
 import { altShortcut, commandShortcut, isMac } from '../lib/platform';
 import { StarIcon } from '../toolbar/icons';
 import styles from './DrawingToolbar.module.css';
@@ -79,7 +80,8 @@ const TREND_SECTIONS: readonly { name: string; tools: readonly DrawingTool[] }[]
  * Each drawing tool's row has a star that makes it a favorite, on the favorites toolbar (D3b).
  */
 export function DrawingToolbar() {
-  const { tool, prefs, drawings } = useDrawings();
+  const { tool, prefs } = useDrawings();
+  const indicatorCount = useIndicators().list.length;
   const [menu, setMenu] = useState<MenuName | null>(null);
   const toolbar = useRef<HTMLElement>(null);
   const anchors = {
@@ -259,19 +261,87 @@ export function DrawingToolbar() {
         </ToolMenu>
       )}
       {menu === 'remove' && (
-        <ToolMenu anchor={anchors.remove} toolbar={toolbar} label="Remove objects" onClose={close}>
-          <MenuItem
-            icon={<TrashIcon />}
-            name={drawings.length === 1 ? 'Remove 1 drawing' : `Remove ${drawings.length} drawings`}
-            disabled={drawings.length === 0}
-            onSelect={() => {
-              close();
-              drawingStore.removeAll();
-            }}
-          />
-        </ToolMenu>
+        <RemoveMenu
+          anchor={anchors.remove}
+          toolbar={toolbar}
+          drawings={drawingStore.removable().length}
+          indicators={indicatorCount}
+          removeLocked={prefs.removeLocked}
+          onClose={close}
+        />
       )}
     </nav>
+  );
+}
+
+/** "1 drawing", "2 drawings": a count as the Remove menu writes it. */
+const counted = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`;
+
+/**
+ * Remove objects' menu, as TradingView's (its Help Center, How can I remove all drawings &
+ * indicators from the chart?, and its image): "Remove N drawings", "Remove N indicators", "Remove
+ * N drawings & N indicators", then the "Always remove locked drawings" switch, off at first. The
+ * drawings counted are those that would go: locked ones only with the switch on, none while Lock
+ * all is on (D3c). Removed drawings come back with undo; indicators don't, as before.
+ */
+function RemoveMenu({
+  anchor,
+  toolbar,
+  drawings,
+  indicators,
+  removeLocked,
+  onClose,
+}: {
+  anchor: RefObject<HTMLDivElement | null>;
+  toolbar: RefObject<HTMLElement | null>;
+  drawings: number;
+  indicators: number;
+  removeLocked: boolean;
+  onClose(): void;
+}) {
+  const item = (name: string, disabled: boolean, remove: () => void) => (
+    <button
+      type="button"
+      role="menuitem"
+      className={`${styles.item} ${styles.plain}`}
+      disabled={disabled}
+      onClick={() => {
+        onClose();
+        remove();
+      }}
+    >
+      <span className={styles.itemName}>{name}</span>
+    </button>
+  );
+  return (
+    <ToolMenu anchor={anchor} toolbar={toolbar} label="Remove objects" wide onClose={onClose}>
+      {item(`Remove ${counted(drawings, 'drawing')}`, drawings === 0, () =>
+        drawingStore.removeAll(),
+      )}
+      {item(`Remove ${counted(indicators, 'indicator')}`, indicators === 0, () =>
+        indicatorStore.removeAll(),
+      )}
+      {item(
+        `Remove ${counted(drawings, 'drawing')} & ${counted(indicators, 'indicator')}`,
+        drawings === 0 && indicators === 0,
+        () => {
+          drawingStore.removeAll();
+          indicatorStore.removeAll();
+        },
+      )}
+      <hr className={styles.divider} />
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={removeLocked}
+        className={`${styles.item} ${styles.plain}`}
+        // A switch: the menu stays open (ours, provisional §11).
+        onClick={() => drawingStore.setPrefs({ removeLocked: !removeLocked })}
+      >
+        <span className={styles.itemName}>Always remove locked drawings</span>
+        <span className={styles.switch} data-on={removeLocked || undefined} aria-hidden />
+      </button>
+    </ToolMenu>
   );
 }
 
@@ -357,12 +427,15 @@ function ToolMenu({
   anchor,
   toolbar,
   label,
+  wide = false,
   onClose,
   children,
 }: {
   anchor: RefObject<HTMLDivElement | null>;
   toolbar: RefObject<HTMLElement | null>;
   label: string;
+  /** Remove objects' menu, its switch's row wider than the tools' menus. */
+  wide?: boolean;
   onClose(): void;
   children: ReactNode;
 }) {
@@ -407,6 +480,7 @@ function ToolMenu({
       className={styles.menu}
       role="menu"
       aria-label={label}
+      data-wide={wide || undefined}
       style={position ? { left: position.left, top: position.top } : { visibility: 'hidden' }}
     >
       {children}

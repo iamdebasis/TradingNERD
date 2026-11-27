@@ -102,3 +102,40 @@ export function reorderDrawings(
     return [token.below === below ? token : { ...token, below }];
   });
 }
+
+/** Where the Object tree drops drawings: a layer of a pane, and the drawing they go behind. */
+export interface TreePlace {
+  /** The pane's key: null for the price pane, else its indicator's id. */
+  pane: string | null;
+  /** The layer under the pane's series (`below`), or the one over them. */
+  below: boolean;
+  /** The drawing of that pane and layer they go just behind; null for the layer's front. */
+  before: string | null;
+}
+
+/**
+ * The drawings after a drag in the Object tree (docs/SPEC.md §5.27, D3c), which lists them in
+ * paint order, its top row at the back (TradingView's own GIF, measured: §4.27): those in `ids`
+ * on the place's pane, keeping their order, go just behind `before`, or to the front of the
+ * layer when there's none, each taking the layer's `below`. The same list back when nothing
+ * moves.
+ */
+export function placeDrawings(
+  drawings: readonly Drawing[],
+  ids: readonly string[],
+  place: TreePlace,
+): readonly Drawing[] {
+  const chosen = new Set(ids);
+  if (place.before !== null && chosen.has(place.before)) return drawings;
+  const moving = drawings.filter(
+    (drawing) => chosen.has(drawing.id) && drawing.pane === place.pane,
+  );
+  if (moving.length === 0) return drawings;
+  const moved = moving.map((drawing) =>
+    drawing.below === place.below ? drawing : { ...drawing, below: place.below },
+  );
+  const rest = drawings.filter((drawing) => !moving.includes(drawing));
+  const at = place.before === null ? -1 : rest.findIndex((drawing) => drawing.id === place.before);
+  const next = at < 0 ? [...rest, ...moved] : [...rest.slice(0, at), ...moved, ...rest.slice(at)];
+  return next.every((drawing, i) => drawing === drawings[i]) ? drawings : next;
+}

@@ -12,5 +12,6 @@ export function registerDrawingRoutes(app: FastifyInstance, store: DrawingsStore
   );
   app.put(`${API_PREFIX}/drawings`, { bodyLimit: BODY_LIMIT }, (request) =>
     store.put(request.body),
-  );
+  ); // A removed indicator's drawings, from every symbol (item 159; D3c).
+  app.post(`${API_PREFIX}/drawings/drop-panes`, (request) => store.dropPanes(request.body));
 }

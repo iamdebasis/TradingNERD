@@ -1028,3 +1028,27 @@ describe('channels and pitchforks (D2)', () => {
     expect(host.asked).toEqual([]);
   });
 });
+
+describe('hidden drawings (D3c)', () => {
+  it('leave the selection when hidden, and can’t be selected while they are', () => {
+    const a = given('a', 'trend-line', [
+      [10, 200],
+      [20, 250],
+    ]);
+    const b = given('b', 'ray', [
+      [30, 200],
+      [40, 250],
+    ]);
+    engine.setDrawings([a, b]);
+    engine.select(['a', 'b']);
+    expect(engine.selection()).toEqual(['a', 'b']);
+    engine.setDrawings([{ ...a, hidden: true }, b]);
+    expect(engine.selection()).toEqual(['b']);
+    engine.select(['a', 'b']);
+    expect(engine.selection()).toEqual(['b']);
+    // Shown again, it can be selected again.
+    engine.setDrawings([a, b]);
+    engine.select(['a']);
+    expect(engine.selection()).toEqual(['a']);
+  });
+});

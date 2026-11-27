@@ -289,7 +289,9 @@ export class DrawingEngine {
     this.drawings = drawings.slice();
     const ids = new Set(this.drawings.map((drawing) => drawing.id));
     if (this.drag && !ids.has(this.drag.id)) this.endDrag();
-    const kept = this.selected.filter((id) => ids.has(id));
+    // A hidden drawing isn't on the chart: it leaves the selection (D3c).
+    const shown = this.selectable();
+    const kept = this.selected.filter((id) => shown.has(id));
     if (kept.length !== this.selected.length) this.setSelection(kept);
     if (this.hover && !ids.has(this.hover)) this.setHover(null, null);
     this.askHistory();
@@ -329,9 +331,14 @@ export class DrawingEngine {
   }
 
   select(ids: readonly string[]): void {
-    const known = new Set(this.drawings.map((drawing) => drawing.id));
+    const known = this.selectable();
     this.setSelection(ids.filter((id) => known.has(id)));
     this.update();
+  }
+
+  /** The drawings that can be selected: every one but the hidden (D3c). */
+  private selectable(): Set<string> {
+    return new Set(this.drawings.filter((drawing) => !drawing.hidden).map((drawing) => drawing.id));
   }
 
   /** The pane a drawing being placed or dragged, or a box, is on: the pointer's moves are read there. */

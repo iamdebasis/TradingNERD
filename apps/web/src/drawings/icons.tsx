@@ -409,3 +409,88 @@ export function MoreIcon() {
     </Icon>
   );
 }
+
+/**
+ * The Object tree's button on the right toolbar (D3c): two stacked rhombi, as TradingView's
+ * "Object tree and data window" (its Help Center images; ours, traced by eye, provisional §11).
+ */
+export function ObjectTreeIcon() {
+  return (
+    <Icon>
+      <path d="M14 6.5 23.5 12 14 17.5 4.5 12z" />
+      <path d="m4.5 16 9.5 5.5 9.5-5.5" />
+    </Icon>
+  );
+}
+
+/** Clone: two squares, the back one showing at the top right (TradingView's menu icon). */
+export function CloneIcon() {
+  return (
+    <Icon>
+      <path d="M10.5 9.5v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" />
+      <rect x="5.5" y="9.5" width="13" height="13" rx="1" />
+    </Icon>
+  );
+}
+
+/** Rename: a pencil (TradingView's Object tree menu and settings title). */
+export function RenameIcon() {
+  return (
+    <Icon>
+      <path d="M7.5 20.5 8.5 16 18 6.5l3.5 3.5-9.5 9.5zM16 8.5l3.5 3.5" />
+    </Icon>
+  );
+}
+
+/** Hide: an eye crossed out, the menus' item (TradingView's). */
+export function HideIcon() {
+  return (
+    <Icon>
+      <path d="M5 14s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" />
+      <circle cx="14" cy="14" r="3" />
+      <path d="M6 21.5 22 6.5" />
+    </Icon>
+  );
+}
+
+/** Show: an open eye, the menus' item for hidden drawings. */
+export function ShowIcon() {
+  return (
+    <Icon>
+      <path d="M5 14s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" />
+      <circle cx="14" cy="14" r="3" />
+    </Icon>
+  );
+}
+
+/** The Object tree's symbol row: two candles, their wicks through them (TradingView's). */
+export function SeriesIcon() {
+  return (
+    <Icon>
+      <rect x="7.5" y="9.5" width="4" height="9" rx="0.5" />
+      <path d="M9.5 6v3.5M9.5 18.5V22" />
+      <rect x="16.5" y="11.5" width="4" height="6" rx="0.5" />
+      <path d="M18.5 8.5v3M18.5 17.5V20" />
+    </Icon>
+  );
+}
+
+/** The Object tree's indicator row: a wave (TradingView's). */
+export function IndicatorRowIcon() {
+  return (
+    <Icon>
+      <path d="M5.5 17c2-3.5 3.5-5 5-5 2.5 0 4 4 6.5 4 1.5 0 3-1.5 5.5-5" />
+    </Icon>
+  );
+}
+
+/** A padlock in an Object tree row, 18 px: open, or shut on a locked drawing. */
+export function RowPadlockIcon({ locked = false }: { locked?: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" {...line} aria-hidden>
+      <rect x="4.5" y="8.5" width="9" height="7" rx="1.5" />
+      <path d={locked ? 'M6.5 8.5v-2a2.5 2.5 0 0 1 5 0v2' : 'M6.5 8.5v-2.5a2.5 2.5 0 0 1 5 0'} />
+      <path d="M9 11.5v1" />
+    </svg>
+  );
+}
