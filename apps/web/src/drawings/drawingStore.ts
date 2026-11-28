@@ -1,23 +1,38 @@
 import type { CursorMode, MagnetMode } from '@tradingnerd/chart';
 import {
   applyDrawingStyle,
+  createGroup,
   DRAWING_TOOLS,
   type Drawing,
+  type DrawingGroup,
   type DrawingStyle,
   type DrawingTool,
   drawingName,
   drawingsKey,
+  type GroupItem,
+  groupMembers,
   type IntervalPreset,
   intervalVisibility,
   isDrawingTool,
+  itemLevels,
+  joinPath,
   MAX_DRAWINGS_PER_SYMBOL,
+  moveItems,
   newDrawingId,
+  newGroupId,
+  nextGroupName,
+  normalizeGroups,
   parseDrawing,
   placeDrawings,
+  placeNewDrawings,
   type Resolution,
+  renameGroup,
   reorderDrawings,
+  reorderItems,
   TREND_LINE_TOOLS,
   type TreePlace,
+  type TreeTarget,
+  topItems,
   type VisualOrderMove,
 } from '@tradingnerd/core';
 import { useSyncExternalStore } from 'react';
@@ -31,7 +46,8 @@ import { type ToolStyles, toolStyles } from './toolStyles';
  * the gateway when the symbol changes and saved there after each edit; their undo and redo; the
  * selection the chart reports; edits to several at once (visual order, intervals visibility,
  * lock, clone, copy and paste: D3a); templates applied, each tool's last style and the favorite
- * tools (D3b); and the left toolbar's tool and modes, which this browser keeps. A load or save
+ * tools (D3b); groups of drawings and the groups picked in the Object tree (D3c2); and the left
+ * toolbar's tool and modes, which this browser keeps. A load or save
  * that fails is tried again every DRAWINGS_RETRY_MS, the chart saying so
  * meanwhile, and a symbol's list not yet saved is what the chart shows when it comes back to it.
  */
@@ -145,6 +161,11 @@ export interface DrawingsState {
   prefs: ToolbarPrefs;
   /** The drawings selected on the chart. */
   selection: readonly string[];
+  /**
+   * The groups picked in the Object tree (D3c2), standing for every drawing inside them: their
+   * drawings the chart can show are the selection. Gone once the selection changes otherwise.
+   */
+  picked: readonly string[];
   canUndo: boolean;
   canRedo: boolean;
 }
@@ -187,6 +208,10 @@ export class DrawingStore {
   private clipboard: readonly Drawing[] = [];
   /** Each tool's last style, which a style edit sets (D3b). */
   private readonly styles: Pick<ToolStyles, 'remember' | 'set'> | null;
+  /** The selection the groups picked stand for, while they're picked. */
+  private pickedFor: ReadonlySet<string> | null = null;
+  /** The groups a drawing made with the tool now chosen joins (D3c2). */
+  private joining: DrawingGroup[] = [];
 
   constructor(
     api: StoreApi = drawingsApi,
@@ -207,6 +232,7 @@ export class DrawingStore {
       tool: null,
       prefs: sanitizeToolbar(readJson(DRAWING_TOOLBAR_KEY)),
       selection: [],
+      picked: [],
       canUndo: false,
       canRedo: false,
     };
@@ -227,11 +253,13 @@ export class DrawingStore {
     this.past = [];
     this.future = [];
     this.early = null;
+    this.pickedFor = null;
     this.commit({
       ...this.value,
       symbol: key,
       drawings: [],
       selection: [],
+      picked: [],
       loadError: null,
       saveError: this.saveErrors.get(key) ?? null,
     });
@@ -253,12 +281,13 @@ export class DrawingStore {
       // A list of the symbol's not yet saved (waiting, on its way, or failed and to be tried
       // again) is newer than the gateway's: it's the one shown.
       const base = this.unsavedOf(key) ?? loaded.drawings;
-      // A drawing on the pane of an indicator no longer on the chart has nowhere to show.
-      const kept = base.filter((d) => d.pane === null || panes.has(d.pane));
+      // A drawing on the pane of an indicator no longer on the chart has nowhere to show; the
+      // group rules hold in what's kept.
+      const kept = normalizeGroups(base.filter((d) => d.pane === null || panes.has(d.pane)));
       const early = this.early ?? [];
       this.early = null;
       const known = new Set(kept.map((d) => d.id));
-      const drawings = [...kept, ...early.filter((d) => !known.has(d.id))];
+      const drawings = placeNewDrawings(kept, [...kept, ...early.filter((d) => !known.has(d.id))]);
       // Undo steps taken before the drawings came would undo them too: they start afresh.
       this.past = [];
       this.future = [];
@@ -283,9 +312,24 @@ export class DrawingStore {
     }
   }
 
-  /** The chart made an edit (drawn, moved, cloned, erased, deleted): one undo step. */
+  /**
+   * The chart made an edit (drawn, moved, cloned, erased, deleted): one undo step. A drawing made
+   * with the tool joins the group it was chosen in (TradingView's toolbar-driven drawings: its
+   * Charting Library v32.0.0), and one in a group (a clone) goes to its group's front.
+   */
   edit(drawings: readonly Drawing[]): void {
-    this.apply(drawings, true);
+    const before = this.value.drawings;
+    const known = new Set(before.map((drawing) => drawing.id));
+    const join = this.joining;
+    const joined =
+      join.length === 0
+        ? drawings
+        : drawings.map((drawing) =>
+            known.has(drawing.id) || drawing.groups.length > 0
+              ? drawing
+              : { ...drawing, groups: join },
+          );
+    this.apply(placeNewDrawings(before, joined), true);
   }
 
   /** Changes a drawing (the floating toolbar, a lock): one undo step. */
@@ -362,12 +406,15 @@ export class DrawingStore {
 
   /**
    * Clone from the menu: a copy of each drawing where it is, over every other, unlocked (ours:
-   * a locked copy on its original couldn't be moved off it; provisional §11). The copies' ids,
-   * for the chart to select.
+   * a locked copy on its original couldn't be moved off it; provisional §11); one in a group at
+   * its group's front (the Charting Library v33.0.0). The copies' ids, for the chart to select.
    */
   clone(ids: readonly string[]): string[] {
     const chosen = new Set(ids);
-    return this.add(this.value.drawings.filter((drawing) => chosen.has(drawing.id)));
+    return this.add(
+      this.value.drawings.filter((drawing) => chosen.has(drawing.id)),
+      null,
+    );
   }
 
   /**
@@ -399,26 +446,33 @@ export class DrawingStore {
    * Paste (Ctrl/⌘ + V): the copied drawings on the chart's symbol, this one or another, at their
    * times and prices (ours: TradingView doesn't say where a paste lands; provisional §11), over
    * every other, each with an id of its own and unlocked. One drawn on an indicator's pane comes
-   * only while that indicator is on the chart. The new drawings' ids, for the chart to select.
+   * only while that indicator is on the chart. They join the group of what's picked, as
+   * TradingView's pastes do (its Charting Library v32.0.0), not the groups they were copied
+   * from. The new drawings' ids, for the chart to select.
    */
   paste(): string[] {
     if (!this.value.symbol) return [];
     const panes = this.panes();
     return this.add(
       this.copied().filter((drawing) => drawing.pane === null || panes.has(drawing.pane)),
+      joinPath(this.value.drawings, this.pickedItems()),
     );
   }
 
-  /** Copies of drawings added over every other, as far as a symbol's limit allows: their ids. */
-  private add(drawings: readonly Drawing[]): string[] {
+  /**
+   * Copies of drawings added over every other, as far as a symbol's limit allows: their ids.
+   * They keep their groups (a clone), or join `groups` when given (a paste).
+   */
+  private add(drawings: readonly Drawing[], groups: DrawingGroup[] | null): string[] {
     const room = Math.max(0, MAX_DRAWINGS_PER_SYMBOL - this.value.drawings.length);
     const copies = drawings.slice(0, room).map((drawing) => ({
       ...drawing,
       id: newDrawingId(),
       locked: false,
+      groups: groups ?? drawing.groups,
     }));
     if (copies.length === 0) return [];
-    this.apply([...this.value.drawings, ...copies], true);
+    this.apply(placeNewDrawings(this.value.drawings, [...this.value.drawings, ...copies]), true);
     return copies.map((drawing) => drawing.id);
   }
 
@@ -460,6 +514,97 @@ export class DrawingStore {
   /** A drag in the Object tree (docs/SPEC.md §5.27): one undo step when anything moves. */
   place(ids: readonly string[], place: TreePlace): void {
     const drawings = placeDrawings(this.value.drawings, ids, place);
+    if (drawings !== this.value.drawings) this.apply(drawings, true);
+  }
+
+  // ---- groups (D3c2) ----
+
+  /** What's picked: the groups picked in the tree, and the drawings selected outside them. */
+  pickedItems(): GroupItem[] {
+    const { drawings, picked, selection } = this.value;
+    return topItems(drawings, [
+      ...picked.map((id): GroupItem => ({ kind: 'group', id })),
+      ...selection.map((id): GroupItem => ({ kind: 'drawing', id })),
+    ]);
+  }
+
+  /**
+   * The tree picked groups (and maybe drawings): they stay picked while the chart's selection is
+   * `selection`, the drawings they stand for that it can show.
+   */
+  pick(groups: readonly string[], selection: readonly string[]): void {
+    this.pickedFor = groups.length > 0 ? new Set(selection) : null;
+    const same =
+      groups.length === this.value.picked.length &&
+      groups.every((id, i) => id === this.value.picked[i]);
+    if (!same) this.commit({ ...this.value, picked: groups.slice() });
+  }
+
+  /**
+   * "Create a group of drawings": the items in a new group named "Group N", taking the frontmost
+   * one's place, as one undo step. The new group's id, or null when they can't be grouped (on
+   * two panes, or none).
+   */
+  group(items: readonly GroupItem[]): string | null {
+    const group = { id: newGroupId(), name: nextGroupName(this.value.drawings) };
+    const drawings = createGroup(this.value.drawings, items, group);
+    if (!drawings) return null;
+    this.apply(drawings, true);
+    return group.id;
+  }
+
+  /** A group's name, from the tree or its settings' title: one undo step; an empty one is kept. */
+  renameGroup(id: string, name: string): void {
+    const drawings = renameGroup(this.value.drawings, id, name);
+    if (drawings !== this.value.drawings) this.apply(drawings, true);
+  }
+
+  /** A group's eye: hides every drawing in it, or shows them all (TradingView's group eye). */
+  setGroupHidden(id: string, hidden: boolean): void {
+    this.setHidden(
+      groupMembers(this.value.drawings, id).map((drawing) => drawing.id),
+      hidden,
+    );
+  }
+
+  /** A group's padlock: locks every drawing in it, or unlocks them all. */
+  setGroupLocked(id: string, locked: boolean): void {
+    this.updateMany(
+      groupMembers(this.value.drawings, id).map((drawing) => drawing.id),
+      (drawing) => (drawing.locked === locked ? drawing : { ...drawing, locked }),
+    );
+  }
+
+  /** The drawings of some items, groups standing for all inside them, in drawing order. */
+  itemDrawings(items: readonly GroupItem[]): Drawing[] {
+    const levels = itemLevels(this.value.drawings, items);
+    return this.value.drawings.filter((drawing) => levels.has(drawing.id));
+  }
+
+  /**
+   * Remove for items of the tree: their drawings, a group's every one, but not the locked ones
+   * (as Remove leaves them: §11, provisional for a group) unless "Always remove locked drawings"
+   * is on; none while Lock all is on.
+   */
+  removeItems(items: readonly GroupItem[]): void {
+    const { removeLocked, lockAll } = this.value.prefs;
+    if (lockAll && !removeLocked) return;
+    this.remove(
+      this.itemDrawings(items)
+        .filter((drawing) => removeLocked || !drawing.locked)
+        .map((drawing) => drawing.id),
+    );
+  }
+
+  /** Visual order for items of the tree, groups moving as one: one undo step when anything moves. */
+  reorderItems(items: readonly GroupItem[], move: VisualOrderMove): void {
+    const drawings = reorderItems(this.value.drawings, items, move);
+    if (drawings !== this.value.drawings) this.apply(drawings, true);
+  }
+
+  /** A drag of items in the Object tree, into a group or out of one: one undo step. */
+  moveItems(items: readonly GroupItem[], target: TreeTarget): void {
+    const drawings = moveItems(this.value.drawings, items, target);
     if (drawings !== this.value.drawings) this.apply(drawings, true);
   }
 
@@ -507,15 +652,28 @@ export class DrawingStore {
     this.queueSave();
   }
 
-  /** The chart's selection, as it reports it. */
+  /**
+   * The chart's selection, as it reports it. Groups picked in the tree stay picked while it's
+   * the one they stand for.
+   */
   setSelection(ids: readonly string[]): void {
     const same =
       ids.length === this.value.selection.length &&
       ids.every((id, i) => id === this.value.selection[i]);
-    if (!same) this.commit({ ...this.value, selection: ids.slice() });
+    const pickedFor = this.pickedFor;
+    const keep =
+      pickedFor !== null && ids.length === pickedFor.size && ids.every((id) => pickedFor.has(id));
+    if (!keep) this.pickedFor = null;
+    const picked = keep || this.value.picked.length === 0 ? this.value.picked : [];
+    if (!same || picked !== this.value.picked) {
+      this.commit({ ...this.value, selection: ids.slice(), picked });
+    }
   }
 
-  /** A tool to draw with, or null for the cursor; a line tool becomes its group's button. */
+  /**
+   * A tool to draw with, or null for the cursor; a line tool becomes its group's button. Taken
+   * up, it notes the group its drawings join: the one picked now (D3c2).
+   */
   setTool(tool: DrawingTool | null): void {
     const prefs =
       tool &&
@@ -524,11 +682,16 @@ export class DrawingStore {
         ? { ...this.value.prefs, lineTool: tool }
         : this.value.prefs;
     if (prefs !== this.value.prefs) writeJson(DRAWING_TOOLBAR_KEY, prefs);
+    if (tool === null) this.joining = [];
+    else if (this.value.tool === null) {
+      this.joining = joinPath(this.value.drawings, this.pickedItems());
+    }
     this.commit({ ...this.value, tool, prefs });
   }
 
   /** A drawing was finished (Keep drawing off) or let go: the cursor comes back. */
   toolDone(): void {
+    this.joining = [];
     if (this.value.tool !== null) this.commit({ ...this.value, tool: null });
   }
 
@@ -537,6 +700,7 @@ export class DrawingStore {
     writeJson(DRAWING_TOOLBAR_KEY, prefs);
     // Choosing a cursor puts the tool down, as on TradingView.
     const tool = change.cursor !== undefined ? null : this.value.tool;
+    if (tool === null) this.joining = [];
     this.commit({ ...this.value, prefs, tool });
   }
 

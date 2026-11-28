@@ -19,3 +19,11 @@ export function commandShortcut(key: string, shift = false, mac = isMac()): stri
   if (mac) return `${shift ? '⇧' : ''}⌘${key}`;
   return `Ctrl+${shift ? 'Shift+' : ''}${key}`;
 }
+
+/**
+ * Clone's drag as TradingView's menus write it: "⌘Drag" on a Mac (its blog GIF of February 2020),
+ * "Ctrl+Drag" elsewhere, as Copy's "Ctrl+C" here (TradingView's own: "Ctrl + Drag").
+ */
+export function dragShortcut(mac = isMac()): string {
+  return mac ? '⌘Drag' : 'Ctrl+Drag';
+}

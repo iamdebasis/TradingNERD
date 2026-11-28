@@ -1,10 +1,12 @@
 /*
- * The Object tree panel (D3c), measured from TradingView's own Help Center images at 2× (CSS px
- * here): 43000473337 image 2 (November 2026) and 43000795451 image 1 (October 2026). Their light
- * colours are mapped to our dark tokens: the panel's white to --color-bg, #F2F2F2 (the switch,
- * the row under the pointer, the line under the toolbar) to --color-gutter, the selected rows'
- * #BBD9FB to --color-selection, the dimmed rows' #B8B8B8 to --color-avatar-text, the grey of the
- * row buttons to --color-text-secondary (provisional until a dark screenshot, docs/SPEC.md §11).
+ * The Object tree panel (D3c, D3c2), measured from TradingView's own Help Center images at 2×
+ * (CSS px here): 43000473337 image 2 (November 2026) and 43000795451 image 1 (October 2026), and
+ * its blog's image of nested groups (October 2026). Their light colours are mapped to our dark
+ * tokens: the panel's white to --color-bg, #F2F2F2 (the switch, the row under the pointer, the
+ * line under the toolbar) to --color-gutter, the selected rows' #BBD9FB to --color-selection, the
+ * rows inside a picked group's #E2EFFD to that blue half way to the panel's, the dimmed rows'
+ * #B8B8B8 to --color-avatar-text, the grey of the row buttons to --color-text-secondary
+ * (provisional until a dark screenshot, docs/SPEC.md §11).
  */
 .panel {
   display: flex;
@@ -90,7 +92,8 @@
   cursor: default;
 }
 
-/* The rows: 38 px, 6 px under the line; a 28 px icon 22 px in, the name 58 px in. */
+/* The rows: 38 px, 6 px under the line; a 28 px icon 22 px in, the name 58 px in; each level of
+   groups 36 px further in (the blog image of October 2026). */
 .list {
   flex: 1;
   min-height: 0;
@@ -104,9 +107,31 @@
   align-items: center;
   gap: 8px;
   height: 38px;
-  padding: 0 8px 0 22px;
+  padding: 0 8px 0 calc(22px + var(--depth, 0) * 36px);
   cursor: default;
   user-select: none;
+}
+
+/* A group's ⌄ or ›, in the 22 px left of its folder icon (centred 15 px in at the top level). */
+.fold {
+  position: absolute;
+  top: 11px;
+  left: calc(6px + var(--depth, 0) * 36px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.fold:hover {
+  background: var(--color-chip);
 }
 
 .icon {
@@ -131,39 +156,77 @@
   outline: none;
 }
 
-.row[aria-selected="true"] {
+.row[data-selected="self"] {
   background: var(--color-selection);
+}
+
+/* Inside a group picked: a lighter blue (TradingView's #E2EFFD under #BBD9FB). */
+.row[data-selected="inside"] {
+  background: color-mix(in srgb, var(--color-selection) 50%, var(--color-bg));
 }
 
 .row[data-kind="symbol"] .label {
   font-weight: 600;
 }
 
-/* Hidden, or unable to join the drawings selected while Ctrl or ⌘ is held: dimmed. */
+/* Hidden, hidden on this interval, or unable to join the drawings selected while Ctrl or ⌘ is
+   held: dimmed. */
 .row[data-hidden] .label,
 .row[data-hidden] .icon,
+.row[data-off] .label,
+.row[data-off] .icon,
 .row[data-dim] .label,
 .row[data-dim] .icon {
   color: var(--color-avatar-text);
 }
 
-/* Where dragged drawings would go: a 2 px line in the accent colour (ours, provisional). */
-.row[data-drop]::after {
+/* Where dragged rows would go: a 2 px line in the accent colour, a small ring at its left end,
+   from the level they'd go to (TradingView's 2019 blog GIF). */
+.row[data-drop]::after,
+.row[data-drop]::before {
   position: absolute;
-  right: 0;
-  left: 0;
-  height: 2px;
-  background: var(--color-accent);
+  left: calc(22px + var(--drop-depth, 0) * 36px);
   content: "";
   pointer-events: none;
+}
+
+.row[data-drop]::after {
+  right: 0;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+.row[data-drop]::before {
+  z-index: 1;
+  width: 6px;
+  height: 6px;
+  margin-left: -6px;
+  border: 2px solid var(--color-accent);
+  border-radius: 50%;
+  background: var(--color-bg);
 }
 
 .row[data-drop="before"]::after {
   top: -1px;
 }
 
+.row[data-drop="before"]::before {
+  top: -4px;
+}
+
 .row[data-drop="after"]::after {
   bottom: -1px;
+}
+
+.row[data-drop="after"]::before {
+  bottom: -4px;
+}
+
+/* Dropped onto a group's row: into it, the row outlined 2 px in the accent blue (TradingView's
+   Help Center image 43000795451-3, #2962FF). */
+.row[data-into] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .list[data-dragging] .row {
@@ -204,6 +267,12 @@
   visibility: visible;
 }
 
+/* Hidden on the chart's interval by its Visibility tab: TradingView's orange crossed eye,
+   measured #FB8C00 on its Help Center GIFs (43000660419, November 2024). */
+.button[data-interval] {
+  color: #fb8c00;
+}
+
 .button:hover:not(:disabled) {
   background: var(--color-chip);
   color: var(--color-text);
@@ -221,14 +290,14 @@
   outline-offset: -1px;
 }
 
-/* The name being edited, in place of the label. */
+/* The name being edited: a field over the row's icon and name to its end, 28 px with a 2 px
+   accent border, its text 7 px in (TradingView's blog GIF of renaming, February 2020). */
 .rename {
   flex: 1;
   min-width: 0;
-  height: 26px;
-  margin-left: -7px;
-  padding: 0 6px;
-  border: 1px solid var(--color-accent);
+  height: 28px;
+  padding: 0 7px;
+  border: 2px solid var(--color-accent);
   border-radius: 4px;
   background: var(--color-bg);
   color: var(--color-text);

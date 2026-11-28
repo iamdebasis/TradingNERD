@@ -83,6 +83,18 @@ export const TOOL_NAMES: Record<DrawingTool, string> = {
 };
 
 /**
+ * A pitchfork's kinds, as TradingView's menu and Style tab name them ("Original", "Schiff",
+ * "Modified Schiff", "Inside": its Help Center's GIF 43000484410, November 2024): one switches
+ * into another.
+ */
+export const PITCHFORK_KIND_NAMES: Record<PitchforkTool, string> = {
+  pitchfork: 'Original',
+  'schiff-pitchfork': 'Schiff',
+  'modified-schiff-pitchfork': 'Modified Schiff',
+  'inside-pitchfork': 'Inside',
+};
+
+/**
  * How many points place each tool: one click, two, or three. A regression trend's two are bars
  * (its prices come from them); the channels' and pitchforks' third sets their width (TradingView's
  * Help Center for each tool; the third-party capture's point counts).
@@ -751,7 +763,26 @@ export interface Drawing {
    * tool's name (TradingView's blog, Name your drawings; docs/SPEC.md §5.27, D3c). Protocol 17.
    */
   name: string;
+  /**
+   * The groups it's in, the outermost first (TradingView's groups of drawings, nested since
+   * October 2026: its Help Center, How to create nested groups of drawings?; docs/SPEC.md §5.27,
+   * D3c2). A group is the drawings that name it and has no record of its own, so an empty group
+   * can't exist, as TradingView's rule says ("Empty groups are automatically removed"). Protocol
+   * 18; none for a new drawing and an older file's.
+   */
+  groups: DrawingGroup[];
 }
+
+/** A group of drawings, as each drawing in it names it: the same id and name on each. */
+export interface DrawingGroup {
+  /** Made by the app, as a drawing's id. */
+  id: string;
+  /** "Group 1" when made; renamed as a drawing is (empty only in a file written by hand). */
+  name: string;
+}
+
+/** Groups nest without a limit on TradingView (its Help Center); this only guards the file. */
+export const MAX_GROUP_DEPTH = 32;
 
 /** A new drawing with its tool's defaults. */
 export function newDrawing(
@@ -771,6 +802,7 @@ export function newDrawing(
     hidden: false,
     below: false,
     name: '',
+    groups: [],
   };
 }
 
@@ -978,7 +1010,25 @@ export function parseDrawing(value: unknown): Drawing | null {
     hidden: bool(value.hidden, false),
     below: bool(value.below, false),
     name: typeof value.name === 'string' ? drawingName(value.name) : '',
+    groups: parseGroups(value.groups),
   };
+}
+
+/**
+ * A drawing's groups as stored: none when the list isn't one (a group without a valid id, the
+ * same group twice, deeper than MAX_GROUP_DEPTH), so the drawing itself still reads.
+ */
+function parseGroups(value: unknown): DrawingGroup[] {
+  if (!Array.isArray(value) || value.length > MAX_GROUP_DEPTH) return [];
+  const groups: DrawingGroup[] = [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.id !== 'string' || !ID.test(item.id)) return [];
+    if (ids.has(item.id)) return [];
+    ids.add(item.id);
+    groups.push({ id: item.id, name: typeof item.name === 'string' ? drawingName(item.name) : '' });
+  }
+  return groups;
 }
 
 /** One symbol's drawings, as the gateway serves and takes them. */

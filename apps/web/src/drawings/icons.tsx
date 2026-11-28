@@ -356,12 +356,45 @@ export function GripIcon() {
   );
 }
 
+/** A color button's bar: the color, or a rainbow for several drawings' that differ (D3c2). */
+function ColorBar({ color, mixed }: { color: string; mixed: boolean }) {
+  if (!mixed) return <rect x="5" y="22" width="18" height="3" rx="1" fill={color} stroke="none" />;
+  const bands = ['#F23645', '#FF9800', '#FFEB3B', '#089981', '#2962FF'];
+  return (
+    <>
+      {bands.map((band, i) => (
+        <rect key={band} x={5 + i * 3.6} y="22" width="3.6" height="3" fill={band} stroke="none" />
+      ))}
+    </>
+  );
+}
+
 /** The line's color: a pencil over a bar of the color. */
-export function LineColorIcon({ color }: { color: string }) {
+export function LineColorIcon({ color, mixed = false }: { color: string; mixed?: boolean }) {
   return (
     <Icon>
       <path d="M8.5 17.5 18 8l2.5 2.5L11 20H8.5zM16 10l2.5 2.5" />
-      <rect x="5" y="22" width="18" height="3" rx="1" fill={color} stroke="none" />
+      <ColorBar color={color} mixed={mixed} />
+    </Icon>
+  );
+}
+
+/** The background's color: a paint bucket over a bar of the color (TradingView's, 2021 GIF). */
+export function FillColorIcon({ color, mixed = false }: { color: string; mixed?: boolean }) {
+  return (
+    <Icon>
+      <path d="m7 12.5 6-6 6.5 6.5-6 6zM13 6.5 11 4.5M21.5 15.5s1.5 2 1.5 3a1.5 1.5 0 0 1-3 0c0-1 1.5-3 1.5-3z" />
+      <ColorBar color={color} mixed={mixed} />
+    </Icon>
+  );
+}
+
+/** The text's color: a T over a bar of the color (TradingView's, 2021 GIF). */
+export function TextColorIcon({ color, mixed = false }: { color: string; mixed?: boolean }) {
+  return (
+    <Icon>
+      <path d="M8 6.5h12M14 6.5v13" />
+      <ColorBar color={color} mixed={mixed} />
     </Icon>
   );
 }
@@ -429,6 +462,44 @@ export function CloneIcon() {
     <Icon>
       <path d="M10.5 9.5v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" />
       <rect x="5.5" y="9.5" width="13" height="13" rx="1" />
+    </Icon>
+  );
+}
+
+/** A group of drawings in the Object tree: a folder (TradingView's row icon, D3c2). */
+export function FolderIcon() {
+  return (
+    <Icon>
+      <path d="M5.5 9V7.5a1 1 0 0 1 1-1h5l2 2.5h8a1 1 0 0 1 1 1v10.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" />
+      <path d="M5.5 11.5h17" />
+    </Icon>
+  );
+}
+
+/** "Create a group of drawings": a folder with a plus at its bottom right (TradingView's button). */
+export function FolderPlusIcon() {
+  return (
+    <Icon>
+      <path d="M15.5 21.5h-9a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1h5l2 2.5h8a1 1 0 0 1 1 1v5" />
+      <path d="M5.5 11.5h17M20 17.5v6M17 20.5h6" />
+    </Icon>
+  );
+}
+
+/** A group's row in the Object tree: ⌄ while open, › while folded (TradingView's, 12 px). */
+export function FoldIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" {...line} aria-hidden>
+      <path d={open ? 'm3 4.5 3 3 3-3' : 'm4.5 3 3 3-3 3'} />
+    </svg>
+  );
+}
+
+/** The kind a menu's item has now: a check mark in the icon column (TradingView's ✓). */
+export function MenuCheckIcon() {
+  return (
+    <Icon>
+      <path d="m8 14.5 4 4 8-9" />
     </Icon>
   );
 }

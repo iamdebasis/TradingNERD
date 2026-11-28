@@ -778,6 +778,137 @@ describe('the Object tree (D3c)', () => {
   });
 });
 
+describe('groups of drawings (D3c2)', () => {
+  async function four() {
+    const gateway = new FakeGateway();
+    const store = storeOf(gateway, () => new Set(['rsi-1']));
+    await ready(store);
+    store.edit([line('a'), line('x'), line('b'), line('c')]);
+    return { store, gateway };
+  }
+  const shape = (store: DrawingStore) =>
+    store
+      .get()
+      .drawings.map((d) =>
+        d.groups.length ? `${d.id}(${d.groups.map((g) => g.name).join('/')})` : d.id,
+      );
+  const drawing = (...ids: string[]) => ids.map((id) => ({ kind: 'drawing' as const, id }));
+
+  it('makes a group named "Group N" where the frontmost drawing is, as one undo step', async () => {
+    const { store, gateway } = await four();
+    const id = store.group(drawing('a', 'b'));
+    expect(id).toMatch(/^g/);
+    expect(shape(store)).toEqual(['x', 'a(Group 1)', 'b(Group 1)', 'c']);
+    store.group(drawing('c'));
+    expect(shape(store)).toEqual(['x', 'a(Group 1)', 'b(Group 1)', 'c(Group 2)']);
+    await store.whenSaved();
+    expect(gateway.held.get('BINANCE:XRPUSDT')?.[3]?.groups).toEqual([
+      { id: expect.stringMatching(/^g/), name: 'Group 2' },
+    ]);
+    store.undo();
+    store.undo();
+    expect(shape(store)).toEqual(['a', 'x', 'b', 'c']);
+  });
+
+  it('refuses drawings of two panes', async () => {
+    const { store } = await four();
+    store.edit([...store.get().drawings, line('r', 'rsi-1')]);
+    const before = store.get().drawings;
+    expect(store.group(drawing('a', 'r'))).toBeNull();
+    expect(store.get().drawings).toBe(before);
+  });
+
+  it('renames, hides, shows, locks and removes a group as one step each', async () => {
+    const { store } = await four();
+    const id = store.group(drawing('a', 'b')) ?? '';
+    store.renameGroup(id, '  Levels ');
+    expect(shape(store)).toEqual(['x', 'a(Levels)', 'b(Levels)', 'c']);
+    store.setGroupHidden(id, true);
+    expect(
+      store
+        .get()
+        .drawings.filter((d) => d.hidden)
+        .map((d) => d.id),
+    ).toEqual(['a', 'b']);
+    store.setGroupLocked(id, true);
+    expect(
+      store
+        .get()
+        .drawings.filter((d) => d.locked)
+        .map((d) => d.id),
+    ).toEqual(['a', 'b']);
+    // Remove leaves the locked ones, as Remove does, unless the switch says otherwise.
+    store.removeItems([{ kind: 'group', id }]);
+    expect(store.get().drawings.map((d) => d.id)).toEqual(['x', 'a', 'b', 'c']);
+    store.setGroupLocked(id, false);
+    store.removeItems([{ kind: 'group', id }]);
+    expect(shape(store)).toEqual(['x', 'c']);
+    store.undo();
+    expect(shape(store)).toEqual(['x', 'a(Levels)', 'b(Levels)', 'c']);
+  });
+
+  it('keeps groups picked in the tree while the chart’s selection is theirs', async () => {
+    const { store } = await four();
+    const id = store.group(drawing('a', 'b')) ?? '';
+    store.pick([id], ['a', 'b']);
+    store.setSelection(['b', 'a']);
+    expect(store.get().picked).toEqual([id]);
+    expect(store.pickedItems()).toEqual([{ kind: 'group', id }]);
+    store.setSelection(['a']);
+    expect(store.get().picked).toEqual([]);
+    expect(store.pickedItems()).toEqual(drawing('a'));
+  });
+
+  it('puts a drawing made with the tool in the group picked when the tool was taken', async () => {
+    const { store } = await four();
+    const id = store.group(drawing('a', 'b')) ?? '';
+    store.pick([id], ['a', 'b']);
+    store.setSelection(['a', 'b']);
+    store.setTool('trend-line');
+    // The chart lets go of the selection as the drawing starts, and adds it at the end.
+    store.setSelection([]);
+    store.edit([...store.get().drawings, line('n')]);
+    expect(shape(store)).toEqual(['x', 'a(Group 1)', 'b(Group 1)', 'n(Group 1)', 'c']);
+    store.toolDone();
+    store.setTool('trend-line');
+    store.edit([...store.get().drawings, line('m')]);
+    expect(shape(store).at(-1)).toBe('m');
+  });
+
+  it('clones a drawing of a group to that group’s front, and pastes into the group picked', async () => {
+    const { store } = await four();
+    store.group(drawing('a', 'b'));
+    const [copy] = store.clone(['a']);
+    expect(shape(store)).toEqual(['x', 'a(Group 1)', 'b(Group 1)', `${copy}(Group 1)`, 'c']);
+    // A copy pasted with c selected joins no group, wherever it was copied from.
+    store.copy(['b']);
+    store.setSelection(['c']);
+    const [pasted] = store.paste();
+    expect(shape(store).at(-1)).toBe(pasted);
+    // With a drawing of the group selected, it joins the group.
+    store.setSelection(['a']);
+    const [joined] = store.paste();
+    expect(shape(store)).toContain(`${joined}(Group 1)`);
+  });
+
+  it('moves items dragged into a group, and a group as one in the visual order', async () => {
+    const { store } = await four();
+    const id = store.group(drawing('a', 'b')) ?? '';
+    store.moveItems(drawing('c'), { pane: null, below: false, parent: id, before: null });
+    expect(shape(store)).toEqual(['x', 'a(Group 1)', 'b(Group 1)', 'c(Group 1)']);
+    store.reorderItems([{ kind: 'group', id }], 'send-to-back');
+    expect(store.get().drawings.map((d) => `${d.id}${d.below ? '↓' : ''}`)).toEqual([
+      'a↓',
+      'b↓',
+      'c↓',
+      'x',
+    ]);
+    store.undo();
+    store.undo();
+    expect(shape(store)).toEqual(['x', 'a(Group 1)', 'b(Group 1)', 'c']);
+  });
+});
+
 describe('the left toolbar’s state', () => {
   it('remembers the last line tool chosen and the modes, in this browser', () => {
     const store = new DrawingStore(new FakeGateway());

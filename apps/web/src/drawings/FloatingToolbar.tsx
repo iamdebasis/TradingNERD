@@ -1,10 +1,4 @@
-import {
-  type Drawing,
-  type DrawingLineStyle,
-  type DrawingTool,
-  recolorDrawing,
-  TOOL_OPTIONS,
-} from '@tradingnerd/core';
+import { type Drawing, type DrawingLineStyle, recolorDrawing } from '@tradingnerd/core';
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -19,6 +13,7 @@ import { ColorEditor, LineStyles, LineWidths } from './ColorEditor';
 import styles from './Drawings.module.css';
 import { drawingStore } from './drawingStore';
 import {
+  FillColorIcon,
   GearIcon,
   GripIcon,
   LineColorIcon,
@@ -26,8 +21,10 @@ import {
   MoreIcon,
   PadlockIcon,
   TemplatesIcon,
+  TextColorIcon,
   TrashIcon,
 } from './icons';
+import { hasLine, severalStyle, withFill, withTextColor } from './severalStyle';
 import { templateEntries } from './TemplateMenu';
 import { useTemplates } from './templateStore';
 
@@ -36,7 +33,7 @@ export const FLOATING_TOOLBAR_KEY = 'tn.drawings.floatingToolbar';
 /** Its first place: centred, below the legend's first rows (provisional, §11). */
 const DEFAULT_TOP = 52;
 
-type Popup = 'color' | 'width' | 'style';
+type Popup = 'color' | 'fill' | 'text' | 'width' | 'style';
 
 interface Place {
   x: number;
@@ -50,19 +47,6 @@ function readPlace(): Place | null {
     : null;
 }
 
-/** A drawing has a line to style unless it's only text (later milestones). */
-function hasLine(tool: DrawingTool): boolean {
-  const options = TOOL_OPTIONS[tool];
-  return (
-    options.extend ||
-    options.extendMenu ||
-    options.extendLines ||
-    options.showPrice ||
-    options.showTime ||
-    options.stats
-  );
-}
-
 /**
  * TradingView's floating toolbar for the drawings selected (docs/SPEC.md §5.27): moved by its
  * grip and left where it's put; the line's color, thickness and style, the settings, Lock and
@@ -70,8 +54,10 @@ function hasLine(tool: DrawingTool): boolean {
  * one of them (TradingView's blog, Change the color of multiple tools at once), showing the
  * first's; Remove leaves the locked ones, as the Delete key does. Templates (D3b), first after
  * the grip, shows while they're all of one tool (Help Center, How to apply a template to several
- * tools of the same type at once?). Its buttons and look are provisional until measured from a
- * screenshot (§11).
+ * tools of the same type at once?), its menu without "Save…" for several. Drawings of different
+ * tools get the background's and the text's colors too, a rainbow where they differ, as
+ * TradingView's blog GIF of December 2021 shows (D3c2). Its buttons and look are provisional
+ * until measured from a screenshot (§11).
  */
 export function FloatingToolbar({
   drawings,
@@ -104,6 +90,10 @@ export function FloatingToolbar({
   const removable = !lockAll && !allLocked;
   const { tool } = drawing;
   const oneTool = drawings.every((item) => item.tool === tool);
+  const look = severalStyle(drawings);
+  // Different tools: their background and text colors too (TradingView's 2021 GIF).
+  const fill = oneTool ? null : look.fill;
+  const text = oneTool ? null : look.text;
 
   // Gone while its color was being changed (deselected, removed): what was chosen stays.
   useEffect(
@@ -161,13 +151,14 @@ export function FloatingToolbar({
       style: { ...current.style, ...next },
     }));
 
-  const openColor = () => {
-    if (popup === 'color') {
+  const openColor = (which: 'color' | 'fill' | 'text' = 'color') => {
+    if (popup === which) {
       closeColor();
       return;
     }
+    if (before.current) drawingStore.finishPreview(before.current, true);
     before.current = drawingStore.get().drawings;
-    setPopup('color');
+    setPopup(which);
   };
   const closeColor = () => {
     if (before.current) drawingStore.finishPreview(before.current, true);
@@ -216,9 +207,12 @@ export function FloatingToolbar({
             aria-label="Line color"
             title="Line color"
             aria-expanded={popup === 'color'}
-            onClick={openColor}
+            onClick={() => openColor('color')}
           >
-            <LineColorIcon color={style.color} />
+            <LineColorIcon
+              color={look.line?.color.value ?? style.color}
+              mixed={look.line?.color.mixed ?? false}
+            />
           </button>
           <button
             type="button"
@@ -243,6 +237,33 @@ export function FloatingToolbar({
           <span className={styles.toolSeparator} />
         </>
       )}
+      {fill && (
+        <button
+          type="button"
+          className={styles.tool}
+          data-color-opener
+          aria-label="Background color"
+          title="Background color"
+          aria-expanded={popup === 'fill'}
+          onClick={() => openColor('fill')}
+        >
+          <FillColorIcon color={fill.color.value} mixed={fill.color.mixed} />
+        </button>
+      )}
+      {text && (
+        <button
+          type="button"
+          className={styles.tool}
+          data-color-opener
+          aria-label="Text color"
+          title="Text color"
+          aria-expanded={popup === 'text'}
+          onClick={() => openColor('text')}
+        >
+          <TextColorIcon color={text.value} mixed={text.mixed} />
+        </button>
+      )}
+      {(fill || text) && <span className={styles.toolSeparator} />}
       <button
         type="button"
         className={styles.tool}
@@ -300,6 +321,7 @@ export function FloatingToolbar({
             state: templates,
             style: () => drawing.style,
             onApply: (style) => drawingStore.applyStyle(ids, tool, style),
+            several: drawings.length > 1,
           })}
           onClose={() => setTemplatesAt(null)}
         />
@@ -313,6 +335,24 @@ export function FloatingToolbar({
           onChange={(color) =>
             drawingStore.previewMany(drawings.map((item) => recolorDrawing(item, color)))
           }
+          onClose={closeColor}
+          style={{ top: 42, left: 0 }}
+        />
+      )}
+      {popup === 'fill' && fill && (
+        <ColorEditor
+          label="Background color"
+          color={fill.color.value}
+          onChange={(color) => drawingStore.previewMany(withFill(drawings, { color }))}
+          onClose={closeColor}
+          style={{ top: 42, left: 0 }}
+        />
+      )}
+      {popup === 'text' && text && (
+        <ColorEditor
+          label="Text color"
+          color={text.value}
+          onChange={(color) => drawingStore.previewMany(withTextColor(drawings, color))}
           onClose={closeColor}
           style={{ top: 42, left: 0 }}
         />

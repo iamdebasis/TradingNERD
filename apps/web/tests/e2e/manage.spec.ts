@@ -307,9 +307,11 @@ test.describe('several drawings at once (D3a)', () => {
     await clickAt(page, await middleOf(page, a));
     await modClick(page, await middleOf(page, b));
     await toolbarOf(page).getByRole('button', { name: 'Settings' }).click();
-    const dialog = page.getByRole('dialog', { name: '2 drawings' });
+    // TradingView's "Selected Drawings" with its three tabs (D3c2).
+    const dialog = page.getByRole('dialog', { name: 'Selected Drawings' });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole('tab')).toHaveText(['Visibility']);
+    await expect(dialog.getByRole('tab')).toHaveText(['Style', 'Displacement', 'Visibility']);
+    await dialog.getByRole('tab', { name: 'Visibility' }).click();
     await dialog.getByRole('checkbox', { name: 'Days' }).uncheck();
     await dialog.getByRole('button', { name: 'Ok' }).click();
     await expect(dialog).toBeHidden();
@@ -323,8 +325,54 @@ test.describe('several drawings at once (D3a)', () => {
   });
 });
 
+test.describe('Selected Drawings (D3c2)', () => {
+  test('shows their differing line colors as a rainbow, and Displacement moves them all as one step', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, async (at) => {
+      const [a, b] = await twoLines(page, at);
+      if (!a || !b) throw new Error('no drawings');
+      return [a, { ...b, style: { ...b.style, color: '#F23645' } }];
+    });
+    const [a, b] = await drawingsOf(page);
+    if (!a || !b) throw new Error('no drawings');
+    await clickAt(page, await middleOf(page, a));
+    await modClick(page, await middleOf(page, b));
+    await toolbarOf(page).getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Selected Drawings' });
+    await expect(dialog.getByRole('button', { name: 'Line: mixed' })).toBeVisible();
+    // Displacement: Enter applies a price expression to every point of both.
+    await dialog.getByRole('tab', { name: 'Displacement' }).click();
+    await expect(dialog).toContainText('Displacement (price, bar)');
+    const price = dialog.getByRole('textbox', { name: 'Price displacement' });
+    await expect(price).toHaveAttribute('placeholder', 'e.g. /2');
+    await price.fill('+5');
+    await price.press('Enter');
+    await expect
+      .poll(async () => (await drawingsOf(page)).map((d) => d.points.map((p) => p.price)))
+      .toEqual([a, b].map((d) => d.points.map((p) => p.price + 5)));
+    // A bar expression typed and not applied: Ok applies it as it keeps the rest.
+    const bar = dialog.getByRole('textbox', { name: 'Bar displacement' });
+    await expect(bar).toHaveAttribute('placeholder', 'e.g. +1');
+    await bar.fill('*2');
+    await expect(bar).toHaveAttribute('aria-invalid', 'true');
+    await bar.fill('+2');
+    await dialog.getByRole('button', { name: 'Ok' }).click();
+    const bars = await chartBars(page);
+    const later = (time: number) =>
+      (bars[bars.findIndex((item) => item.time === time) + 2] as Bar).time;
+    await expect
+      .poll(async () => (await drawingsOf(page)).map((d) => d.points.map((p) => p.time)))
+      .toEqual([a, b].map((d) => d.points.map((p) => later(p.time))));
+    // One undo step puts both back.
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect.poll(() => drawingsOf(page)).toEqual([a, b]);
+  });
+});
+
 test.describe('a drawing’s menu (D3a)', () => {
-  test('opens on a right-click with Object Tree…, Template, Visual order, Visibility on intervals, Clone, Copy, Lock, Hide, Remove and Settings', async ({
+  test('opens on a right-click with Template, Visual order, Visibility on intervals, Object Tree…, Clone, Copy, Lock, Hide, Remove and Settings', async ({
     page,
     market,
   }) => {
@@ -335,13 +383,15 @@ test.describe('a drawing’s menu (D3a)', () => {
     // The right-click selects the drawing it's on.
     expect(await selectionOf(page)).toEqual(['a']);
     await expect(menu.locator(':scope > [role="menuitem"]')).toHaveText([
-      // D3c's, as TradingView's menu for drawings starts.
-      'Object Tree…',
       // D3b's, while the drawings selected are all of one tool.
       'Template',
       'Visual order',
       'Visibility on intervals',
-      'Clone',
+      // D3c's, after Visibility on intervals for one drawing as TradingView's menu has it
+      // (its Help Center images of 2022 and 2024; D3c2).
+      'Object Tree…',
+      // Clone's drag shortcut as TradingView writes it (D3c2).
+      /^Clone(⌘Drag|Ctrl\+Drag)$/,
       /^Copy(⌘C|Ctrl\+C)$/,
       'Lock',
       // D3c's.
@@ -349,10 +399,16 @@ test.describe('a drawing’s menu (D3a)', () => {
       /^Remove(⌫|Del)$/,
       'Settings…',
     ]);
+    // TradingView's order (D3c2), a move that changes nothing greyed out.
     await menu.getByRole('menuitem', { name: 'Visual order' }).hover();
-    await expect(menu.getByRole('menu', { name: 'Visual order' }).getByRole('menuitem')).toHaveText(
-      ['Bring to front', 'Bring forward', 'Send backward', 'Send to back'],
-    );
+    const order = menu.getByRole('menu', { name: 'Visual order' }).getByRole('menuitem');
+    await expect(order).toHaveText([
+      'Bring to front',
+      'Send to back',
+      'Bring forward',
+      'Send backward',
+    ]);
+    for (let i = 0; i < 4; i++) await expect(order.nth(i)).toBeEnabled();
     await menu.getByRole('menuitem', { name: 'Visibility on intervals' }).hover();
     await expect(menu.getByRole('menu', { name: 'Visual order' })).toBeHidden();
     await expect(
@@ -383,8 +439,6 @@ test.describe('a drawing’s menu (D3a)', () => {
     await toolbarOf(page).getByRole('button', { name: 'More' }).click();
     const menu = page.getByRole('menu', { name: 'Drawing', exact: true });
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: 'Object Tree…' })).toBeFocused();
-    await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Template' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Visual order' })).toBeFocused();

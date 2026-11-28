@@ -1,5 +1,7 @@
 export * from './clock.ts';
 export * from './config.ts';
+export * from './displacement.ts';
+export * from './drawingGroups.ts';
 export * from './drawingOrder.ts';
 export * from './drawings.ts';
 export * from './drawingTemplates.ts';

@@ -43,6 +43,23 @@ describe('drawings, kept in data/drawings.json', () => {
     expect((await new DrawingsStore(dataDir).get('Binance:XRPUSDT')).drawings).toEqual([line('a')]);
   });
 
+  it('keeps each drawing’s groups, a group’s drawings together where its frontmost is (D3c2)', async () => {
+    const dataDir = freshDir();
+    const store = new DrawingsStore(dataDir);
+    const group = { id: 'g1', name: 'Levels' };
+    const saved = await store.put({
+      symbol: 'A:B',
+      drawings: [{ ...line('a'), groups: [group] }, line('x'), { ...line('b'), groups: [group] }],
+    });
+    expect(saved.drawings.map((d) => [d.id, d.groups])).toEqual([
+      ['x', []],
+      ['a', [group]],
+      ['b', [group]],
+    ]);
+    expect(fileOf(dataDir).symbols['A:B']?.map((d) => d.id)).toEqual(['x', 'a', 'b']);
+    expect((await new DrawingsStore(dataDir).get('A:B')).drawings[2]?.groups).toEqual([group]);
+  });
+
   it('drops a symbol from the file when its last drawing goes', async () => {
     const dataDir = freshDir();
     const store = new DrawingsStore(dataDir);

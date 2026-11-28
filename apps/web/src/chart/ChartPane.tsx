@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { marketApi, searchApi } from '../data/api';
 import { useGateway } from '../data/GatewayContext';
 import { DrawingMenu, selectAdded } from '../drawings/DrawingMenu';
-import { DrawingSettingsDialog, SeveralDrawingsDialog } from '../drawings/DrawingSettingsDialog';
+import { DrawingSettingsDialog, SelectedDrawingsDialog } from '../drawings/DrawingSettingsDialog';
 import { drawingKeyAction } from '../drawings/drawingKeys';
 import { DRAWINGS_RETRY_MS, drawingStore, useDrawings } from '../drawings/drawingStore';
 import { FavoritesToolbar } from '../drawings/FavoritesToolbar';
@@ -116,7 +116,14 @@ export function ChartPane({
   /** The user's drawings (docs/SPEC.md §6.24): the symbol's, the toolbar's modes, the selection. */
   const drawings = useDrawings();
   /** The drawings whose settings are open: one's own dialog, or several's Visibility (D3a). */
-  const [drawingSettings, setDrawingSettings] = useState<readonly string[] | null>(null);
+  /**
+   * The drawings whose settings are open, and the group they are when a group's (D3c2): one
+   * drawing's own dialog, else "Selected Drawings" or the group's.
+   */
+  const [drawingSettings, setDrawingSettings] = useState<{
+    ids: readonly string[];
+    group: string | null;
+  } | null>(null);
   /** The drawings' menu, where it opened (a right-click, or the floating toolbar's ⋯; D3a). */
   const [drawingMenu, setDrawingMenu] = useState<{ x: number; y: number } | null>(null);
   const interval = useMemo(() => parseResolution(resolution), [resolution]);
@@ -183,7 +190,7 @@ export function ChartPane({
         onEdit: (list) => drawingStore.edit(list),
         onSelect: (ids) => drawingStore.setSelection(ids),
         onToolDone: () => drawingStore.toolDone(),
-        onOpen: (id) => setDrawingSettings([id]),
+        onOpen: (id) => setDrawingSettings({ ids: [id], group: null }),
         onMenu: (_id, x, y) => setDrawingMenu({ x, y }),
         // A new drawing starts in its tool's last style (D3b).
         styleOf: toolStyles.styleOf,
@@ -377,8 +384,9 @@ export function ChartPane({
       if (request.kind === 'select') {
         chart.setDrawings(drawingStore.get().drawings);
         chart.selectDrawings(request.ids);
-      } else if (request.kind === 'drawing-settings') setDrawingSettings(request.ids);
-      else setEditing(request.id);
+      } else if (request.kind === 'drawing-settings') {
+        setDrawingSettings({ ids: request.ids, group: request.group ?? null });
+      } else setEditing(request.id);
     }
   }, [chart, treeRequests]);
 
@@ -407,6 +415,12 @@ export function ChartPane({
           if (chart.cancelDrawing()) event.preventDefault();
           return;
         case 'delete':
+          // A group picked in the Object tree goes whole, its hidden drawings too (D3c2).
+          if (drawingStore.get().picked.length > 0) {
+            event.preventDefault();
+            drawingStore.removeItems(drawingStore.pickedItems());
+            return;
+          }
           if (chart.removeSelectedDrawings()) event.preventDefault();
           return;
         case 'tool':
@@ -463,6 +477,19 @@ export function ChartPane({
     ? []
     : drawings.drawings.filter((drawing) => drawings.selection.includes(drawing.id));
   const selectedIds = selected.map((drawing) => drawing.id);
+  // Their settings: a group picked in the tree opens its own, every drawing in it (D3c2).
+  const openSettings = () => {
+    const items = drawingStore.pickedItems();
+    const one = items.length === 1 ? items[0] : undefined;
+    if (!items.some((item) => item.kind === 'group')) {
+      setDrawingSettings({ ids: selectedIds, group: null });
+      return;
+    }
+    setDrawingSettings({
+      ids: drawingStore.itemDrawings(items).map((drawing) => drawing.id),
+      group: one?.kind === 'group' ? one.id : null,
+    });
+  };
   // The drawings' menu goes with the selection it was opened for.
   const anySelected = selected.length > 0;
   useEffect(() => {
@@ -509,7 +536,7 @@ export function ChartPane({
           key={selectedIds.join(' ')}
           drawings={selected}
           lockAll={prefs.lockAll}
-          onSettings={() => setDrawingSettings(selectedIds)}
+          onSettings={openSettings}
           onMore={(at) => setDrawingMenu(at)}
         />
       )}
@@ -519,20 +546,28 @@ export function ChartPane({
           y={drawingMenu.y}
           chart={chart}
           resolution={interval}
-          onSettings={() => setDrawingSettings(selectedIds)}
+          onSettings={openSettings}
           onClose={() => setDrawingMenu(null)}
         />
       )}
-      {drawingSettings !== null && drawingSettings.length === 1 && (
-        <DrawingSettingsDialog
-          id={drawingSettings[0] as string}
-          chart={chart}
-          onClose={() => setDrawingSettings(null)}
-        />
-      )}
-      {drawingSettings !== null && drawingSettings.length > 1 && (
-        <SeveralDrawingsDialog ids={drawingSettings} onClose={() => setDrawingSettings(null)} />
-      )}
+      {drawingSettings !== null &&
+        drawingSettings.ids.length === 1 &&
+        drawingSettings.group === null && (
+          <DrawingSettingsDialog
+            id={drawingSettings.ids[0] as string}
+            chart={chart}
+            onClose={() => setDrawingSettings(null)}
+          />
+        )}
+      {drawingSettings !== null &&
+        (drawingSettings.ids.length > 1 || drawingSettings.group !== null) && (
+          <SelectedDrawingsDialog
+            ids={drawingSettings.ids}
+            group={drawingSettings.group}
+            chart={chart}
+            onClose={() => setDrawingSettings(null)}
+          />
+        )}
       <TemplateDialogsHost />
       {prefs.favorites.length > 0 && (
         <FavoritesToolbar

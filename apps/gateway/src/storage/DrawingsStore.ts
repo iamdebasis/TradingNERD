@@ -4,6 +4,7 @@ import {
   type DrawingsFile,
   drawingsKey,
   MAX_DRAWING_SYMBOLS,
+  normalizeGroups,
   parseDrawingsFile,
   parseSymbolDrawings,
   type SymbolDrawings,
@@ -39,14 +40,16 @@ export class DrawingsStore {
   }
 
   /**
-   * Replaces a symbol's drawings; returns them as stored (normalized). Saves run one after
-   * another, each building on the last, so two symbols saved together both stay.
+   * Replaces a symbol's drawings; returns them as stored (normalized, the group rules holding:
+   * D3c2). Saves run one after another, each building on the last, so two symbols saved
+   * together both stay.
    */
   put(value: unknown): Promise<SymbolDrawings> {
     const parsed = parseSymbolDrawings(value);
     if (!parsed)
       return Promise.reject(new MarketError('bad_request', 'Those are not valid drawings'));
-    const run = this.saves.then(() => this.save(parsed));
+    const grouped = { ...parsed, drawings: normalizeGroups(parsed.drawings).slice() };
+    const run = this.saves.then(() => this.save(grouped));
     this.saves = run.catch(() => {});
     return run;
   }

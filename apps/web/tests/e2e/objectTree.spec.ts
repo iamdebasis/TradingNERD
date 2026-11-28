@@ -1,5 +1,11 @@
 import type { Locator, Page } from '@playwright/test';
-import { type Bar, type Drawing, type DrawingTool, newDrawing } from '@tradingnerd/core';
+import {
+  type Bar,
+  type Drawing,
+  type DrawingTool,
+  defaultVisibility,
+  newDrawing,
+} from '@tradingnerd/core';
 import { chartBars, chartCall, chartState, expect, openChart, paneOrigin, test } from './fixtures';
 
 /**
@@ -467,11 +473,13 @@ test.describe('the menus (D3c)', () => {
     // One drawing: its right-click selects it.
     await rowOf(page, 'd:a').click({ button: 'right' });
     await expect.poll(() => selectionOf(page)).toEqual(['a']);
+    // TradingView's tree menu (43000795451 image 2): Create a group of drawings before Clone.
     await expect(menuItems(treeMenu(page))).toHaveText([
       'Template',
       'Visual order',
       'Visibility on intervals',
-      'Clone',
+      'Create a group of drawings',
+      /^Clone(⌘Drag|Ctrl\+Drag)$/,
       /^Copy(⌘C|Ctrl\+C)$/,
       'Rename',
       'Lock',
@@ -488,7 +496,8 @@ test.describe('the menus (D3c)', () => {
       'Template',
       'Visual order',
       'Visibility on intervals',
-      'Clone',
+      'Create a group of drawings',
+      /^Clone(⌘Drag|Ctrl\+Drag)$/,
       /^Copy(⌘C|Ctrl\+C)$/,
       'Lock',
       'Hide',
@@ -627,5 +636,323 @@ test.describe('Remove objects (D3c)', () => {
       .getByRole('button', { name: 'LINKUSDT', exact: true })
       .click();
     await expect.poll(() => idsOf(page)).toEqual(['k']);
+  });
+});
+
+/** Drags a row onto another's middle (into a group), or to just before or after it at `x`. */
+async function dragTo(
+  page: Page,
+  from: string,
+  to: string,
+  where: 'onto' | 'before' | 'after',
+  x?: number,
+) {
+  const source = await rowOf(page, from).boundingBox();
+  const target = await rowOf(page, to).boundingBox();
+  if (!source || !target) throw new Error('no rows');
+  await page.mouse.move(source.x + 80, source.y + source.height / 2);
+  await page.mouse.down();
+  const y =
+    where === 'onto'
+      ? target.y + target.height / 2
+      : where === 'before'
+        ? target.y + 4
+        : target.y + target.height - 4;
+  await page.mouse.move(x ?? source.x + 90, y, { steps: 8 });
+  await page.mouse.up();
+}
+
+/** Each drawing as "id" or "id(group/…)" with its groups' names, in drawing order. */
+const shapeOf = async (page: Page) =>
+  (await drawingsOf(page)).map((d) =>
+    d.groups.length ? `${d.id}(${d.groups.map((g) => g.name).join('/')})` : d.id,
+  );
+
+const GROUP_1 = { id: 'g1', name: 'Group 1' };
+
+/** Two trend lines in Group 1. */
+async function grouped(page: Page, at: Spots, a: Partial<Drawing> = {}) {
+  const [first, second] = await twoLines(page, at);
+  if (!first || !second) throw new Error('no lines');
+  return [
+    { ...first, ...a, groups: [GROUP_1] },
+    { ...second, groups: [GROUP_1] },
+  ];
+}
+
+test.describe('groups of drawings (D3c2)', () => {
+  test('makes a group from the tree’s toolbar where the frontmost drawing is, picked, folded and renamed', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, async (at) => [
+      ...(await twoLines(page, at)),
+      await stored(page, 'c', 'horizontal-line', [[at.left, at.high]]),
+    ]);
+    await openTree(page);
+    const create = treePanel(page).getByRole('button', { name: 'Create a group of drawings' });
+    await expect(create).toBeDisabled();
+    // a and c, b between them: the group forms where c is, a just behind it.
+    await rowOf(page, 'd:a').click();
+    await rowOf(page, 'd:c').click({ modifiers: ['ControlOrMeta'] });
+    await create.click();
+    await expect.poll(() => shapeOf(page)).toEqual(['b', 'a(Group 1)', 'c(Group 1)']);
+    await expect
+      .poll(() => market.drawingSaves.at(-1)?.drawings[2]?.groups[0]?.name)
+      .toBe('Group 1');
+    const id = (await find(page, 'a'))?.groups[0]?.id ?? '';
+    const head = rowOf(page, `g:${id}`);
+    await expect(rowsOf(page)).toHaveText([
+      SYMBOL_ROW,
+      'Trendline',
+      'Group 1',
+      'Trendline',
+      'Horizontal line',
+    ]);
+    await expect(rowOf(page, 'd:a')).toHaveAttribute('aria-level', '2');
+    // Picked: its row in the selected blue, its drawings' lighter, both selected on the chart.
+    await expect(head).toHaveAttribute('data-selected', 'self');
+    await expect(rowOf(page, 'd:a')).toHaveAttribute('data-selected', 'inside');
+    await expect.poll(async () => (await selectionOf(page)).sort()).toEqual(['a', 'c']);
+    // A group picked isn't cloned (TradingView greys Clone out).
+    await expect(treePanel(page).getByRole('button', { name: 'Clone' })).toBeDisabled();
+    // Folded, its drawings' rows go, and stay folded after a reload.
+    await head.getByRole('button', { name: 'Collapse group' }).click();
+    await expect(rowsOf(page)).toHaveText([SYMBOL_ROW, 'Trendline', 'Group 1']);
+    await page.reload();
+    await openChart(page);
+    await expect(rowsOf(page)).toHaveText([SYMBOL_ROW, 'Trendline', 'Group 1']);
+    await head.getByRole('button', { name: 'Expand group' }).click();
+    await expect(rowsOf(page)).toHaveCount(5);
+    // F2 renames it on each of its drawings; undo gives the name back.
+    await head.click();
+    await head.press('F2');
+    const field = treePanel(page).getByRole('textbox', { name: 'Name' });
+    await expect(field).toHaveValue('Group 1');
+    await field.fill('Levels');
+    await field.press('Enter');
+    await expect.poll(() => shapeOf(page)).toEqual(['b', 'a(Levels)', 'c(Levels)']);
+    await page.keyboard.press('ControlOrMeta+KeyZ');
+    await expect.poll(() => shapeOf(page)).toEqual(['b', 'a(Group 1)', 'c(Group 1)']);
+    // A second group is "Group 2".
+    await rowOf(page, 'd:b').click();
+    await create.click();
+    await expect.poll(() => shapeOf(page)).toEqual(['b(Group 2)', 'a(Group 1)', 'c(Group 1)']);
+  });
+
+  test('a group’s eye, padlock and trash act on all in it, partly hidden or locked showing open', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, (at) => grouped(page, at));
+    await openTree(page);
+    const head = rowOf(page, 'g:g1');
+    const button = (row: Locator, name: string) => row.getByRole('button', { name, exact: true });
+    // a hidden alone: the group's eye stays open; a click hides both, another shows both.
+    await rowOf(page, 'd:a').hover();
+    await button(rowOf(page, 'd:a'), 'Hide').click();
+    await expect.poll(() => shownIds(page)).toEqual(['b']);
+    await head.hover();
+    await button(head, 'Hide').click();
+    await expect.poll(() => shownIds(page)).toEqual([]);
+    await page.mouse.move(5, 5);
+    await expect(button(head, 'Show')).toBeVisible();
+    await button(head, 'Show').click();
+    await expect.poll(() => shownIds(page)).toEqual(['a', 'b']);
+    // a locked alone: the padlock stays open; a click locks both, and the trash greys out.
+    await rowOf(page, 'd:a').hover();
+    await button(rowOf(page, 'd:a'), 'Lock').click();
+    await head.hover();
+    await button(head, 'Lock').click();
+    await expect
+      .poll(async () => (await drawingsOf(page)).map((d) => d.locked))
+      .toEqual([true, true]);
+    await expect(button(head, 'Remove')).toBeDisabled();
+    await button(head, 'Unlock').click();
+    await button(head, 'Remove').click();
+    await expect.poll(() => idsOf(page)).toEqual([]);
+    await page.keyboard.press('ControlOrMeta+KeyZ');
+    await expect.poll(() => idsOf(page)).toEqual(['a', 'b']);
+  });
+
+  test('drags a drawing onto a group’s row, first in it, and out after its last row', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, async (at) => {
+      const [a, b] = await twoLines(page, at);
+      if (!a || !b) throw new Error('no lines');
+      return [{ ...a, groups: [GROUP_1] }, b];
+    });
+    await openTree(page);
+    await expect(rowsOf(page)).toHaveText([SYMBOL_ROW, 'Group 1', 'Trendline', 'Trendline']);
+    // Folded, it stays folded as b goes in, first (TradingView's Help Center, nested groups).
+    await rowOf(page, 'g:g1').getByRole('button', { name: 'Collapse group' }).click();
+    await dragTo(page, 'd:b', 'g:g1', 'onto');
+    await expect.poll(() => shapeOf(page)).toEqual(['b(Group 1)', 'a(Group 1)']);
+    await expect(rowsOf(page)).toHaveText([SYMBOL_ROW, 'Group 1']);
+    await rowOf(page, 'g:g1').getByRole('button', { name: 'Expand group' }).click();
+    // Out again: after the last row, the pointer at the top level's indent.
+    const list = await treeOf(page).boundingBox();
+    if (!list) throw new Error('no tree');
+    await dragTo(page, 'd:a', 'd:a', 'after', list.x + 10);
+    await expect.poll(() => shapeOf(page)).toEqual(['b(Group 1)', 'a']);
+    await page.keyboard.press('ControlOrMeta+KeyZ');
+    await expect.poll(() => shapeOf(page)).toEqual(['b(Group 1)', 'a(Group 1)']);
+  });
+
+  test('a paste joins the group picked, and a clone its own group’s front', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, async (at) => [
+      ...(await grouped(page, at)),
+      await stored(page, 'c', 'horizontal-line', [[at.left, at.high]]),
+    ]);
+    await openTree(page);
+    await rowOf(page, 'g:g1').click();
+    await expect.poll(async () => (await selectionOf(page)).sort()).toEqual(['a', 'b']);
+    await page.keyboard.press('ControlOrMeta+KeyC');
+    await page.keyboard.press('ControlOrMeta+KeyV');
+    await expect
+      .poll(async () => (await shapeOf(page)).map((item) => item.replace(/^d\w+/, 'copy')))
+      .toEqual(['a(Group 1)', 'b(Group 1)', 'copy(Group 1)', 'copy(Group 1)', 'c']);
+    // The tree's Clone on a drawing of the group: the copy at the group's front.
+    await rowOf(page, 'd:a').click({ button: 'right' });
+    await treeMenu(page)
+      .getByRole('menuitem', { name: /^Clone/ })
+      .click();
+    await expect
+      .poll(async () => (await shapeOf(page)).map((item) => item.replace(/^d\w+/, 'copy')))
+      .toEqual([
+        'a(Group 1)',
+        'b(Group 1)',
+        'copy(Group 1)',
+        'copy(Group 1)',
+        'copy(Group 1)',
+        'c',
+      ]);
+    // A drawing of the group with one outside it: no Visual order, as TradingView's menu.
+    await rowOf(page, 'd:a').click();
+    await rowOf(page, 'd:c').click({ modifiers: ['ControlOrMeta'] });
+    await rowOf(page, 'd:c').click({ button: 'right' });
+    await expect(
+      treeMenu(page).getByRole('menuitem', { name: 'Visibility on intervals' }),
+    ).toBeVisible();
+    await expect(treeMenu(page).getByRole('menuitem', { name: 'Visual order' })).toHaveCount(0);
+  });
+
+  test('Delete removes a group picked, its hidden drawing too, from its row or the chart', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, (at) => grouped(page, at, { hidden: true }));
+    await openTree(page);
+    // From its row, which has the keyboard once clicked.
+    await rowOf(page, 'g:g1').click();
+    await expect.poll(() => selectionOf(page)).toEqual(['b']);
+    await page.keyboard.press('Delete');
+    await expect.poll(() => idsOf(page)).toEqual([]);
+    await page.keyboard.press('ControlOrMeta+KeyZ');
+    await expect.poll(() => idsOf(page)).toEqual(['a', 'b']);
+    // From the chart's keys, the tree no longer focused.
+    await rowOf(page, 'g:g1').click();
+    await expect.poll(() => selectionOf(page)).toEqual(['b']);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Delete');
+    await expect.poll(() => idsOf(page)).toEqual([]);
+  });
+
+  test('a group’s menu, and its settings titled with its name, which they rename', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, (at) => grouped(page, at));
+    await openTree(page);
+    await rowOf(page, 'g:g1').click({ button: 'right' });
+    await expect(menuItems(treeMenu(page))).toHaveText([
+      'Rename',
+      'Lock',
+      'Hide',
+      /^Remove(⌫|Del)$/,
+      'Settings…',
+    ]);
+    await treeMenu(page).getByRole('menuitem', { name: 'Settings…' }).click();
+    await expect(page.getByRole('dialog', { name: 'Group 1' })).toBeVisible();
+    // Renamed in its title, the dialog's name follows the field: found by its role alone.
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('tab')).toHaveText(['Style', 'Displacement', 'Visibility']);
+    await dialog.getByRole('button', { name: 'Rename' }).click();
+    const name = dialog.getByRole('textbox', { name: 'Name' });
+    await name.fill('Weekly analysis');
+    await name.press('Enter');
+    await dialog.getByRole('button', { name: 'Ok' }).click();
+    await expect.poll(() => shapeOf(page)).toEqual(['a(Weekly analysis)', 'b(Weekly analysis)']);
+    await expect(rowOf(page, 'g:g1')).toContainText('Weekly analysis');
+  });
+
+  test('marks a drawing hidden on this interval with an orange crossed eye, and its group', async ({
+    page,
+    market,
+  }) => {
+    const off = defaultVisibility();
+    off.days = { ...off.days, on: false };
+    await openWith(page, market, async (at) => {
+      const [a, b] = await twoLines(page, at, { visibility: off });
+      if (!a || !b) throw new Error('no lines');
+      return [a, { ...b, groups: [GROUP_1] }];
+    });
+    await openTree(page);
+    await page.mouse.move(5, 5);
+    const eye = rowOf(page, 'd:b').getByRole('button', { name: 'Hide' });
+    await expect(rowOf(page, 'd:b')).toHaveAttribute('data-off');
+    await expect(eye).toHaveAttribute('data-interval');
+    await expect(eye).toBeVisible();
+    await expect(eye).toHaveCSS('color', 'rgb(251, 140, 0)');
+    await expect(rowOf(page, 'g:g1')).toHaveAttribute('data-off');
+    await expect(rowOf(page, 'd:a')).not.toHaveAttribute('data-off');
+  });
+
+  test('a pitchfork’s kinds in its menu, the one it is checked', async ({ page, market }) => {
+    await openWith(page, market, async (at) => [
+      await stored(page, 'p', 'pitchfork', [
+        [at.left, at.mid],
+        [at.right, at.high],
+        [at.right, at.low],
+      ]),
+    ]);
+    await openTree(page);
+    await rowOf(page, 'd:p').click({ button: 'right' });
+    for (const kind of ['Original', 'Schiff', 'Modified Schiff', 'Inside']) {
+      await expect(treeMenu(page).getByRole('menuitem', { name: kind, exact: true })).toBeVisible();
+    }
+    await treeMenu(page).getByRole('menuitem', { name: 'Schiff', exact: true }).click();
+    await expect.poll(async () => (await find(page, 'p'))?.tool).toBe('schiff-pitchfork');
+  });
+
+  test('the floating toolbar for drawings of different tools offers their background and text colors', async ({
+    page,
+    market,
+  }) => {
+    await openWith(page, market, async (at) => [
+      ...(await twoLines(page, at)),
+      await stored(page, 'c', 'parallel-channel', [
+        [at.left, at.low],
+        [at.right, at.low],
+        [at.left, at.mid],
+      ]),
+    ]);
+    await openTree(page);
+    await rowOf(page, 'd:a').click();
+    await rowOf(page, 'd:c').click({ modifiers: ['ControlOrMeta'] });
+    const toolbar = page.getByRole('toolbar', { name: 'Drawing toolbar' });
+    await expect(toolbar.getByRole('button', { name: 'Background color' })).toBeVisible();
+    await expect(toolbar.getByRole('button', { name: 'Text color' })).toBeVisible();
+    await expect(toolbar.getByRole('button', { name: 'Templates' })).toHaveCount(0);
+    // One tool: none of them, Templates back.
+    await rowOf(page, 'd:b').click({ modifiers: ['ControlOrMeta'] });
+    await rowOf(page, 'd:c').click({ modifiers: ['ControlOrMeta'] });
+    await expect(toolbar.getByRole('button', { name: 'Templates' })).toBeVisible();
+    await expect(toolbar.getByRole('button', { name: 'Background color' })).toHaveCount(0);
   });
 });
