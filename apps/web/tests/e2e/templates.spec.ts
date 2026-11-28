@@ -201,9 +201,10 @@ test.describe('drawing templates (D3b)', () => {
     await expect(settings).toBeVisible();
     await settings.getByRole('button', { name: 'Template' }).click();
     const menu = page.getByRole('menu', { name: 'Template' });
+    // A settings dialog says "Apply defaults", as TradingView's (its blog image, July 2022; D3c2).
     await expect(menu.getByRole('menuitem')).toHaveText([
       'Save drawing template as…',
-      'Apply default drawing template',
+      'Apply defaults',
     ]);
     await saveAs(page, menu, '  Red  ');
     await expect.poll(() => lastSave(market)?.tool).toBe('trend-line');
@@ -327,6 +328,11 @@ test.describe('drawing templates (D3b)', () => {
     await openWith(page, market, three(page));
     await select(page, ['a', 'b']);
     const menu = await templatesMenu(page);
+    // Several of one tool: nothing to save, as TradingView's image (July 2022) shows (D3c2).
+    await expect(menu.getByRole('menuitem')).toHaveText([
+      'Apply default drawing template',
+      'Green',
+    ]);
     await menu.getByRole('menuitem', { name: 'Green', exact: true }).click();
     await expect
       .poll(async () => (await drawingsOf(page)).map((drawing) => drawing.style.color))

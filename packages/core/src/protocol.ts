@@ -25,8 +25,9 @@ import { isSessionHours, parseMarketSchedule, type SessionHours } from './schedu
  * 16: drawing templates, a style saved under a name for one tool (/api/drawing-templates).
  * 17: a drawing's name (the Object tree's Rename), and dropping a removed indicator's drawings
  *     for every symbol (/api/drawings/drop-panes).
+ * 18: groups of drawings: each drawing's `groups`, the groups it's in, the outermost first.
  */
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 /** Body of GET /api/health. */
 export interface HealthResponse {

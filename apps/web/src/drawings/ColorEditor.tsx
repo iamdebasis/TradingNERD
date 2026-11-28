@@ -177,11 +177,17 @@ export function ColorField({
   color,
   onChange,
   line,
+  mixed = false,
 }: {
   label: string;
   color: string;
   onChange(color: string): void;
   line?: LineChoice | undefined;
+  /**
+   * Several drawings' colors that differ: a rainbow, as TradingView's swatch for them (its Help
+   * Center GIFs, 43000660419, November 2024; D3c2). The editor starts from the first's.
+   */
+  mixed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const { opacity } = splitColor(color);
@@ -191,11 +197,19 @@ export function ColorField({
         type="button"
         className={styles.swatch}
         data-color-opener
-        aria-label={`${label}: ${splitColor(color).hex}, ${Math.round(opacity * 100)}% opacity`}
+        data-mixed={mixed || undefined}
+        aria-label={
+          mixed
+            ? `${label}: mixed`
+            : `${label}: ${splitColor(color).hex}, ${Math.round(opacity * 100)}% opacity`
+        }
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <span className={styles.swatchColor} style={{ background: color }} />
+        <span
+          className={mixed ? styles.swatchMixed : styles.swatchColor}
+          style={mixed ? undefined : { background: color }}
+        />
       </button>
       {open && (
         <ColorEditor

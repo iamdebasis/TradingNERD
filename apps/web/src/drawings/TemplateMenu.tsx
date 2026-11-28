@@ -13,38 +13,56 @@ import type { PopupMenuEntry } from '../watchlist/PopupMenu';
 import { TEMPLATES_RETRY_MS, type TemplatesState, templateStore } from './templateStore';
 
 /**
- * The Template menu (docs/SPEC.md §5.27, D3b), the same in its three places: the settings
+ * The Template menu (docs/SPEC.md §5.27, D3b, D3c2), the same in its three places: the settings
  * dialog's Template button, the floating toolbar's Templates and the drawings' menu's Template ›
  * (TradingView's Help Center names the floating toolbar and the context menu): "Save drawing
  * template as…", "Apply default drawing template", then the tool's templates by name, each with
- * a ✕ that removes it. Its words are a third-party guide's ("Save Drawing Template As…") and the
- * Charting Library's action ("Apply default"); provisional until measured from a screenshot (§11).
+ * a ✕ that removes it. For several drawings of one tool there's nothing to save (TradingView's
+ * blog images, Applying templates to several same-type drawing tools at once, July 2022), and a
+ * settings dialog's says "Apply defaults" (the same images; the floating toolbar's "Apply Default
+ * Drawing Template"). "Save…" is a third-party guide's words ("Save Drawing Template As…");
+ * TradingView's 2020 GIF says "Save As…" (provisional, §11).
  */
 
 export const SAVE_TEMPLATE = 'Save drawing template as…';
 export const APPLY_DEFAULT = 'Apply default drawing template';
+/** A settings dialog's words for it (TradingView's image of July 2022). */
+export const APPLY_DEFAULTS = 'Apply defaults';
 
 export function templateEntries({
   tool,
   state,
   style,
   onApply,
+  several = false,
+  dialog = false,
 }: {
   tool: DrawingTool;
   state: TemplatesState;
   /** The style a new template keeps: the drawing's as it is now (in a dialog, not yet kept). */
   style(): DrawingStyle;
   onApply(style: DrawingStyle): void;
+  /** For several drawings: no "Save…". */
+  several?: boolean;
+  /** In a settings dialog: "Apply defaults". */
+  dialog?: boolean;
 }): PopupMenuEntry[] {
   const saved = sortedTemplates(state.tools[tool] ?? []);
   const full = saved.length >= MAX_TEMPLATES_PER_TOOL;
   const entries: PopupMenuEntry[] = [
+    ...(several
+      ? []
+      : [
+          {
+            label: SAVE_TEMPLATE,
+            disabled: state.status !== 'ready' || full,
+            onSelect: () => templateDialogs.open({ kind: 'save', tool, style: style(), name: '' }),
+          },
+        ]),
     {
-      label: SAVE_TEMPLATE,
-      disabled: state.status !== 'ready' || full,
-      onSelect: () => templateDialogs.open({ kind: 'save', tool, style: style(), name: '' }),
+      label: dialog ? APPLY_DEFAULTS : APPLY_DEFAULT,
+      onSelect: () => onApply(defaultDrawingStyle(tool)),
     },
-    { label: APPLY_DEFAULT, onSelect: () => onApply(defaultDrawingStyle(tool)) },
   ];
   if (saved.length > 0) entries.push('separator');
   for (const template of saved) {

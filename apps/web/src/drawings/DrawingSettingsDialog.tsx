@@ -1,6 +1,7 @@
 import type { ChartController } from '@tradingnerd/chart';
 import {
   applyDrawingStyle,
+  type DisplacementAxis,
   type Drawing,
   type DrawingFill,
   type DrawingLevel,
@@ -9,8 +10,10 @@ import {
   type DrawingStats,
   type DrawingStyle,
   type DrawingText,
+  defaultDrawingStyle,
   displayName,
   drawingName,
+  groupPath,
   H_ALIGNS,
   type HAlign,
   isPitchforkTool,
@@ -20,10 +23,13 @@ import {
   MAX_DRAWING_NAME,
   MAX_DRAWING_TEXT,
   MAX_LEVEL_COEFF,
+  PITCHFORK_KIND_NAMES,
   PITCHFORK_TOOLS,
   PRICE_SOURCES,
   type PriceSource,
+  parseDisplacement,
   type RegressionSettings,
+  renameGroup,
   TOOL_OPTIONS,
   V_ALIGNS,
   type VAlign,
@@ -42,7 +48,16 @@ import { joinColor, splitColor } from './color';
 import styles from './Drawings.module.css';
 import { drawingStore, useDrawings } from './drawingStore';
 import { RenameIcon } from './icons';
-import { templateDialogs, templateEntries } from './TemplateMenu';
+import { groupLabel } from './objectTreeModel';
+import {
+  displaceDrawings,
+  severalStyle,
+  withFill,
+  withLine,
+  withLineColor,
+  withTextColor,
+} from './severalStyle';
+import { APPLY_DEFAULTS, templateDialogs, templateEntries } from './TemplateMenu';
 import { useTemplates } from './templateStore';
 
 type Tab = 'inputs' | 'style' | 'text' | 'coordinates' | 'visibility';
@@ -61,12 +76,7 @@ const EXTEND_NAMES: Record<(typeof EXTENDS)[number], string> = {
   both: 'Extend both',
 };
 /** The pitchforks' Style drop-down, switching one into another (Help Center, each pitchfork). */
-const PITCHFORK_NAMES: Record<(typeof PITCHFORK_TOOLS)[number], string> = {
-  pitchfork: 'Original',
-  'schiff-pitchfork': 'Schiff',
-  'modified-schiff-pitchfork': 'Modified Schiff',
-  'inside-pitchfork': 'Inside',
-};
+const PITCHFORK_NAMES = PITCHFORK_KIND_NAMES;
 
 /** TradingView's stats, as its Style tab names them (Help Center, Trendline drawing tool). */
 const STATS: readonly { key: keyof DrawingStats; name: string }[] = [
@@ -264,6 +274,7 @@ export function DrawingSettingsDialog({
               state: templates,
               style: () => drawing.style,
               onApply: (style) => set(applyDrawingStyle(drawing, style)),
+              dialog: true,
             })}
             onClose={() => setTemplateAt(null)}
           />
@@ -348,29 +359,62 @@ function DrawingTitle({
 }
 
 /**
- * Settings with several drawings selected (TradingView's blog, Customizable visibility of multiple
- * objects; Help Center, I want to customize the visibility for several objects): their Visibility
- * tab, set for every one of them, starting from the first's. Changes show at once; Ok keeps them
- * as one undo step, Cancel, Escape and ✕ put them back. Its title and look are provisional (§11).
+ * Settings with several drawings selected, or a group's (docs/SPEC.md §5.27, D3a, D3c2), as
+ * TradingView's Help Center and blog images show them (43000660419's GIFs, November 2024;
+ * 43000682552's image, 2022): titled "Selected Drawings", or the group's name with the pencil that
+ * renames it; tabs Style (Line, Background, Text, a rainbow where they differ), Displacement
+ * (price and bar expressions) and Visibility (set for every one, starting from the first's); the
+ * Template button's menu without "Save…" (one tool's templates, or "Apply defaults" alone for
+ * several tools: provisional §11). Changes show at once; Ok keeps them as one undo step, Cancel,
+ * Escape and ✕ put them back.
  */
-export function SeveralDrawingsDialog({
+export function SelectedDrawingsDialog({
   ids,
+  group,
+  chart,
   onClose,
 }: {
   ids: readonly string[];
+  /** A group's settings: its id. */
+  group: string | null;
+  chart: ChartController | null;
   onClose(): void;
 }) {
   const titleId = useId();
   const { drawings } = useDrawings();
   const chosen = drawings.filter((item) => ids.includes(item.id));
   const [before] = useState(() => drawingStore.get().drawings);
+  const [tab, setTab] = useState<'style' | 'displacement' | 'visibility'>('style');
+  const [shift, setShift] = useState<Record<DisplacementAxis, Expression>>({
+    price: { text: '', applied: true },
+    bar: { text: '', applied: true },
+  });
   const dialog = useRef<HTMLDivElement>(null);
+  const templates = useTemplates();
+  const [templateAt, setTemplateAt] = useState<{ x: number; y: number } | null>(null);
+  const templateButton = useRef<HTMLButtonElement>(null);
+  const templateOpen = useRef(false);
+  templateOpen.current = templateAt !== null;
+
+  const set = (next: readonly Drawing[]) => drawingStore.previewMany(next);
+  /** An expression typed in Displacement, on every drawing: true when it was one. */
+  const displaceBy = (axis: DisplacementAxis, text: string): boolean => {
+    const by = parseDisplacement(text, axis);
+    if (!by) return false;
+    const current = drawingStore.get().drawings.filter((item) => ids.includes(item.id));
+    set(displaceDrawings(current, axis, by, chart));
+    return true;
+  };
 
   const cancel = () => {
     drawingStore.finishPreview(before, false);
     onClose();
   };
   const ok = () => {
+    // An expression typed and not yet applied with Enter is applied as Ok keeps the rest.
+    for (const axis of ['price', 'bar'] as const) {
+      if (!shift[axis].applied) displaceBy(axis, shift[axis].text);
+    }
     drawingStore.finishPreview(before, true);
     onClose();
   };
@@ -378,9 +422,10 @@ export function SeveralDrawingsDialog({
   cancelRef.current = cancel;
 
   useEffect(() => {
-    dialog.current?.querySelector<HTMLElement>('[role="tab"]')?.focus();
+    dialog.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (templateOpen.current) return;
       event.preventDefault();
       cancelRef.current();
     };
@@ -395,6 +440,29 @@ export function SeveralDrawingsDialog({
 
   const first = chosen[0];
   if (!first) return null;
+  const groupName = group ? (groupPath(chosen, group)?.at(-1)?.name ?? '') : null;
+  const oneTool = chosen.every((item) => item.tool === first.tool);
+  const templateItems = oneTool
+    ? templateEntries({
+        tool: first.tool,
+        state: templates,
+        style: () => first.style,
+        onApply: (style) => set(chosen.map((item) => applyDrawingStyle(item, style))),
+        several: chosen.length > 1,
+        dialog: true,
+      })
+    : [
+        {
+          label: APPLY_DEFAULTS,
+          onSelect: () =>
+            set(chosen.map((item) => applyDrawingStyle(item, defaultDrawingStyle(item.tool)))),
+        },
+      ];
+  const tabs = [
+    { tab: 'style', name: 'Style' },
+    { tab: 'displacement', name: 'Displacement' },
+    { tab: 'visibility', name: 'Visibility' },
+  ] as const;
   return createPortal(
     <div className={frame.backdrop}>
       <div
@@ -405,27 +473,78 @@ export function SeveralDrawingsDialog({
         aria-labelledby={titleId}
       >
         <header className={frame.header}>
-          <h2 id={titleId} className={frame.title}>
-            {chosen.length === 1 ? displayName(first) : `${chosen.length} drawings`}
-          </h2>
+          {group && groupName !== null ? (
+            <DrawingTitle
+              id={titleId}
+              name={groupLabel(groupName)}
+              onRename={(name) => {
+                const renamed = renameGroup(drawingStore.get().drawings, group, name);
+                set(renamed.filter((item) => item.groups.some((g) => g.id === group)));
+              }}
+            />
+          ) : (
+            <h2 id={titleId} className={frame.title}>
+              Selected Drawings
+            </h2>
+          )}
           <button type="button" className={frame.close} aria-label="Close" onClick={cancel}>
             <CloseIcon />
           </button>
         </header>
         <div className={frame.tabs} role="tablist" aria-label="Settings">
-          <button type="button" role="tab" className={frame.tab} aria-selected={true}>
-            Visibility
-          </button>
+          {tabs.map((item) => (
+            <button
+              key={item.tab}
+              type="button"
+              role="tab"
+              className={frame.tab}
+              aria-selected={tab === item.tab}
+              onClick={() => setTab(item.tab)}
+            >
+              {item.name}
+            </button>
+          ))}
         </div>
         <div className={frame.content} role="tabpanel">
-          <VisibilityTab
-            drawing={first}
-            onSet={(visibility) =>
-              drawingStore.previewMany(chosen.map((item) => ({ ...item, visibility })))
-            }
-          />
+          {tab === 'style' && <SeveralStyleTab chosen={chosen} onChange={set} />}
+          {tab === 'displacement' && (
+            <DisplacementTab
+              shift={shift}
+              onShift={(axis, text) =>
+                setShift((now) => ({ ...now, [axis]: { text, applied: text.trim() === '' } }))
+              }
+              onApply={(axis) => {
+                if (!displaceBy(axis, shift[axis].text)) return false;
+                setShift((now) => ({ ...now, [axis]: { ...now[axis], applied: true } }));
+                return true;
+              }}
+            />
+          )}
+          {tab === 'visibility' && (
+            <VisibilityTab
+              drawing={first}
+              onSet={(visibility) => set(chosen.map((item) => ({ ...item, visibility })))}
+            />
+          )}
         </div>
         <footer className={frame.footer}>
+          <button
+            ref={templateButton}
+            type="button"
+            className={frame.secondary}
+            aria-haspopup="menu"
+            aria-expanded={templateAt !== null}
+            onClick={(event) => {
+              if (templateAt) {
+                setTemplateAt(null);
+                return;
+              }
+              const at = event.currentTarget.getBoundingClientRect();
+              setTemplateAt({ x: Math.round(at.left), y: Math.round(at.bottom + 4) });
+            }}
+          >
+            Template
+          </button>
           <span style={{ marginRight: 'auto' }} />
           <button type="button" className={frame.secondary} onClick={cancel}>
             Cancel
@@ -434,9 +553,137 @@ export function SeveralDrawingsDialog({
             Ok
           </button>
         </footer>
+        {templateAt && (
+          <PopupMenu
+            x={templateAt.x}
+            y={templateAt.y}
+            label="Template"
+            anchor={templateButton.current}
+            layer={TEMPLATE_MENU_LAYER}
+            items={templateItems}
+            onClose={() => setTemplateAt(null)}
+          />
+        )}
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** An expression typed in Displacement, and whether it's been applied since it was typed. */
+interface Expression {
+  text: string;
+  applied: boolean;
+}
+
+/**
+ * Several drawings' Style: Line, Background and Text, each when any of them has one, a value they
+ * differ in shown as a rainbow (see severalStyle.ts).
+ */
+function SeveralStyleTab({
+  chosen,
+  onChange,
+}: {
+  chosen: readonly Drawing[];
+  onChange(drawings: readonly Drawing[]): void;
+}) {
+  const look = severalStyle(chosen);
+  return (
+    <>
+      {look.line && (
+        <div className={frame.row}>
+          <span className={frame.label}>Line</span>
+          <ColorField
+            label="Line"
+            color={look.line.color.value}
+            mixed={look.line.color.mixed}
+            onChange={(color) => onChange(withLineColor(chosen, color))}
+            line={{
+              width: look.line.width.value,
+              lineStyle: look.line.lineStyle.value,
+              onWidth: (width) => onChange(withLine(chosen, { width })),
+              onStyle: (lineStyle) => onChange(withLine(chosen, { lineStyle })),
+            }}
+          />
+        </div>
+      )}
+      {look.fill && (
+        <CheckRow
+          label="Background"
+          checked={look.fill.on.value || look.fill.on.mixed}
+          mixed={look.fill.on.mixed}
+          onChecked={(on) => onChange(withFill(chosen, { on }))}
+        >
+          <ColorField
+            label="Background"
+            color={look.fill.color.value}
+            mixed={look.fill.color.mixed}
+            onChange={(color) => onChange(withFill(chosen, { color }))}
+          />
+        </CheckRow>
+      )}
+      {look.text && (
+        <Row label="Text">
+          <ColorField
+            label="Text"
+            color={look.text.value}
+            mixed={look.text.mixed}
+            onChange={(color) => onChange(withTextColor(chosen, color))}
+          />
+        </Row>
+      )}
+    </>
+  );
+}
+
+/**
+ * Displacement (TradingView's Help Center image, How to move multiple drawing objects at the same
+ * time?): "Displacement (price, bar)", a price field ("e.g. /2") and a bar field ("e.g. +1"), and
+ * its hint. Enter applies an expression to every drawing; Ok applies one typed and not applied
+ * (ours, provisional §11).
+ */
+function DisplacementTab({
+  shift,
+  onShift,
+  onApply,
+}: {
+  shift: Record<DisplacementAxis, Expression>;
+  onShift(axis: DisplacementAxis, text: string): void;
+  onApply(axis: DisplacementAxis): boolean;
+}) {
+  const field = (axis: DisplacementAxis, label: string, placeholder: string) => {
+    const { text } = shift[axis];
+    return (
+      <input
+        className={styles.displacementField}
+        aria-label={label}
+        placeholder={placeholder}
+        value={text}
+        aria-invalid={text.trim() !== '' && parseDisplacement(text, axis) === null}
+        onChange={(event) => onShift(axis, event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          // Applied, the text stays chosen: Enter again moves them as far again.
+          if (onApply(axis)) event.currentTarget.select();
+        }}
+      />
+    );
+  };
+  return (
+    <>
+      <div className={frame.row}>
+        <span className={frame.label}>Displacement (price, bar)</span>
+        <div className={styles.displacement}>
+          {field('price', 'Price displacement', 'e.g. /2')}
+          {field('bar', 'Bar displacement', 'e.g. +1')}
+        </div>
+      </div>
+      <p className={styles.hint}>
+        Use special math signs to displace selected drawings: +,-,/,* for price and +,- for bar
+        index.
+      </p>
+    </>
   );
 }
 
@@ -635,18 +882,26 @@ function LineSwatch({
 function CheckRow({
   label,
   checked,
+  mixed = false,
   onChecked,
   children,
 }: {
   label: string;
   checked: boolean;
+  /** Several drawings, some on and some off: the box half checked. */
+  mixed?: boolean;
   onChecked(checked: boolean): void;
   children?: ReactNode;
 }) {
+  const box = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.indeterminate = mixed;
+  }, [mixed]);
   return (
     <div className={frame.row}>
       <label className={frame.checkLabel}>
         <input
+          ref={box}
           type="checkbox"
           className={frame.checkbox}
           checked={checked}
